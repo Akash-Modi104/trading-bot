@@ -1,0 +1,18 @@
+
+# 2026-04-26 19:45:44.085147
++y
+
+# 2026-04-26 20:03:45.529838
++> rewrite dashboard.py with a clean dark theme dashboard using Chart.js CDN and Font Awesome CDN. Flask app must bind to host="0.0.0.0" port=5001. Add routes: GET / returns HTML, POST /start-bot, POST /stop-bot, POST /run-scanner, POST /close-all, GET /api/state. Show KPI cards for P&L, win rate, trades, open positions.
+
+# 2026-04-26 20:15:53.147349
++check if server is up and running and what is the issue
+
+# 2026-04-26 20:15:53.147625
++check if server is up and running and what is the issue
+
+# 2026-04-26 20:18:12.259111
++how to fix the server it is notloading
+
+# 2026-04-26 20:18:12.259354
++how to fix the server it is notloading

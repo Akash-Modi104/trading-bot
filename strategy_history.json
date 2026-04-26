@@ -1,0 +1,49 @@
+[
+  {
+    "date": "2026-04-26",
+    "params": {
+      "ema_fast": 9,
+      "ema_slow": 21,
+      "rsi_period": 14,
+      "rsi_buy_min": 50,
+      "rsi_buy_max": 70,
+      "stop_loss_pct": 1.5,
+      "take_profit_pct": 3.0,
+      "bar_timeframe": "5Min",
+      "max_positions": 2,
+      "budget_per_trade": 500
+    },
+    "win_rate": 0.0,
+    "total_pnl": 0
+  },
+  {
+    "date": "2026-04-26",
+    "params": {
+      "ema_fast": 9,
+      "ema_slow": 21,
+      "rsi_period": 14,
+      "rsi_buy_min": 50,
+      "rsi_buy_max": 70,
+      "atr_period": 14,
+      "atr_multiplier": 1.5,
+      "rel_vol_min": 1.8,
+      "stop_loss_pct": 1.5,
+      "take_profit_pct": 3.0,
+      "bar_timeframe": "5Min",
+      "max_positions": 3,
+      "budget_per_trade": 333,
+      "trade_start_hour": 10,
+      "trade_start_min": 0,
+      "trade_end_hour": 14,
+      "trade_end_min": 0,
+      "close_hour": 15,
+      "close_min": 45,
+      "vwap_required": true,
+      "orb_required": true,
+      "multi_tf_required": true,
+      "min_confidence": 60
+    },
+    "win_rate": 0.0,
+    "total_pnl": 0
+  }
+]

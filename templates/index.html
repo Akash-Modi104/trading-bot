@@ -1,0 +1,794 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Stock Signal Tracker</title>
+
+  <!-- Materialize CSS -->
+  <link
+    rel="stylesheet"
+    href="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/css/materialize.min.css"
+  />
+
+  <!-- Plotly JS (for generating charts) -->
+  <script src="https://cdn.plot.ly/plotly-2.24.2.min.js"></script>
+
+  <!-- Axios -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/axios/1.4.0/axios.min.js"></script>
+
+  <!-- Materialize JS -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/js/materialize.min.js"></script>
+
+  <style>
+    .nav-wrapper .brand-logo {
+      margin-left: 10px;
+    }
+    .progress-container {
+      position: relative;
+      margin-top: 20px;
+    }
+    .progress-text {
+      position: absolute;
+      width: 100%;
+      text-align: center;
+      font-weight: bold;
+      top: 0;
+      left: 0;
+      line-height: 4px;
+      margin-top: 12px;
+    }
+    .section-container {
+      display: none; /* We'll show/hide these via JS */
+    }
+    .active-section {
+      display: block;
+    }
+    .modal-content {
+      min-height: 200px;
+    }
+    footer.page-footer {
+      margin-top: 40px;
+    }
+    .download-btn {
+      margin-top: 10px;
+      margin-right: 10px;
+    }
+  </style>
+</head>
+<body>
+  <!-- NAVBAR -->
+  <nav class="blue darken-2">
+    <div class="nav-wrapper container">
+      <a href="#" class="brand-logo">Stock Tracker</a>
+      <ul id="nav-mobile" class="right hide-on-med-and-down">
+        <li><a href="#" id="navHomeLink">Home</a></li>
+        <li><a href="#" id="navManageLink">Manage Companies</a></li>
+        <li><a href="#" id="navPortfolioLink">Portfolio</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <div class="container">
+    <!-- HOME SECTION -->
+    <div id="homeSection" class="section-container active-section">
+      <h4>📈 Home</h4>
+
+      <!-- SELECT COMPANY & ACTION BUTTONS -->
+      <div class="row" style="margin-top: 20px;">
+        <div class="col s12 m6">
+          <label for="companyDropdown">Select a Company</label>
+          <select id="companyDropdown" class="browser-default">
+            <option value="" disabled selected>Select a company</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="row" style="margin-top: 20px;">
+        <div class="col s12">
+          <button
+            id="processSignalsBtn"
+            class="btn waves-effect waves-light blue"
+            style="margin-right: 10px;"
+          >
+            Process Signals
+          </button>
+          <button
+            id="generateGraphBtn"
+            class="btn waves-effect waves-light grey darken-1"
+            style="margin-right: 10px;"
+          >
+            Generate Graph
+          </button>
+          <button
+            id="processAllSignalsBtn"
+            class="btn waves-effect waves-light amber darken-2"
+            style="margin-right: 10px;"
+          >
+            Run for All Companies
+          </button>
+          <button
+            id="predictAllSignalsBtn"
+            class="btn waves-effect waves-light cyan darken-1"
+          >
+            Predict Signals for All Companies
+          </button>
+        </div>
+      </div>
+
+      <!-- PROGRESS BAR -->
+      <div class="progress-container">
+        <div class="progress">
+          <div id="progressBar" class="determinate" style="width: 0%;"></div>
+        </div>
+        <div id="progressText" class="progress-text">0%</div>
+      </div>
+
+      <!-- RESULTS TABLE (6 columns) -->
+      <div class="row" style="margin-top: 40px;">
+        <div class="col s12">
+          <h5>Results:</h5>
+          <button
+            id="downloadResultsBtn"
+            class="btn waves-effect waves-light green darken-1 download-btn"
+          >
+            Download Results
+          </button>
+
+          <table id="resultsTable" class="highlight responsive-table">
+            <thead>
+              <tr>
+                <th>Company</th>
+                <th>Sell Date</th>
+                <th>Sell Price</th>
+                <th>Buy Date</th>
+                <th>Buy Price</th>
+                <th>Profit/Loss (%)</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td></td>
+                <td></td>
+                <td></td>
+                <td></td>
+                <td></td>
+                <td class="center-align">No results to display.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ALL COMPANIES SIGNALS TABLE (3 columns) -->
+      <div class="row" style="margin-top: 40px;">
+        <div class="col s12">
+          <h5>All Companies Signals</h5>
+          <button
+            id="downloadSignalsBtn"
+            class="btn waves-effect waves-light green darken-1 download-btn"
+          >
+            Download Signals
+          </button>
+
+          <table id="allSignalsResultsTable" class="highlight responsive-table">
+            <thead>
+              <tr>
+                <th>Company</th>
+                <th>Signal</th>
+                <th>Price</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td></td>
+                <td></td>
+                <td class="center-align">No results to display.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div><!-- END HOME SECTION -->
+
+    <!-- MANAGE COMPANIES SECTION -->
+    <div id="manageCompaniesSection" class="section-container">
+      <h4>Manage Companies</h4>
+
+      <div class="row" style="margin-top: 20px;">
+        <div class="col s12 m6">
+          <div class="input-field">
+            <input id="newCompanyInput" type="text" placeholder="e.g., AAPL" />
+            <label for="newCompanyInput">Add/Delete Ticker</label>
+          </div>
+        </div>
+        <div class="col s6 m2">
+          <button
+            id="addCompanyBtn"
+            class="btn waves-effect waves-light green darken-1"
+            style="width: 100%; margin-top: 20px;"
+          >
+            Add
+          </button>
+        </div>
+        <div class="col s6 m2">
+          <button
+            id="deleteCompanyBtn"
+            class="btn waves-effect waves-light red darken-1"
+            style="width: 100%; margin-top: 20px;"
+          >
+            Delete
+          </button>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="col s12">
+          <h6>Currently Saved Companies:</h6>
+          <ul id="companyList" class="collection"></ul>
+        </div>
+      </div>
+    </div><!-- END MANAGE COMPANIES SECTION -->
+
+    <!-- PORTFOLIO SECTION -->
+    <div id="portfolioSection" class="section-container">
+      <h4>My Portfolio</h4>
+
+      <!-- Add Position to Portfolio -->
+      <div class="row" style="margin-top: 20px;">
+        <div class="col s12 m3">
+          <label for="portfolioTickerSelect">Ticker</label>
+          <select id="portfolioTickerSelect" class="browser-default">
+            <option value="" disabled selected>Select ticker</option>
+          </select>
+        </div>
+        <div class="col s12 m3">
+          <div class="input-field">
+            <input id="portfolioBuyPriceInput" type="number" placeholder="Buy Price" />
+            <label for="portfolioBuyPriceInput">Buy Price</label>
+          </div>
+        </div>
+        <div class="col s12 m3">
+          <div class="input-field">
+            <input id="portfolioQuantityInput" type="number" placeholder="Quantity" />
+            <label for="portfolioQuantityInput">Quantity</label>
+          </div>
+        </div>
+        <div class="col s12 m3">
+          <button
+            id="portfolioAddBtn"
+            class="btn waves-effect waves-light green darken-1"
+            style="width: 100%; margin-top: 20px;"
+          >
+            Add to Portfolio
+          </button>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="col s12">
+          <button
+            id="portfolioLoadBtn"
+            class="btn waves-effect waves-light grey darken-1"
+            style="margin-right: 10px;"
+          >
+            Load Portfolio
+          </button>
+          <button
+            id="portfolioCheckSignalsBtn"
+            class="btn waves-effect waves-light blue"
+            style="margin-right: 10px;"
+          >
+            Check Portfolio Signals
+          </button>
+          <button
+            id="portfolioLoadArchiveBtn"
+            class="btn waves-effect waves-light orange darken-1"
+            style="margin-right: 10px;"
+          >
+            Load Archive
+          </button>
+        </div>
+      </div>
+
+      <!-- Portfolio Table -->
+      <div class="row" style="margin-top: 40px;">
+        <div class="col s12">
+          <h5>Open Positions</h5>
+          <table id="portfolioTable" class="highlight responsive-table">
+            <thead>
+              <tr>
+                <th>Ticker</th>
+                <th>Buy Price</th>
+                <th>Quantity</th>
+                <th>Current Price</th>
+                <th>Signal</th>
+                <th>Profit (%)</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td colspan="7" class="center-align">No positions yet.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Archive Table -->
+      <div class="row" style="margin-top: 40px;">
+        <div class="col s12">
+          <h5>Archived (Sold) Positions</h5>
+          <!-- Updated columns: Ticker, Buy Date, Sell Date, Buy Price, Sell Price, Profit (%) -->
+          <table id="archiveTable" class="highlight responsive-table">
+            <thead>
+              <tr>
+                <th>Ticker</th>
+                <th>Buy Date</th>
+                <th>Sell Date</th>
+                <th>Buy Price</th>
+                <th>Sell Price</th>
+                <th>Profit (%)</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td colspan="6" class="center-align">No archived positions yet.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div><!-- END PORTFOLIO SECTION -->
+  </div><!-- END CONTAINER -->
+
+  <footer class="page-footer blue darken-2">
+    <div class="container center-align">
+      <p>© 2024 Stock Signal Tracker</p>
+    </div>
+  </footer>
+
+  <!-- MODAL for Graph -->
+  <div id="chartModal" class="modal">
+    <div class="modal-content">
+      <h5 id="chartModalTitle">Candlestick Chart</h5>
+      <div id="chartContainer" style="width: 100%; height: 400px;"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="modal-close btn waves-effect waves-light">Close</button>
+    </div>
+  </div>
+
+  <script>
+    const baseURL = 'http://127.0.0.1:5000'; // Adjust if needed
+
+    // Sections
+    const homeSection = document.getElementById('homeSection');
+    const manageSection = document.getElementById('manageCompaniesSection');
+    const portfolioSection = document.getElementById('portfolioSection');
+
+    // Nav
+    const navHomeLink = document.getElementById('navHomeLink');
+    const navManageLink = document.getElementById('navManageLink');
+    const navPortfolioLink = document.getElementById('navPortfolioLink');
+
+    // Progress
+    function updateProgressBar(percent, text) {
+      const pb = document.getElementById('progressBar');
+      const pt = document.getElementById('progressText');
+      pb.style.width = percent + '%';
+      pt.textContent = text || `${percent}%`;
+    }
+
+    // On DOM loaded
+    document.addEventListener('DOMContentLoaded', () => {
+      M.AutoInit();
+      homeSection.classList.add('active-section');
+      loadCompanyList();
+      predictAllSignals(); // auto load signals on home page
+    });
+
+    // Switch sections
+    navHomeLink.addEventListener('click', () => {
+      homeSection.classList.add('active-section');
+      manageSection.classList.remove('active-section');
+      portfolioSection.classList.remove('active-section');
+    });
+
+    navManageLink.addEventListener('click', () => {
+      manageSection.classList.add('active-section');
+      homeSection.classList.remove('active-section');
+      portfolioSection.classList.remove('active-section');
+      loadCompanyList();
+    });
+
+    navPortfolioLink.addEventListener('click', () => {
+      portfolioSection.classList.add('active-section');
+      homeSection.classList.remove('active-section');
+      manageSection.classList.remove('active-section');
+      loadCompanyListForPortfolio();
+      loadPortfolio();
+      loadArchive();
+    });
+
+    /*******************************************
+     * Load / Manage Companies
+     *******************************************/
+    function loadCompanyList() {
+      axios.get(`${baseURL}/get_companies`)
+        .then(resp => {
+          const comps = resp.data || [];
+          // home dropdown
+          const homeDrop = document.getElementById('companyDropdown');
+          homeDrop.innerHTML = '<option value="" disabled selected>Select a company</option>';
+          comps.forEach(c => {
+            const opt = document.createElement('option');
+            opt.value = c;
+            opt.textContent = c;
+            homeDrop.appendChild(opt);
+          });
+
+          // manage page
+          const compList = document.getElementById('companyList');
+          compList.innerHTML = '';
+          comps.forEach(t => {
+            const li = document.createElement('li');
+            li.classList.add('collection-item');
+            li.textContent = t;
+            compList.appendChild(li);
+          });
+        })
+        .catch(err => console.error(err));
+    }
+
+    function loadCompanyListForPortfolio() {
+      axios.get(`${baseURL}/get_companies`)
+        .then(resp => {
+          const comps = resp.data || [];
+          const sel = document.getElementById('portfolioTickerSelect');
+          sel.innerHTML = '<option value="" disabled selected>Select ticker</option>';
+          comps.forEach(c => {
+            const opt = document.createElement('option');
+            opt.value = c;
+            opt.textContent = c;
+            sel.appendChild(opt);
+          });
+        })
+        .catch(err => console.error(err));
+    }
+
+    document.getElementById('addCompanyBtn').addEventListener('click', () => {
+      const newComp = document.getElementById('newCompanyInput').value.trim().toUpperCase();
+      if (!newComp) {
+        return M.toast({html: 'Enter a valid ticker!', classes: 'red darken-1'});
+      }
+      axios.post(`${baseURL}/add_company`, { company: newComp })
+        .then(resp => {
+          M.toast({html: resp.data.message, classes: 'green darken-1'});
+          loadCompanyList();
+        })
+        .catch(err => console.error(err));
+    });
+
+    document.getElementById('deleteCompanyBtn').addEventListener('click', () => {
+      const comp = document.getElementById('newCompanyInput').value.trim().toUpperCase();
+      if (!comp) {
+        return M.toast({html: 'Enter a ticker to delete!', classes: 'red darken-1'});
+      }
+      axios.post(`${baseURL}/delete_company`, { company: comp })
+        .then(resp => {
+          M.toast({html: resp.data.message, classes: 'green darken-1'});
+          loadCompanyList();
+        })
+        .catch(err => console.error(err));
+    });
+
+    /*******************************************
+     * HOME -> SIGNALS
+     *******************************************/
+    document.getElementById('processSignalsBtn').addEventListener('click', processSignalsForOne);
+    function processSignalsForOne() {
+      const c = document.getElementById('companyDropdown').value;
+      if (!c) {
+        return M.toast({html: 'Select a company!', classes: 'red darken-1'});
+      }
+      updateProgressBar(50, 'Processing...');
+      axios.post(`${baseURL}/process_signals`, { company: c })
+        .then(resp => {
+          const data = resp.data;
+          const tb = document.querySelector('#resultsTable tbody');
+          tb.innerHTML = '';
+          const row = `
+            <tr>
+              <td>${data.company}</td>
+              <td>${data.sell_date || 'N/A'}</td>
+              <td>${data.sell_price || 'N/A'}</td>
+              <td>${data.buy_date || 'N/A'}</td>
+              <td>${data.buy_price || 'N/A'}</td>
+              <td>${data.profit || 'N/A'}</td>
+            </tr>
+          `;
+          tb.innerHTML = row;
+          updateProgressBar(100, 'Done!');
+        })
+        .catch(err => {
+          console.error(err);
+          updateProgressBar(0, 'Error!');
+        });
+    }
+
+    document.getElementById('processAllSignalsBtn').addEventListener('click', processSignalsAll);
+    function processSignalsAll() {
+      updateProgressBar(50, 'Processing...');
+      axios.post(`${baseURL}/process_all_signals`)
+        .then(resp => {
+          const arr = resp.data || [];
+          const tb = document.querySelector('#resultsTable tbody');
+          tb.innerHTML = '';
+          if (!arr.length) {
+            tb.innerHTML = `<tr><td colspan="6" class="center-align">No results found.</td></tr>`;
+          } else {
+            arr.forEach(d => {
+              const row = `
+                <tr>
+                  <td>${d.company}</td>
+                  <td>${d.sell_date || 'N/A'}</td>
+                  <td>${d.sell_price || 'N/A'}</td>
+                  <td>${d.buy_date || 'N/A'}</td>
+                  <td>${d.buy_price || 'N/A'}</td>
+                  <td>${d.profit || 'N/A'}</td>
+                </tr>
+              `;
+              tb.innerHTML += row;
+            });
+          }
+          updateProgressBar(100, 'Done!');
+        })
+        .catch(err => {
+          console.error(err);
+          updateProgressBar(0, 'Error!');
+        });
+    }
+
+    document.getElementById('predictAllSignalsBtn').addEventListener('click', predictAllSignals);
+    function predictAllSignals() {
+      updateProgressBar(50, 'Predicting...');
+      axios.post(`${baseURL}/predict_all_signals`)
+        .then(resp => {
+          const arr = resp.data || [];
+          const tb = document.querySelector('#allSignalsResultsTable tbody');
+          tb.innerHTML = '';
+          if (!arr.length) {
+            tb.innerHTML = `<tr><td colspan="3" class="center-align">No data.</td></tr>`;
+          } else {
+            arr.forEach(d => {
+              const price = d.price && d.price !== 'N/A'
+                ? parseFloat(d.price).toFixed(2)
+                : 'N/A';
+              const row = `
+                <tr>
+                  <td>${d.company}</td>
+                  <td>${d.signal}</td>
+                  <td>${price}</td>
+                </tr>
+              `;
+              tb.innerHTML += row;
+            });
+          }
+          updateProgressBar(100, 'Done!');
+        })
+        .catch(err => {
+          console.error(err);
+          updateProgressBar(0, 'Error!');
+        });
+    }
+
+    document.getElementById('generateGraphBtn').addEventListener('click', () => {
+      const c = document.getElementById('companyDropdown').value;
+      if (!c) {
+        return M.toast({html: 'Select a company.', classes: 'red darken-1'});
+      }
+      updateProgressBar(50, 'Generating...');
+      axios.post(`${baseURL}/generate_graph`, { company: c })
+        .then(resp => {
+          const figureData = resp.data.data;
+          const chartC = document.getElementById('chartContainer');
+          chartC.innerHTML = '';
+          Plotly.newPlot(chartC, figureData.data, figureData.layout || {});
+          const m = document.getElementById('chartModal');
+          const mod = M.Modal.getInstance(m);
+          mod.open();
+          updateProgressBar(100, 'Done!');
+        })
+        .catch(err => {
+          console.error(err);
+          updateProgressBar(0, 'Error!');
+        });
+    });
+
+    /***********************************************
+     * Download CSV
+     ***********************************************/
+    function tableToCSV(tableId) {
+      const table = document.getElementById(tableId);
+      let csv = [];
+      const rows = table.querySelectorAll("tr");
+      for (let i = 0; i < rows.length; i++) {
+        const cols = rows[i].querySelectorAll("th, td");
+        let rowData = [];
+        for (let j = 0; j < cols.length; j++) {
+          const text = cols[j].innerText.replace(/"/g, '""');
+          rowData.push(`"${text}"`);
+        }
+        csv.push(rowData.join(","));
+      }
+      return csv.join("\n");
+    }
+    function downloadCSV(filename, csvContent) {
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.setAttribute("href", url);
+      a.setAttribute("download", filename);
+      a.style.visibility = "hidden";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    }
+    document.getElementById('downloadResultsBtn').addEventListener('click', () => {
+      const content = tableToCSV("resultsTable");
+      downloadCSV("results_table.csv", content);
+    });
+    document.getElementById('downloadSignalsBtn').addEventListener('click', () => {
+      const content = tableToCSV("allSignalsResultsTable");
+      downloadCSV("all_signals_table.csv", content);
+    });
+
+    /***********************************************
+     * PORTFOLIO
+     ***********************************************/
+    document.getElementById('portfolioAddBtn').addEventListener('click', () => {
+      const t = document.getElementById('portfolioTickerSelect').value.trim().toUpperCase();
+      const bp = parseFloat(document.getElementById('portfolioBuyPriceInput').value);
+      const q = parseFloat(document.getElementById('portfolioQuantityInput').value) || 1;
+
+      if (!t || isNaN(bp)) {
+        return M.toast({html: 'Select ticker & valid buy price!', classes: 'red darken-1'});
+      }
+      axios.post(`${baseURL}/portfolio_add`, {
+        ticker: t,
+        buy_price: bp,
+        quantity: q
+      })
+      .then(resp => {
+        M.toast({html: resp.data.message, classes: 'green darken-1'});
+        // auto refresh portfolio
+        loadPortfolio();
+      })
+      .catch(err => {
+        console.error("Error adding to portfolio:", err);
+        M.toast({html: 'Fail add portfolio.', classes: 'red darken-1'});
+      });
+    });
+
+    function loadPortfolio() {
+      axios.get(`${baseURL}/portfolio_list`)
+        .then(resp => {
+          const port = resp.data || [];
+          const tb = document.querySelector('#portfolioTable tbody');
+          tb.innerHTML = "";
+          if (!port.length) {
+            tb.innerHTML = `<tr><td colspan="7" class="center-align">No positions found.</td></tr>`;
+            return;
+          }
+          port.forEach(p => {
+            const row = `
+              <tr>
+                <td>${p.ticker}</td>
+                <td>${p.buy_price}</td>
+                <td>${p.quantity || '1'}</td>
+                <td>N/A</td>
+                <td>N/A</td>
+                <td>N/A</td>
+                <td><button class="btn red sellBtn" data-ticker="${p.ticker}">Sell</button></td>
+              </tr>
+            `;
+            tb.innerHTML += row;
+          });
+          attachSellButtonHandlers();
+        })
+        .catch(err => {
+          console.error("Error loading portfolio:", err);
+          M.toast({html: 'Error loading portfolio.', classes: 'red darken-1'});
+        });
+    }
+    document.getElementById('portfolioLoadBtn').addEventListener('click', loadPortfolio);
+
+    document.getElementById('portfolioCheckSignalsBtn').addEventListener('click', () => {
+      axios.post(`${baseURL}/predict_portfolio_signals`)
+        .then(resp => {
+          const results = resp.data || [];
+          const tb = document.querySelector('#portfolioTable tbody');
+          tb.innerHTML = '';
+          if (!results.length) {
+            tb.innerHTML = `<tr><td colspan="7" class="center-align">No positions found.</td></tr>`;
+            return;
+          }
+          results.forEach(r => {
+            const row = `
+              <tr>
+                <td>${r.ticker}</td>
+                <td>${r.buy_price}</td>
+                <td>${r.quantity || '1'}</td>
+                <td>${r.current_price || 'N/A'}</td>
+                <td>${r.signal}</td>
+                <td>${r.profit_percent || 'N/A'}</td>
+                <td><button class="btn red sellBtn" data-ticker="${r.ticker}">Sell</button></td>
+              </tr>
+            `;
+            tb.innerHTML += row;
+          });
+          attachSellButtonHandlers();
+        })
+        .catch(err => {
+          console.error("Error checking signals:", err);
+          M.toast({html: 'Failed signals check.', classes: 'red darken-1'});
+        });
+    });
+
+    function loadArchive() {
+      axios.get(`${baseURL}/portfolio_archive`)
+        .then(resp => {
+          const arr = resp.data || [];
+          const tb = document.querySelector('#archiveTable tbody');
+          tb.innerHTML = "";
+          if (!arr.length) {
+            tb.innerHTML = `<tr><td colspan="6" class="center-align">No archived positions yet.</td></tr>`;
+            return;
+          }
+          // Display Ticker, Buy Date, Sell Date, Buy Price, Sell Price, Profit(%)
+          arr.forEach(a => {
+            const row = `
+              <tr>
+                <td>${a.ticker}</td>
+                <td>${a.buy_date || 'N/A'}</td>
+                <td>${a.sell_date || 'N/A'}</td>
+                <td>${a.buy_price}</td>
+                <td>${a.sell_price}</td>
+                <td>${a.profit_percent || 'N/A'}</td>
+              </tr>
+            `;
+            tb.innerHTML += row;
+          });
+        })
+        .catch(err => {
+          console.error("Error loading archive:", err);
+          M.toast({html: 'Failed to load archive.', classes: 'red darken-1'});
+        });
+    }
+    document.getElementById('portfolioLoadArchiveBtn').addEventListener('click', loadArchive);
+
+    //** SELL direct call or modal? We'll do direct call for now.
+    function attachSellButtonHandlers() {
+      const sellBtns = document.querySelectorAll('.sellBtn');
+      sellBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+          const ticker = btn.getAttribute('data-ticker');
+          axios.post(`${baseURL}/portfolio_sell`, { ticker })
+            .then(resp => {
+              M.toast({html: resp.data.message, classes: 'green darken-1'});
+              // Refresh open & archived
+              loadPortfolio();
+              loadArchive();
+            })
+            .catch(err => {
+              console.error("Sell error:", err);
+              M.toast({html: 'Sell failed.', classes: 'red darken-1'});
+            });
+        });
+      });
+    }
+  </script>
+</body>
+</html>

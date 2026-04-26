@@ -1,0 +1,79 @@
+[
+  {
+    "ticker": "ITC.NS",
+    "buy_price": 245.0,
+    "quantity": 2.0,
+    "buy_date": null,
+    "sell_price": 478.6,
+    "sell_date": "2024-12-28",
+    "profit_value": 467.2,
+    "profit_percent": 95.35,
+    "duration_days": "N/A"
+  },
+  {
+    "ticker": "MARICO.NS",
+    "buy_price": 67.0,
+    "quantity": 89.0,
+    "buy_date": "2024-12-28",
+    "sell_price": 89.0,
+    "sell_date": "2024-12-28",
+    "profit_value": 1958.0,
+    "profit_percent": 32.84,
+    "duration_days": 0
+  },
+  {
+    "ticker": "MARICO.NS",
+    "buy_price": 78.0,
+    "quantity": 567.0,
+    "buy_date": "2024-12-28",
+    "sell_price": 632.6,
+    "sell_date": "2024-12-28",
+    "profit_value": 314458.2,
+    "profit_percent": 711.03,
+    "duration_days": 0
+  },
+  {
+    "ticker": "DABUR.NS",
+    "buy_price": 78.0,
+    "quantity": 567.0,
+    "buy_date": "2024-12-28",
+    "sell_price": 507.15,
+    "sell_date": "2024-12-28",
+    "profit_value": 243328.05,
+    "profit_percent": 550.19,
+    "duration_days": 0
+  },
+  {
+    "ticker": "MARICO.NS",
+    "buy_price": 78.0,
+    "quantity": 89.0,
+    "buy_date": "2024-12-28",
+    "sell_price": 632.6,
+    "sell_date": "2024-12-28",
+    "profit_value": 49359.4,
+    "profit_percent": 711.03,
+    "duration_days": 0
+  },
+  {
+    "ticker": "ITC.NS",
+    "buy_price": 670.0,
+    "quantity": 1.0,
+    "buy_date": "2024-12-28",
+    "sell_price": 478.6,
+    "sell_date": "2024-12-28",
+    "profit_value": -191.4,
+    "profit_percent": -28.57,
+    "duration_days": 0
+  },
+  {
+    "ticker": "ITC.NS",
+    "buy_price": 670.0,
+    "quantity": 1.0,
+    "buy_date": "2024-12-28",
+    "sell_price": 478.6,
+    "sell_date": "2024-12-28",
+    "profit_value": -191.4,
+    "profit_percent": -28.57,
+    "duration_days": 0
+  }
+]

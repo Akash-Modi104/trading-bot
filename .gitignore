@@ -1,0 +1,12 @@
+venv/
+__pycache__/
+*.pyc
+*.xlsx
+*.csv
+*.log
+.env
+alpaca_config.json
+strategy_params.json
+portfolio.json
+reports/
+archive/
