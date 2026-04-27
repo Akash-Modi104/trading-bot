@@ -1,4 +1,3 @@
-from watchlist import BASE_WATCHLIST, SECTOR_MAP, get_sector
 """
 local_scanner.py — Open-source LLM stock scanner
 Replaces the Claude scheduled task on Hostinger KVM2.
