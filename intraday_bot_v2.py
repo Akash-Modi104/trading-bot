@@ -1,4 +1,3 @@
-from watchlist import SECTOR_MAP, get_sector
 """
 Advanced Intraday Trading Bot v2 — Full Feature Build
 Features:
