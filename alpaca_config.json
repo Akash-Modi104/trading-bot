@@ -1,0 +1,21 @@
+{
+  "risk": {
+    "max_positions": 3,
+    "budget_per_trade": 333,
+    "stop_loss_pct": 1.5,
+    "take_profit_pct": 3.0,
+    "trail_pct": 1.0,
+    "partial_tp_pct": 2.0,
+    "partial_tp_frac": 0.5,
+    "daily_loss_limit_pct": 3.0,
+    "vix_pause_threshold": 28,
+    "vix_stop_threshold": 35,
+    "rel_vol_min": 1.8,
+    "min_confidence": 60,
+    "sector_cap": true,
+    "spy_filter": true,
+    "vwap_required": true,
+    "orb_required": true,
+    "multi_tf_required": true
+  }
+}

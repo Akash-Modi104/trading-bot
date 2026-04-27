@@ -3,6 +3,7 @@
 #  Deploy trading bot to Hostinger KVM2
 #  Usage:
 #    SERVER_IP=1.2.3.4 bash server/deploy.sh
+#    SERVER_IP=1.2.3.4 SERVER_USER=root bash server/deploy.sh
 # ============================================================
 
 SERVER_IP="${SERVER_IP:-}"
@@ -27,13 +28,10 @@ rsync -avz --progress \
   --exclude "__pycache__/" \
   --exclude "*.pyc" \
   --exclude ".git/" \
+  --exclude ".aider*" \
   --exclude "server/setup_hostinger.sh" \
   "$LOCAL_DIR/" \
   "${SERVER_USER}@${SERVER_IP}:${REMOTE_DIR}/"
-
-# Copy server-specific scanner (overrides root version)
-scp "$SCRIPT_DIR/local_scanner.py" \
-    "${SERVER_USER}@${SERVER_IP}:${REMOTE_DIR}/local_scanner.py"
 
 # Install / upgrade Python deps on server
 echo "[deploy] Installing Python dependencies..."
@@ -48,7 +46,12 @@ echo ""
 echo "=========================================="
 echo "  DEPLOY COMPLETE"
 echo "=========================================="
-echo "  Dashboard: http://${SERVER_IP}"
+echo "  Dashboard: http://${SERVER_IP}:5001"
+echo ""
+echo "  SSL setup (first time only):"
+echo "    ssh ${SERVER_USER}@${SERVER_IP}"
+echo "    bash ${REMOTE_DIR}/server/ssl_setup.sh"
+echo ""
 echo "  Logs:"
 echo "    ssh ${SERVER_USER}@${SERVER_IP}"
 echo "    tail -f /var/log/trading-bot.out.log"

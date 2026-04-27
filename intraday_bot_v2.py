@@ -561,10 +561,9 @@ def run():
             alert_eod(float(get_account().get("equity", start_eq)),
                       daily_pnl, trades,
                       os.path.join(BASE_DIR, "reports", f"trading_report_{now.strftime('%Y-%m-%d')}.html"))
-            import subprocess
+            import subprocess, sys
             subprocess.Popen(
-                [os.path.join(BASE_DIR, "venv", "Scripts", "python.exe"),
-                 os.path.join(BASE_DIR, "eod_report.py")],
+                [sys.executable, os.path.join(BASE_DIR, "eod_report.py")],
                 cwd=BASE_DIR
             )
             log_event("EOD report launched. Bot finished.")

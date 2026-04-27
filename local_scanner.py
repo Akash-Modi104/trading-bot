@@ -1,13 +1,11 @@
 """
 local_scanner.py — Open-source LLM stock scanner
-Replaces the Claude scheduled task on Hostinger KVM2.
-Uses Ollama (qwen2.5:7b) for AI scoring + DuckDuckGo for news.
+Uses Ollama (qwen2.5) for AI scoring + DuckDuckGo for news.
 Runs every 15 min during market hours, writes claude_picks.json.
 """
 
-import json, os, time, re, requests
+import json, os, time, re, requests, sys
 from datetime import datetime, date
-from duckduckgo_search import DDGS
 import pytz, schedule
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -25,14 +23,14 @@ except ImportError:
                 k, v = line.split("=", 1)
                 os.environ.setdefault(k.strip(), v.strip())
 
-API_KEY    = os.environ["ALPACA_API_KEY"]
-SECRET_KEY = os.environ["ALPACA_SECRET_KEY"]
-DATA_URL   = os.environ.get("ALPACA_DATA_URL", "https://data.alpaca.markets/v2")
-ALPACA_URL = os.environ.get("ALPACA_BASE_URL", "https://paper-api.alpaca.markets/v2")
-OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
-OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5:7b-instruct-q4_K_M")
-PICKS_FILE = os.path.join(BASE_DIR, "claude_picks.json")
-NEG_NEWS_F = os.path.join(BASE_DIR, "negative_news.json")
+API_KEY      = os.environ["ALPACA_API_KEY"]
+SECRET_KEY   = os.environ["ALPACA_SECRET_KEY"]
+DATA_URL     = os.environ.get("ALPACA_DATA_URL", "https://data.alpaca.markets/v2")
+ALPACA_URL   = os.environ.get("ALPACA_BASE_URL", "https://paper-api.alpaca.markets/v2")
+OLLAMA_URL   = os.environ.get("OLLAMA_URL", "http://localhost:11434")
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5:3b")
+PICKS_FILE   = os.path.join(BASE_DIR, "claude_picks.json")
+NEG_NEWS_F   = os.path.join(BASE_DIR, "negative_news.json")
 
 HEADERS = {"APCA-API-KEY-ID": API_KEY, "APCA-API-SECRET-KEY": SECRET_KEY}
 ET = pytz.timezone("America/New_York")
@@ -61,7 +59,13 @@ def now_et():
 def market_open():
     n = now_et()
     from datetime import time as dtime
-    return n.weekday() < 5 and dtime(9,30) <= n.time() <= dtime(15,45)
+    return n.weekday() < 5 and dtime(9, 30) <= n.time() <= dtime(15, 45)
+
+def premarket_window():
+    """True from 9:00–9:30 ET on weekdays (pre-market scan)."""
+    n = now_et()
+    from datetime import time as dtime
+    return n.weekday() < 5 and dtime(9, 0) <= n.time() < dtime(9, 30)
 
 def log(msg):
     ts = now_et().strftime("%H:%M:%S")
@@ -70,10 +74,12 @@ def log(msg):
 # ── Alpaca data ───────────────────────────────────────────────
 def get_bars(sym, tf="5Min", limit=80):
     try:
-        r = requests.get(f"{DATA_URL}/stocks/{sym}/bars",
-                         headers=HEADERS,
-                         params={"timeframe": tf, "limit": limit, "feed": "iex"},
-                         timeout=10)
+        r = requests.get(
+            f"{DATA_URL}/stocks/{sym}/bars",
+            headers=HEADERS,
+            params={"timeframe": tf, "limit": limit, "feed": "iex"},
+            timeout=10,
+        )
         d = r.json()
         return d.get("bars") or [] if isinstance(d, dict) else []
     except Exception:
@@ -81,37 +87,39 @@ def get_bars(sym, tf="5Min", limit=80):
 
 def get_latest_price(sym):
     try:
-        r = requests.get(f"{DATA_URL}/stocks/{sym}/trades/latest",
-                         headers=HEADERS, timeout=5)
+        r = requests.get(
+            f"{DATA_URL}/stocks/{sym}/trades/latest",
+            headers=HEADERS, timeout=5,
+        )
         return r.json().get("trade", {}).get("p")
     except Exception:
         return None
 
 # ── Technical indicators ──────────────────────────────────────
 def ema_series(vals, n):
-    if len(vals) < n: return [None]*len(vals)
-    k = 2/(n+1); out = [None]*(n-1)
-    s = sum(vals[:n])/n; out.append(s)
-    for v in vals[n:]: s = v*k+s*(1-k); out.append(s)
+    if len(vals) < n: return [None] * len(vals)
+    k = 2 / (n + 1); out = [None] * (n - 1)
+    s = sum(vals[:n]) / n; out.append(s)
+    for v in vals[n:]: s = v * k + s * (1 - k); out.append(s)
     return out
 
 def rsi_val(closes, n=14):
-    if len(closes) < n+1: return 50
-    g = [max(closes[i]-closes[i-1],0) for i in range(1,len(closes))]
-    l = [max(closes[i-1]-closes[i],0) for i in range(1,len(closes))]
-    ag, al = sum(g[-n:])/n, sum(l[-n:])/n
-    return 100 if al==0 else 100-100/(1+ag/al)
+    if len(closes) < n + 1: return 50
+    g = [max(closes[i] - closes[i-1], 0) for i in range(1, len(closes))]
+    l = [max(closes[i-1] - closes[i], 0) for i in range(1, len(closes))]
+    ag, al = sum(g[-n:]) / n, sum(l[-n:]) / n
+    return 100 if al == 0 else 100 - 100 / (1 + ag / al)
 
 def vwap_val(bars):
-    num=den=0
+    num = den = 0
     for b in bars:
-        tp=(b["h"]+b["l"]+b["c"])/3; num+=tp*b["v"]; den+=b["v"]
-    return num/den if den else None
+        tp = (b["h"] + b["l"] + b["c"]) / 3; num += tp * b["v"]; den += b["v"]
+    return num / den if den else None
 
 def rel_vol(bars, lb=20):
-    if len(bars)<5: return 1.0
-    avg = sum(b["v"] for b in bars[-lb-1:-1])/min(lb,len(bars)-1)
-    return bars[-1]["v"]/avg if avg else 1.0
+    if len(bars) < 5: return 1.0
+    avg = sum(b["v"] for b in bars[-lb-1:-1]) / min(lb, len(bars) - 1)
+    return bars[-1]["v"] / avg if avg else 1.0
 
 def technical_score(sym):
     """Calculate technical score 0-60. Returns (score, details_dict)."""
@@ -128,14 +136,14 @@ def technical_score(sym):
     rv = rel_vol(bars)
 
     score = 0
-    details = {"price": curr, "rsi": round(r,1), "relvol": round(rv,2)}
+    details = {"price": curr, "rsi": round(r, 1), "relvol": round(rv, 2)}
 
     # Disqualifiers
     if r > 78 or r < 35:
         return 0, {"skip": f"RSI {r:.0f} extreme"}
 
     # EMA crossover in last 3 bars
-    if all(x is not None for x in [ef[-1],es[-1],ef[-2],es[-2]]):
+    if all(x is not None for x in [ef[-1], es[-1], ef[-2], es[-2]]):
         if ef[-1] > es[-1]:
             if ef[-2] <= es[-2]:
                 score += 20; details["ema_cross"] = "fresh crossover"
@@ -162,15 +170,27 @@ def technical_score(sym):
     return max(0, min(score, 60)), details
 
 # ── DuckDuckGo news search ────────────────────────────────────
-def search_news(query, max_results=5):
-    """Search internet using DuckDuckGo. Returns list of result snippets."""
-    try:
-        with DDGS() as ddgs:
-            results = list(ddgs.text(query, max_results=max_results))
-        return [r.get("body","") + " " + r.get("title","") for r in results]
-    except Exception as e:
-        log(f"Search error: {e}")
-        return []
+def search_news(query, max_results=5, retries=3):
+    """Search internet using DuckDuckGo with retry on rate-limit."""
+    for attempt in range(retries):
+        try:
+            from duckduckgo_search import DDGS
+            with DDGS() as ddgs:
+                results = list(ddgs.text(query, max_results=max_results))
+            return [r.get("body", "") + " " + r.get("title", "") for r in results]
+        except Exception as e:
+            err = str(e).lower()
+            if "ratelimit" in err or "202" in err or "timeout" in err:
+                if attempt < retries - 1:
+                    wait = 5 * (attempt + 1)
+                    log(f"DDG rate-limited, retry {attempt+1}/{retries} in {wait}s…")
+                    time.sleep(wait)
+                else:
+                    log(f"DDG failed after {retries} attempts: {e}")
+            else:
+                log(f"Search error: {e}")
+                break
+    return []
 
 def get_movers():
     """Find trending tickers from web searches."""
@@ -182,24 +202,59 @@ def get_movers():
     ]
     found = {}
     ticker_re = re.compile(r'\b([A-Z]{2,5})\b')
-    noise = {"THE","FOR","AND","ARE","HAS","TOP","BIG","NEW","NOW","DAY",
-             "ALL","LOW","BUY","SEC","FDA","CEO","GET","SET","USE","INC",
-             "LLC","ETF","IPO","USD","NET","GDP","CPI","FED","API","EST"}
+    noise = {
+        "THE","FOR","AND","ARE","HAS","TOP","BIG","NEW","NOW","DAY",
+        "ALL","LOW","BUY","SEC","FDA","CEO","GET","SET","USE","INC",
+        "LLC","ETF","IPO","USD","NET","GDP","CPI","FED","API","EST",
+        "NYSE","NASDAQ","STOCK","YEAR","HIGH","WEEK","TODAY",
+    }
     for q in searches:
         snippets = search_news(q, 8)
         for s in snippets:
             for m in ticker_re.finditer(s):
                 t = m.group(1)
                 if t not in noise and len(t) >= 2:
-                    found[t] = found.get(t,0) + 1
-    # Filter to only known/valid-looking tickers (3-5 chars, in sector map or high freq)
-    candidates = [t for t,c in sorted(found.items(),key=lambda x:-x[1])
-                  if c >= 2 or t in SECTOR_MAP]
+                    found[t] = found.get(t, 0) + 1
+    candidates = [
+        t for t, c in sorted(found.items(), key=lambda x: -x[1])
+        if c >= 2 or t in SECTOR_MAP
+    ]
     return list(dict.fromkeys(BASE_WATCHLIST + candidates[:10]))[:25]
+
+# ── Ollama JSON parsing ───────────────────────────────────────
+def _parse_ollama_json(text):
+    """Robustly extract the JSON object from LLM response text."""
+    text = text.strip()
+    # Direct parse
+    try:
+        return json.loads(text)
+    except Exception:
+        pass
+    # Find outermost { ... }
+    start = text.find("{")
+    end   = text.rfind("}")
+    if start >= 0 and end > start:
+        try:
+            return json.loads(text[start:end + 1])
+        except Exception:
+            pass
+    # Regex fallback — grab any valid-looking key/value blob
+    m = re.search(
+        r'\{\s*"sentiment"\s*:\s*"[^"]+"\s*,\s*"ai_score"\s*:\s*\d+\s*,\s*"reason"\s*:\s*"[^"]*"\s*\}',
+        text,
+    )
+    if m:
+        try:
+            return json.loads(m.group())
+        except Exception:
+            pass
+    return None
 
 # ── Ollama LLM scoring ─────────────────────────────────────────
 def ollama_score(sym, tech_score, tech_details, news_snippets, sector):
-    """Ask local LLM to score sentiment + give final confidence. Returns (ai_score 0-40, sentiment, reason)."""
+    """Ask local LLM to score sentiment + give final confidence.
+    Returns (ai_score 0-40, sentiment, reason).
+    Falls back to (0, 'neutral', '') if Ollama is unavailable."""
     news_text = "\n".join(f"- {s[:200]}" for s in news_snippets[:5]) or "No news found."
 
     prompt = f"""You are a stock trading analyst. Score this stock for an intraday momentum trade.
@@ -224,18 +279,23 @@ Respond ONLY in this exact JSON format (no other text):
 {{"sentiment": "positive|negative|neutral", "ai_score": <number 0-40>, "reason": "<one sentence>"}}"""
 
     try:
-        r = requests.post(f"{OLLAMA_URL}/api/generate",
-                          json={"model": OLLAMA_MODEL, "prompt": prompt,
-                                "stream": False, "options": {"temperature": 0.1}},
-                          timeout=60)
-        text = r.json().get("response", "{}")
-        # Extract JSON from response
-        match = re.search(r'\{[^}]+\}', text, re.DOTALL)
-        if match:
-            data = json.loads(match.group())
-            return (int(data.get("ai_score", 0)),
-                    data.get("sentiment", "neutral"),
-                    data.get("reason", "")[:150])
+        r = requests.post(
+            f"{OLLAMA_URL}/api/generate",
+            json={
+                "model": OLLAMA_MODEL, "prompt": prompt,
+                "stream": False, "options": {"temperature": 0.1},
+            },
+            timeout=60,
+        )
+        text = r.json().get("response", "")
+        data = _parse_ollama_json(text)
+        if data:
+            return (
+                min(int(data.get("ai_score", 0)), 40),
+                data.get("sentiment", "neutral"),
+                str(data.get("reason", ""))[:150],
+            )
+        log(f"  Ollama parse failed for {sym}, raw: {text[:120]}")
     except Exception as e:
         log(f"  Ollama error for {sym}: {e}")
     return 0, "neutral", ""
@@ -253,17 +313,39 @@ def premarket_gap(sym):
         pass
     return 0.0
 
+# ── Check Ollama availability ──────────────────────────────────
+def ollama_available():
+    try:
+        r = requests.get(f"{OLLAMA_URL}/api/tags", timeout=3)
+        models = [m["name"] for m in r.json().get("models", [])]
+        # Accept any qwen2.5 variant
+        return any("qwen2.5" in m for m in models), models
+    except Exception:
+        return False, []
+
 # ── Main scan ─────────────────────────────────────────────────
-def run_scan():
-    if not market_open():
+def run_scan(force=False):
+    in_market  = market_open()
+    in_premarket = premarket_window()
+
+    if not force and not in_market and not in_premarket:
         log("Market closed — skipping scan")
         return
 
+    scan_type = "pre-market" if in_premarket and not in_market else "intraday"
     today = now_et().strftime("%Y-%m-%d")
-    log(f"=== Starting scan ({today}) ===")
+    log(f"=== Starting {scan_type} scan ({today}) ===")
+
+    # Check Ollama
+    ollama_ok, models = ollama_available()
+    if not ollama_ok:
+        log(f"WARNING: Ollama unavailable — using technical-only scoring")
+        log(f"  Run: ollama serve && ollama pull {OLLAMA_MODEL}")
+    else:
+        log(f"Ollama OK. Models: {models}")
 
     # Step 1: Get candidate tickers
-    log("Fetching movers from web...")
+    log("Fetching movers from web…")
     watchlist = get_movers()
     log(f"Watchlist ({len(watchlist)}): {watchlist}")
 
@@ -273,7 +355,7 @@ def run_scan():
 
     for sym in watchlist:
         if sym in ("SPY", "QQQ", "VIXY"): continue
-        log(f"  Analyzing {sym}...")
+        log(f"  Analyzing {sym}…")
 
         # Technical score
         t_score, t_details = technical_score(sym)
@@ -285,17 +367,24 @@ def run_scan():
         snippets = search_news(f"{sym} stock news today", 4)
 
         # Check for negative keywords
-        neg_keywords = ["lawsuit","fraud","bankruptcy","investigation","downgrade",
-                        "miss","recall","fda reject","accounting","scandal","halt"]
-        has_negative = any(kw in " ".join(snippets).lower() for kw in neg_keywords)
-        if has_negative:
+        neg_keywords = [
+            "lawsuit","fraud","bankruptcy","investigation","downgrade",
+            "miss","recall","fda reject","accounting","scandal","halt",
+        ]
+        if snippets and any(kw in " ".join(snippets).lower() for kw in neg_keywords):
             log(f"  {sym} → negative news detected, adding to kill-switch")
             neg_tickers[sym] = "negative news detected"
             continue
 
-        # Ollama AI scoring
+        # Ollama AI scoring (falls back to 0/neutral if unavailable)
         sector = SECTOR_MAP.get(sym, "Other")
-        ai_score, sentiment, reason = ollama_score(sym, t_score, t_details, snippets, sector)
+        if ollama_ok:
+            ai_score, sentiment, reason = ollama_score(sym, t_score, t_details, snippets, sector)
+        else:
+            # Technical-only mode: treat as neutral, award partial AI credit
+            ai_score  = min(int(t_score * 0.3), 18)
+            sentiment = "neutral"
+            reason    = "Technical analysis only (AI offline)"
 
         total = t_score + ai_score
         gap   = premarket_gap(sym)
@@ -308,19 +397,22 @@ def run_scan():
 
         log(f"  {sym}: tech={t_score} ai={ai_score} total={total} sentiment={sentiment}")
 
-        if total >= 60 and sentiment != "negative":
+        # Lower threshold to 55 in pre-market (less liquidity data available)
+        threshold = 55 if in_premarket else 60
+
+        if total >= threshold and sentiment != "negative":
             picks.append({
-                "date": today,
-                "symbol": sym,
-                "confidence": min(total, 100),
-                "sector": sector,
-                "reason": reason or t_details.get("ema_cross","momentum setup"),
-                "news_sentiment": sentiment,
-                "has_earnings": False,
-                "rel_volume": t_details.get("relvol", 1.0),
-                "pre_market_gap": gap,
-                "recommended_action": "buy",
-                "analyst_notes": f"Tech {t_score}/60 | AI {ai_score}/40 | RSI {t_details.get('rsi','?')}",
+                "date":              today,
+                "symbol":            sym,
+                "confidence":        min(total, 100),
+                "sector":            sector,
+                "reason":            reason or t_details.get("ema_cross", "momentum setup"),
+                "news_sentiment":    sentiment,
+                "has_earnings":      False,
+                "rel_volume":        t_details.get("relvol", 1.0),
+                "pre_market_gap":    gap,
+                "recommended_action":"buy",
+                "analyst_notes":     f"Tech {t_score}/60 | AI {ai_score}/40 | RSI {t_details.get('rsi','?')}",
             })
 
     # Sort and cap
@@ -336,8 +428,10 @@ def run_scan():
 
     # Write negative news kill-switch
     with open(NEG_NEWS_F, "w") as f:
-        json.dump({"date": today, "tickers": list(neg_tickers.keys()),
-                   "reasons": neg_tickers}, f, indent=2)
+        json.dump(
+            {"date": today, "tickers": list(neg_tickers.keys()), "reasons": neg_tickers},
+            f, indent=2,
+        )
     if neg_tickers:
         log(f"Kill-switch: {list(neg_tickers.keys())}")
 
@@ -345,27 +439,16 @@ def run_scan():
 
 # ── Scheduler ─────────────────────────────────────────────────
 def main():
-    log("Local scanner starting (Ollama model: " + OLLAMA_MODEL + ")")
+    force = "--force" in sys.argv
+    log(f"Local scanner starting (model: {OLLAMA_MODEL}{'  [FORCE]' if force else ''})")
 
-    # Check Ollama is reachable
-    try:
-        r = requests.get(f"{OLLAMA_URL}/api/tags", timeout=5)
-        models = [m["name"] for m in r.json().get("models", [])]
-        log(f"Ollama available. Models: {models}")
-    except Exception:
-        log("WARNING: Ollama not reachable at " + OLLAMA_URL)
-        log("Run: ollama serve  and  ollama pull qwen2.5:7b-instruct-q4_K_M")
-
-    # Run immediately on start, then every 15 min
-    run_scan()
+    # Run immediately on start
+    run_scan(force=force)
     schedule.every(15).minutes.do(run_scan)
 
-    # Also run at 9:00 AM ET (pre-market)
-    schedule.every().monday.at("09:00").do(run_scan)
-    schedule.every().tuesday.at("09:00").do(run_scan)
-    schedule.every().wednesday.at("09:00").do(run_scan)
-    schedule.every().thursday.at("09:00").do(run_scan)
-    schedule.every().friday.at("09:00").do(run_scan)
+    # Pre-market runs at 9:00 AM ET
+    for day in ("monday","tuesday","wednesday","thursday","friday"):
+        getattr(schedule.every(), day).at("09:00").do(run_scan, force=True)
 
     while True:
         schedule.run_pending()

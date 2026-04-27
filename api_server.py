@@ -1,5 +1,6 @@
 from flask import Flask, jsonify, request, Response
 from flask_cors import CORS
+from functools import wraps
 import json, os, subprocess, time, threading
 from datetime import datetime
 import pytz
@@ -27,6 +28,24 @@ LOG_F   = os.path.join(BASE_DIR, "trade_log.json")
 PICKS_F = os.path.join(BASE_DIR, "claude_picks.json")
 STRAT_F = os.path.join(BASE_DIR, "strategy_params.json")
 ET      = pytz.timezone("America/New_York")
+
+# ── Optional HTTP Basic Auth ──────────────────────────────────────
+def _require_auth(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        pw = os.environ.get("DASHBOARD_PASS", "")
+        if not pw:
+            return f(*args, **kwargs)
+        auth = request.authorization
+        user = os.environ.get("DASHBOARD_USER", "admin")
+        if not auth or auth.username != user or auth.password != pw:
+            return Response(
+                "Authentication required.",
+                401,
+                {"WWW-Authenticate": 'Basic realm="AlgoTrader"'},
+            )
+        return f(*args, **kwargs)
+    return decorated
 
 # ── Helpers ───────────────────────────────────────────────────────
 def read_json(path, default=None):
@@ -106,6 +125,7 @@ def build_data():
 
 # ── Routes ────────────────────────────────────────────────────────
 @app.route("/")
+@_require_auth
 def index():
     path = os.path.join(BASE_DIR, "templates", "react_index.html")
     if os.path.exists(path):
@@ -114,10 +134,12 @@ def index():
     return "Dashboard template not found.", 503
 
 @app.route("/api/data")
+@_require_auth
 def api_data():
     return jsonify(build_data())
 
 @app.route("/api/stream")
+@_require_auth
 def api_stream():
     """Server-Sent Events — pushes a snapshot every 5 s."""
     def generate():
@@ -136,17 +158,24 @@ def api_stream():
     )
 
 @app.route("/api/health")
+@_require_auth
 def api_health():
+    # Real supervisor service names on this server
+    svc_names = {
+        "trading-bot": "trading-bot",
+        "scanner":     "scanner",
+        "dashboard":   "dashboard",
+    }
     svcs = {}
-    for name in ("trading-bot", "local-scanner", "trading-dashboard"):
+    for label, name in svc_names.items():
         try:
             out = subprocess.check_output(
                 ["supervisorctl", "status", name],
                 stderr=subprocess.DEVNULL, timeout=3,
             ).decode()
-            svcs[name] = "running" if "RUNNING" in out else "stopped"
+            svcs[label] = "running" if "RUNNING" in out else "stopped"
         except Exception:
-            svcs[name] = "unknown"
+            svcs[label] = "unknown"
 
     ollama = "offline"
     try:
@@ -162,10 +191,12 @@ def api_health():
     return jsonify({"services": svcs, "ollama": ollama})
 
 @app.route("/api/config", methods=["GET"])
+@_require_auth
 def api_config_get():
     return jsonify(read_json(STRAT_F, {}))
 
 @app.route("/api/config", methods=["POST"])
+@_require_auth
 def api_config_post():
     updates = request.get_json(force=True) or {}
     current = read_json(STRAT_F, {})
@@ -174,6 +205,7 @@ def api_config_post():
     return jsonify({"ok": True, "params": current})
 
 @app.route("/api/action", methods=["POST"])
+@_require_auth
 def api_action():
     action = (request.get_json(force=True) or {}).get("action", "")
 
@@ -181,7 +213,7 @@ def api_action():
         "start":   "supervisorctl start trading-bot",
         "stop":    "supervisorctl stop trading-bot",
         "restart": "supervisorctl restart trading-bot",
-        "scan":    "supervisorctl restart local-scanner",
+        "scan":    "supervisorctl restart scanner",
     }
 
     if action in cmd_map:
