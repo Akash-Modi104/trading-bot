@@ -468,7 +468,19 @@ def check_exits(alpaca_pos, p):
         curr   = float(pos.get("current_price", entry))
         qty    = int(float(pos.get("qty", 1)))
         pct    = (curr-entry)/entry*100 if entry else 0
-        local  = open_positions.get(sym, {})
+
+        # Rebuild tracking entry after a bot restart (open_positions is in-memory)
+        if sym not in open_positions:
+            open_positions[sym] = {
+                "qty": qty, "entry": entry,
+                "stop": round(entry * (1 - p["stop_loss_pct"] / 100), 2),
+                "trail_hi": curr,
+                "tp":   round(entry * (1 + p["take_profit_pct"] / 100), 2),
+                "partial_taken": False, "original_qty": qty,
+                "sector": get_sector(sym),
+            }
+
+        local  = open_positions[sym]
 
         # ── News kill-switch (highest priority) ───────────────
         if sym.upper() in bad_news:
