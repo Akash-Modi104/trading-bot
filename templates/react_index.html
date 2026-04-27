@@ -1,326 +1,960 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Trading Command Center - React</title>
-    
-    <!-- Tailwind CSS -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-        tailwind.config = {
-            theme: {
-                extend: {
-                    colors: {
-                        darkBg: '#0d1117',
-                        cardBg: '#161b22',
-                        borderColor: '#30363d',
-                        accentBlue: '#58a6ff',
-                        textMuted: '#8b949e',
-                        winGreen: '#39d353',
-                        lossRed: '#f85149',
-                        warningYellow: '#e3b341',
-                    }
-                }
-            }
-        }
-    </script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AlgoTrader Dashboard</title>
 
-    <!-- React & ReactDOM -->
-    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    
-    <!-- Babel for in-browser JSX compilation -->
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 
-    <!-- Lucide Icons -->
-    <script src="https://unpkg.com/lucide@latest"></script>
-    
-    <style>
-        body { background-color: #0d1117; color: #c9d1d9; font-family: 'Segoe UI', sans-serif; }
-        .custom-scroll::-webkit-scrollbar { width: 8px; }
-        .custom-scroll::-webkit-scrollbar-track { background: #0d1117; }
-        .custom-scroll::-webkit-scrollbar-thumb { background: #30363d; border-radius: 4px; }
-        .custom-scroll::-webkit-scrollbar-thumb:hover { background: #58a6ff; }
-    </style>
+  <!-- React 18 -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+
+  <!-- Babel (in-browser JSX) -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <!-- Inter + JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:          #060d18;
+      --bg-card:     #0b1629;
+      --bg-hover:    #0f1e35;
+      --bg-input:    #0d1e38;
+      --border:      #162440;
+      --border-lt:   #1e3356;
+
+      --blue:        #3b82f6;
+      --blue-bg:     rgba(59,130,246,.12);
+      --green:       #10b981;
+      --green-bg:    rgba(16,185,129,.12);
+      --red:         #ef4444;
+      --red-bg:      rgba(239,68,68,.12);
+      --yellow:      #f59e0b;
+      --yellow-bg:   rgba(245,158,11,.12);
+      --purple:      #8b5cf6;
+      --purple-bg:   rgba(139,92,246,.12);
+
+      --text:        #e2e8f0;
+      --muted:       #64748b;
+      --dim:         #334155;
+    }
+
+    html { font-size: 14px; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Inter', system-ui, sans-serif;
+      line-height: 1.5;
+      min-height: 100vh;
+    }
+
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--border-lt); }
+
+    .mono { font-family: 'JetBrains Mono', monospace; }
+
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    thead th {
+      padding: 9px 14px;
+      text-align: left;
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      background: rgba(6,13,24,.9);
+      border-bottom: 1px solid var(--border);
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      white-space: nowrap;
+    }
+    tbody td {
+      padding: 10px 14px;
+      border-bottom: 1px solid rgba(22,36,64,.7);
+      vertical-align: middle;
+    }
+    tbody tr:hover td { background: var(--bg-hover); }
+    tbody tr:last-child td { border-bottom: none; }
+
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    .card-hdr {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .card-title {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .empty {
+      padding: 36px;
+      text-align: center;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+    .btn {
+      padding: 8px 14px;
+      border-radius: 7px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all .15s;
+      border: 1px solid;
+      font-family: 'Inter', sans-serif;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      letter-spacing: .02em;
+    }
+    .btn:hover { filter: brightness(1.2); transform: translateY(-1px); }
+    .btn:active { transform: translateY(0); filter: brightness(.95); }
+    .btn-green  { background: rgba(16,185,129,.12);  color: #10b981; border-color: rgba(16,185,129,.35); }
+    .btn-red    { background: rgba(239,68,68,.12);   color: #ef4444; border-color: rgba(239,68,68,.35); }
+    .btn-blue   { background: rgba(59,130,246,.12);  color: #3b82f6; border-color: rgba(59,130,246,.35); }
+    .btn-yellow { background: rgba(245,158,11,.12);  color: #f59e0b; border-color: rgba(245,158,11,.35); }
+    .btn-ghost  { background: transparent; color: var(--muted); border-color: var(--border); }
+
+    input[type="number"] {
+      width: 100%;
+      background: var(--bg-input);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      padding: 6px 10px;
+      font-size: 14px;
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 700;
+      outline: none;
+      transition: border-color .15s;
+    }
+    input[type="number"]:focus { border-color: var(--blue); }
+
+    @keyframes pulse  { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.5;transform:scale(1.3)} }
+    @keyframes spin   { to { transform: rotate(360deg); } }
+    @keyframes fadein { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
+    .pulse  { animation: pulse  1.8s ease-in-out infinite; }
+    .spin   { animation: spin   1s  linear      infinite; }
+    .fadein { animation: fadein .25s ease; }
+  </style>
 </head>
 <body>
-    <div id="root"></div>
+  <div id="root"></div>
 
-    <script type="text/babel">
-        const { useState, useEffect } = React;
+  <script type="text/babel">
+    const { useState, useEffect, useRef, useCallback } = React;
 
-        const StatCard = ({ label, value, valueClass }) => (
-            <div className="bg-gradient-to-br from-[#21262d] to-cardBg border border-borderColor rounded-xl p-5 text-center transition-all duration-300 hover:border-accentBlue hover:shadow-[0_8px_16px_rgba(88,166,255,0.1)] hover:-translate-y-1">
-                <div className="text-textMuted text-xs uppercase tracking-wider mb-2 font-semibold">{label}</div>
-                <div className={`text-2xl font-bold ${valueClass || 'text-accentBlue'}`}>{value}</div>
+    /* ── Format helpers ──────────────────────────────────────── */
+    const f$ = n =>
+      n == null ? '—' : (n < 0 ? '-' : '') + '$' +
+      Math.abs(n).toLocaleString('en-US', {minimumFractionDigits:2,maximumFractionDigits:2});
+
+    const fpct = n =>
+      n == null ? '—' : (n >= 0 ? '+' : '') + n.toFixed(2) + '%';
+
+    const clr = (n, pos='#10b981', neg='#ef4444', zero='#64748b') =>
+      n == null ? zero : n > 0 ? pos : n < 0 ? neg : zero;
+
+    /* ── Dot ─────────────────────────────────────────────────── */
+    const Dot = ({ on, pulse }) => (
+      <span style={{
+        display: 'inline-block', width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
+        background: on ? '#10b981' : '#ef4444',
+        boxShadow: `0 0 6px ${on ? '#10b981' : '#ef4444'}`,
+        ...(pulse && on ? { animation: 'pulse 1.8s ease-in-out infinite' } : {}),
+      }} />
+    );
+
+    /* ── Badge ───────────────────────────────────────────────── */
+    const Badge = ({ children, color = '#64748b', bg }) => (
+      <span className="badge" style={{
+        color,
+        background: bg || (color + '1a'),
+      }}>{children}</span>
+    );
+
+    /* ── Regime badge ────────────────────────────────────────── */
+    const Regime = ({ v }) => {
+      const map = {
+        bullish:  ['#10b981','Bullish'],
+        trending: ['#3b82f6','Trending'],
+        bearish:  ['#ef4444','Bearish'],
+        choppy:   ['#f59e0b','Choppy'],
+        unknown:  ['#64748b','Unknown'],
+      };
+      const [c, label] = map[v?.toLowerCase()] || map.unknown;
+      return <Badge color={c}>{label}</Badge>;
+    };
+
+    /* ── Win-rate bar ────────────────────────────────────────── */
+    const WinBar = ({ wins = 0, losses = 0 }) => {
+      const total = wins + losses;
+      const pct   = total ? Math.round(wins / total * 100) : 0;
+      return (
+        <div>
+          <div style={{display:'flex',justifyContent:'space-between',marginBottom:5,fontSize:11,fontFamily:'JetBrains Mono'}}>
+            <span style={{color:'#10b981'}}>{wins}W</span>
+            <span style={{color:'#94a3b8',fontWeight:700}}>{pct}%</span>
+            <span style={{color:'#ef4444'}}>{losses}L</span>
+          </div>
+          <div style={{height:5,background:'var(--border)',borderRadius:3,overflow:'hidden'}}>
+            <div style={{
+              height:'100%', width:`${pct}%`, borderRadius:3,
+              background:'linear-gradient(90deg,#10b981,#34d399)',
+              transition:'width .5s ease',
+            }} />
+          </div>
+        </div>
+      );
+    };
+
+    /* ── Confidence bar ──────────────────────────────────────── */
+    const ConfBar = ({ value = 0 }) => {
+      const c = value >= 75 ? '#10b981' : value >= 55 ? '#3b82f6' : '#f59e0b';
+      return (
+        <div style={{display:'flex',alignItems:'center',gap:8}}>
+          <div style={{flex:1,height:4,background:'var(--border)',borderRadius:2,overflow:'hidden'}}>
+            <div style={{height:'100%',width:`${Math.min(value,100)}%`,background:c,borderRadius:2,transition:'width .5s'}} />
+          </div>
+          <span style={{fontSize:12,fontWeight:700,fontFamily:'JetBrains Mono',color:c,width:28,textAlign:'right'}}>{value}</span>
+        </div>
+      );
+    };
+
+    /* ── Metric card ─────────────────────────────────────────── */
+    const MetCard = ({ label, value, sub, color, children }) => (
+      <div style={{
+        background:'var(--bg-card)', border:'1px solid var(--border)', borderRadius:10, padding:'14px 16px',
+        transition:'border-color .15s, transform .15s', cursor:'default',
+      }}
+        onMouseEnter={e=>{ e.currentTarget.style.borderColor='var(--border-lt)'; e.currentTarget.style.transform='translateY(-2px)'; }}
+        onMouseLeave={e=>{ e.currentTarget.style.borderColor='var(--border)'; e.currentTarget.style.transform=''; }}
+      >
+        <div style={{fontSize:10,fontWeight:700,letterSpacing:'.1em',textTransform:'uppercase',color:'var(--muted)',marginBottom:8}}>{label}</div>
+        <div style={{fontSize:22,fontWeight:700,fontFamily:'JetBrains Mono',color:color||'var(--text)',lineHeight:1}}>{value}</div>
+        {sub   && <div style={{fontSize:11,color:'var(--muted)',marginTop:5}}>{sub}</div>}
+        {children && <div style={{marginTop:8}}>{children}</div>}
+      </div>
+    );
+
+    /* ── P&L chart ───────────────────────────────────────────── */
+    const PnLChart = ({ curve }) => {
+      const ref   = useRef(null);
+      const chart = useRef(null);
+      const dep   = JSON.stringify(curve);
+
+      useEffect(() => {
+        if (!ref.current || !window.Chart) return;
+        chart.current?.destroy();
+
+        const labels = curve?.length ? curve.map(p => p.time) : ['09:30','—'];
+        const vals   = curve?.length ? curve.map(p => p.pnl)  : [0, 0];
+        const last   = vals[vals.length - 1] ?? 0;
+        const c      = last >= 0 ? '#10b981' : '#ef4444';
+        const cBg    = last >= 0 ? 'rgba(16,185,129,.1)' : 'rgba(239,68,68,.1)';
+
+        chart.current = new window.Chart(ref.current.getContext('2d'), {
+          type: 'line',
+          data: {
+            labels,
+            datasets: [{
+              data: vals,
+              borderColor: c,
+              backgroundColor: cBg,
+              fill: true,
+              tension: 0.4,
+              pointRadius: vals.length > 20 ? 0 : 4,
+              pointHoverRadius: 5,
+              pointBackgroundColor: c,
+              borderWidth: 2,
+            }]
+          },
+          options: {
+            responsive: true, maintainAspectRatio: false,
+            interaction: { intersect: false, mode: 'index' },
+            plugins: {
+              legend: { display: false },
+              tooltip: {
+                backgroundColor: '#0b1629',
+                borderColor: '#162440',
+                borderWidth: 1,
+                titleColor: '#64748b',
+                bodyColor: c,
+                callbacks: { label: ctx => ' ' + f$(ctx.raw) }
+              }
+            },
+            scales: {
+              x: {
+                grid: { color: 'rgba(22,36,64,.6)' },
+                ticks: { color: '#64748b', font: { size: 10, family: 'JetBrains Mono' }, maxTicksLimit: 8 }
+              },
+              y: {
+                grid: { color: 'rgba(22,36,64,.6)' },
+                ticks: {
+                  color: '#64748b',
+                  font: { size: 10, family: 'JetBrains Mono' },
+                  callback: v => '$' + v.toFixed(0)
+                },
+                grace: '10%',
+              }
+            }
+          }
+        });
+        return () => chart.current?.destroy();
+      }, [dep]);
+
+      return (
+        <div style={{ height: 230, position: 'relative' }}>
+          <canvas ref={ref} />
+          {(!curve || curve.length === 0) && (
+            <div style={{
+              position:'absolute', inset:0, display:'flex', alignItems:'center',
+              justifyContent:'center', color:'var(--muted)', fontSize:13, pointerEvents:'none'
+            }}>No completed trades yet today</div>
+          )}
+        </div>
+      );
+    };
+
+    /* ── Positions table ─────────────────────────────────────── */
+    const Positions = ({ rows = [] }) => (
+      <div className="card" style={{height:'100%'}}>
+        <div className="card-hdr">
+          <span className="card-title">📍 Open Positions</span>
+          <Badge color="#3b82f6">{rows.length} / 3</Badge>
+        </div>
+        <div style={{overflowX:'auto',maxHeight:290,overflowY:'auto'}}>
+          <table>
+            <thead><tr>
+              <th>Symbol</th><th>Qty</th><th>Entry</th><th>Current</th><th>P&L %</th><th>Stop</th>
+            </tr></thead>
+            <tbody>
+              {rows.length === 0
+                ? <tr><td colSpan="6"><div className="empty">No open positions</div></td></tr>
+                : rows.map((p, i) => (
+                  <tr key={i}>
+                    <td style={{borderLeft:`3px solid ${clr(p.pct)}`}}>
+                      <span style={{fontWeight:700}}>{p.sym}</span>
+                    </td>
+                    <td className="mono">{p.qty}</td>
+                    <td className="mono">{f$(p.entry)}</td>
+                    <td className="mono">{f$(p.curr)}</td>
+                    <td className="mono" style={{color:clr(p.pct),fontWeight:700}}>{fpct(p.pct)}</td>
+                    <td className="mono" style={{color:'var(--muted)'}}>{f$(p.stop)}</td>
+                  </tr>
+                ))
+              }
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+
+    /* ── AI Picks ────────────────────────────────────────────── */
+    const Picks = ({ rows = [] }) => (
+      <div className="card" style={{height:'100%'}}>
+        <div className="card-hdr">
+          <span className="card-title">🎯 AI Scanner Picks</span>
+          {rows.length > 0 && <Badge color="#10b981">{rows.length} picks</Badge>}
+        </div>
+        <div style={{maxHeight:290,overflowY:'auto'}}>
+          {rows.length === 0
+            ? <div className="empty"><div style={{fontSize:22,marginBottom:8}}>⏳</div>Waiting for scanner results…</div>
+            : rows.map((p, i) => (
+              <div key={i} style={{
+                padding:'11px 16px',
+                borderBottom:'1px solid rgba(22,36,64,.6)',
+                display:'flex', justifyContent:'space-between', alignItems:'center', gap:12,
+              }}>
+                <div style={{minWidth:0}}>
+                  <div style={{fontWeight:700,fontSize:15}}>{p.symbol}</div>
+                  <div style={{fontSize:11,color:'var(--muted)',marginTop:2}}>
+                    {p.sector}
+                    {p.rel_volume != null && <span style={{color:'#3b82f6',marginLeft:6}}>{p.rel_volume}× vol</span>}
+                    {p.pre_market_gap > 0 && <span style={{color:'#f59e0b',marginLeft:6}}>+{p.pre_market_gap}% gap</span>}
+                  </div>
+                  <div style={{fontSize:11,color:'#94a3b8',marginTop:3,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:200}}
+                    title={p.reason}>{p.reason}</div>
+                </div>
+                <div style={{flexShrink:0,minWidth:120,textAlign:'right'}}>
+                  <ConfBar value={p.confidence} />
+                  {p.news_sentiment && (
+                    <div style={{marginTop:5}}>
+                      <Badge
+                        color={p.news_sentiment==='positive'?'#10b981':p.news_sentiment==='negative'?'#ef4444':'#64748b'}
+                      >{p.news_sentiment}</Badge>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))
+          }
+        </div>
+      </div>
+    );
+
+    /* ── Trade history ───────────────────────────────────────── */
+    const Trades = ({ rows = [], full }) => (
+      <div className="card" style={{height:'100%'}}>
+        <div className="card-hdr">
+          <span className="card-title">📋 {full ? 'Full Trade History' : "Today's Trades"}</span>
+          <Badge color="#64748b">{rows.length}</Badge>
+        </div>
+        <div style={{overflowX:'auto',maxHeight: full ? 600 : 290, overflowY:'auto'}}>
+          <table>
+            <thead><tr>
+              <th>Time</th><th>Symbol</th><th>Side</th><th>Qty</th><th>Price</th><th>P&L</th><th>Reason</th>
+            </tr></thead>
+            <tbody>
+              {rows.length === 0
+                ? <tr><td colSpan="7"><div className="empty">No trades today</div></td></tr>
+                : rows.map((t, i) => {
+                  const buy  = t.action?.toLowerCase() === 'buy';
+                  const hasPnl = !buy && t.pct != null;
+                  return (
+                    <tr key={i}>
+                      <td className="mono" style={{color:'var(--muted)',fontSize:11}}>{String(t.time||'').substring(11,19)}</td>
+                      <td style={{fontWeight:700,borderLeft:`3px solid ${buy?'#10b981':'#ef4444'}`}}>{t.sym}</td>
+                      <td>
+                        <Badge color={buy?'#10b981':'#ef4444'}>{t.action?.toUpperCase()}</Badge>
+                      </td>
+                      <td className="mono">{t.qty||'—'}</td>
+                      <td className="mono">{f$(t.price)}</td>
+                      <td className="mono" style={{color:hasPnl?clr(t.pct):'var(--muted)',fontWeight:hasPnl?700:400}}>
+                        {hasPnl ? fpct(t.pct) : '—'}
+                      </td>
+                      <td style={{color:'var(--muted)',fontSize:11,maxWidth:140,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}
+                        title={t.reason}>{t.reason?.substring(0,35)}{t.reason?.length>35?'…':''}</td>
+                    </tr>
+                  );
+                })
+              }
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+
+    /* ── Activity log ────────────────────────────────────────── */
+    const Log = ({ rows = [] }) => (
+      <div className="card" style={{height:'100%'}}>
+        <div className="card-hdr"><span className="card-title">📟 Activity Log</span></div>
+        <div style={{
+          fontFamily:'JetBrains Mono,monospace', fontSize:12, lineHeight:1.6,
+          padding:'12px 16px', maxHeight:280, overflowY:'auto',
+          background:'rgba(6,13,24,.6)',
+        }}>
+          {rows.length === 0
+            ? <span style={{color:'var(--muted)',fontStyle:'italic'}}>No activity yet</span>
+            : rows.map((item, i) => (
+              <div key={i} style={{marginBottom:4,display:'flex',gap:8}}>
+                <span style={{color:'#3b82f6',flexShrink:0}}>[{item.t}]</span>
+                <span style={{color:'#94a3b8'}}>{item.m}</span>
+              </div>
+            ))
+          }
+        </div>
+      </div>
+    );
+
+    /* ── Controls ────────────────────────────────────────────── */
+    const Controls = ({ onAction, paused, pauseReason }) => {
+      const [busy, setBusy] = useState(null);
+      const [msg,  setMsg]  = useState(null);
+
+      const act = async (action) => {
+        if (action === 'close_all' && !confirm('Close ALL open positions now?')) return;
+        setBusy(action);
+        try {
+          const r = await fetch('/api/action', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({action}),
+          });
+          const d = await r.json();
+          setMsg({ ok: d.status === 'success', text: d.status === 'success' ? `✓ ${action} done` : d.message });
+        } catch {
+          setMsg({ ok: false, text: 'Request failed' });
+        } finally {
+          setBusy(null);
+          setTimeout(() => setMsg(null), 3000);
+        }
+      };
+
+      return (
+        <div className="card">
+          <div className="card-hdr"><span className="card-title">⚙️ Bot Controls</span></div>
+          <div style={{padding:14}}>
+            {paused && (
+              <div style={{
+                background:'rgba(245,158,11,.1)', border:'1px solid rgba(245,158,11,.3)',
+                borderRadius:7, padding:'9px 12px', marginBottom:12,
+                color:'#f59e0b', fontSize:12, display:'flex', alignItems:'center', gap:6,
+              }}>⚠️ {pauseReason || 'Bot is paused'}</div>
+            )}
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
+              {[
+                ['start',     'btn-green',  '▶ Start'],
+                ['stop',      'btn-red',    '⏸ Stop'],
+                ['scan',      'btn-blue',   '🔍 Scan'],
+                ['close_all', 'btn-yellow', '✕ Close All'],
+              ].map(([a, cls, label]) => (
+                <button key={a} className={`btn ${cls}`} onClick={() => act(a)}>
+                  {busy === a ? <span className="spin" style={{width:12,height:12,border:'2px solid currentColor',borderTopColor:'transparent',borderRadius:'50%',display:'inline-block'}} /> : label}
+                </button>
+              ))}
             </div>
-        );
+            {msg && (
+              <div style={{
+                marginTop:10, padding:'8px 12px', borderRadius:6, fontSize:12,
+                background: msg.ok ? 'rgba(16,185,129,.1)' : 'rgba(239,68,68,.1)',
+                color:       msg.ok ? '#10b981'            : '#ef4444',
+              }}>{msg.text}</div>
+            )}
+          </div>
+        </div>
+      );
+    };
 
-        const Dashboard = () => {
-            const [data, setData] = useState(null);
-            const [loading, setLoading] = useState(true);
-
-            const fetchData = async () => {
-                try {
-                    const res = await fetch('/api/data');
-                    const json = await res.json();
-                    setData(json);
-                    setLoading(false);
-                } catch (err) {
-                    console.error("Failed to fetch data:", err);
-                }
-            };
-
-            useEffect(() => {
-                fetchData();
-                const interval = setInterval(fetchData, 20000);
-                return () => clearInterval(interval);
-            }, []);
-
-            useEffect(() => {
-                lucide.createIcons();
-            });
-
-            const handleAction = async (action) => {
-                if (action === 'close_all' && !confirm('Are you sure you want to close ALL positions?')) return;
-                
-                try {
-                    await fetch('/api/action', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ action })
-                    });
-                    fetchData(); // Refresh immediately after action
-                } catch (err) {
-                    console.error("Action failed:", err);
-                }
-            };
-
-            if (loading || !data) return (
-                <div className="flex h-screen items-center justify-center text-accentBlue text-xl">
-                    <i data-lucide="loader-2" className="animate-spin mr-3"></i> Loading Command Center...
-                </div>
-            );
-
-            const { metrics, stats, picks, trades, positions, activity_log, timestamp } = data;
-
+    /* ── System health ───────────────────────────────────────── */
+    const Health = ({ health }) => {
+      const svcs = [
+        { key: 'trading-bot',       icon: '🤖', label: 'Trading Bot'  },
+        { key: 'local-scanner',     icon: '🔍', label: 'AI Scanner'   },
+        { key: 'trading-dashboard', icon: '📊', label: 'Dashboard'    },
+      ];
+      return (
+        <div className="card">
+          <div className="card-hdr"><span className="card-title">💻 System Health</span></div>
+          {[...svcs, { key: '_ollama', icon: '🧠', label: 'Ollama LLM' }].map(s => {
+            const st = s.key === '_ollama'
+              ? (health?.ollama === 'online' ? 'running' : health?.ollama || 'unknown')
+              : (health?.services?.[s.key] || 'unknown');
+            const ok = st === 'running' || st === 'online';
             return (
-                <div className="max-w-[1400px] mx-auto p-5">
-                    {/* Header */}
-                    <header className="flex flex-col md:flex-row justify-between items-center mb-8 border-b-2 border-borderColor pb-5 gap-4">
-                        <div>
-                            <h1 className="text-accentBlue text-3xl font-bold mb-2 drop-shadow-[0_2px_10px_rgba(88,166,255,0.3)] flex items-center">
-                                <i data-lucide="bar-chart-2" className="mr-3"></i> Trading Command Center
-                            </h1>
-                            <div className="text-textMuted text-sm">Real-time bot performance | Last update: {timestamp}</div>
-                        </div>
-                        <div className="flex flex-wrap gap-3">
-                            <button onClick={() => handleAction('start')} className="px-5 py-2.5 bg-[#238636] hover:bg-[#2ea043] text-white rounded-lg font-bold transition-all flex items-center shadow-lg hover:-translate-y-0.5">
-                                <i data-lucide="play" className="mr-2 w-4 h-4"></i> Start Bot
-                            </button>
-                            <button onClick={() => handleAction('stop')} className="px-5 py-2.5 bg-[#b91c1c] hover:bg-[#dc2626] text-white rounded-lg font-bold transition-all flex items-center shadow-lg hover:-translate-y-0.5">
-                                <i data-lucide="pause" className="mr-2 w-4 h-4"></i> Stop Bot
-                            </button>
-                            <button onClick={() => handleAction('scan')} className="px-5 py-2.5 bg-[#1d4ed8] hover:bg-[#2563eb] text-white rounded-lg font-bold transition-all flex items-center shadow-lg hover:-translate-y-0.5">
-                                <i data-lucide="search" className="mr-2 w-4 h-4"></i> Scan Now
-                            </button>
-                            <button onClick={() => handleAction('close_all')} className="px-5 py-2.5 bg-[#92400e] hover:bg-[#b45309] text-white rounded-lg font-bold transition-all flex items-center shadow-lg hover:-translate-y-0.5">
-                                <i data-lucide="alert-triangle" className="mr-2 w-4 h-4"></i> Close All
-                            </button>
-                        </div>
-                    </header>
-
-                    {/* Live Metrics */}
-                    <section className="bg-cardBg border border-borderColor rounded-xl p-5 mb-6 shadow-[0_4px_12px_rgba(0,0,0,0.4)]">
-                        <h2 className="text-accentBlue text-xl border-l-4 border-accentBlue pl-3 mb-5 uppercase tracking-wide flex items-center">
-                            <i data-lucide="activity" className="mr-2"></i> Live Account Metrics
-                        </h2>
-                        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
-                            <StatCard label="Account Equity" value={`$${metrics.equity.toLocaleString()}`} valueClass={metrics.equity >= 100000 ? 'text-winGreen' : 'text-lossRed'} />
-                            <StatCard label="Buying Power" value={`$${metrics.buying_power.toLocaleString()}`} />
-                            <StatCard label="Today's P&L" value={`${metrics.daily_pnl.toFixed(2)}%`} valueClass={metrics.daily_pnl >= 0 ? 'text-winGreen' : 'text-lossRed'} />
-                            <StatCard label="Trades Executed" value={metrics.trades_count} />
-                            <StatCard label="VIX Level" value={metrics.vix.toFixed(1)} valueClass={metrics.vix < 20 ? 'text-winGreen' : (metrics.vix < 28 ? 'text-warningYellow' : 'text-lossRed')} />
-                            <StatCard label="Market Regime" value={metrics.regime.toUpperCase()} />
-                            <div className="bg-gradient-to-br from-[#21262d] to-cardBg border border-borderColor rounded-xl p-5 text-center transition-all">
-                                <div className="text-textMuted text-xs uppercase tracking-wider mb-2 font-semibold">Bot Status</div>
-                                <span className={`inline-block px-3 py-1 rounded-md text-sm font-bold ${metrics.paused ? 'bg-[#3a2a1a] text-warningYellow' : 'bg-[#1a3a1a] text-winGreen'}`}>
-                                    {metrics.paused ? 'PAUSED' : 'ACTIVE'}
-                                </span>
-                            </div>
-                        </div>
-                    </section>
-
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-                        {/* Open Positions */}
-                        <section className="bg-cardBg border border-borderColor rounded-xl p-5 shadow-[0_4px_12px_rgba(0,0,0,0.4)]">
-                            <h2 className="text-accentBlue text-xl border-l-4 border-accentBlue pl-3 mb-5 uppercase tracking-wide flex items-center">
-                                <i data-lucide="map-pin" className="mr-2"></i> Open Positions ({positions.length})
-                            </h2>
-                            <div className="overflow-x-auto">
-                                <table className="w-full text-left text-sm">
-                                    <thead>
-                                        <tr className="border-b-2 border-borderColor text-accentBlue uppercase tracking-wider">
-                                            <th className="p-3 bg-darkBg">Symbol</th>
-                                            <th className="p-3 bg-darkBg">Qty</th>
-                                            <th className="p-3 bg-darkBg">Entry</th>
-                                            <th className="p-3 bg-darkBg">Current</th>
-                                            <th className="p-3 bg-darkBg">P&L</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {positions.length === 0 ? (
-                                            <tr><td colSpan="5" className="p-4 text-center text-textMuted border-b border-[#21262d]">No open positions</td></tr>
-                                        ) : positions.map((p, i) => (
-                                            <tr key={i} className={`hover:bg-[#21262d] border-b border-[#21262d] border-l-4 ${p.pct > 0 ? 'border-l-winGreen' : 'border-l-lossRed'}`}>
-                                                <td className="p-3 font-bold">{p.sym}</td>
-                                                <td className="p-3">{p.qty}</td>
-                                                <td className="p-3">${parseFloat(p.entry).toFixed(2)}</td>
-                                                <td className="p-3">${parseFloat(p.curr).toFixed(2)}</td>
-                                                <td className={`p-3 font-bold ${p.pct > 0 ? 'text-winGreen' : 'text-lossRed'}`}>{p.pct > 0 ? '+' : ''}{p.pct.toFixed(2)}%</td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
-                        </section>
-
-                        {/* AI-Selected Stocks */}
-                        <section className="bg-cardBg border border-borderColor rounded-xl p-5 shadow-[0_4px_12px_rgba(0,0,0,0.4)]">
-                            <h2 className="text-accentBlue text-xl border-l-4 border-accentBlue pl-3 mb-5 uppercase tracking-wide flex items-center">
-                                <i data-lucide="target" className="mr-2"></i> Today's AI Watchlist
-                            </h2>
-                            {picks.length > 0 ? (
-                                <div className="bg-[#1a3a1a] border-l-4 border-winGreen text-winGreen p-3 rounded-lg mb-4 flex items-center">
-                                    <i data-lucide="check-circle" className="mr-2 w-5 h-5"></i> {picks.length} stocks selected by AI scanner
-                                </div>
-                            ) : (
-                                <div className="bg-[#3a2a1a] border-l-4 border-warningYellow text-warningYellow p-3 rounded-lg mb-4 flex items-center">
-                                    <i data-lucide="clock" className="mr-2 w-5 h-5"></i> Waiting for first scan of the day
-                                </div>
-                            )}
-                            <div className="overflow-y-auto max-h-[300px] custom-scroll pr-2">
-                                {picks.length === 0 ? (
-                                    <div className="text-center text-textMuted py-4">Waiting for scanner results...</div>
-                                ) : picks.map((p, i) => (
-                                    <div key={i} className="p-3 border-b border-borderColor flex justify-between items-center hover:bg-[#21262d] rounded transition-colors">
-                                        <div className="flex flex-col">
-                                            <span className="font-bold text-lg">{p.symbol}</span>
-                                            <span className="text-xs text-textMuted uppercase">{p.sector}</span>
-                                        </div>
-                                        <div className="text-right">
-                                            <div className="text-accentBlue font-bold text-lg">{p.confidence}% AI Score</div>
-                                            <div className="text-xs text-textMuted max-w-[200px] truncate" title={p.reason}>{p.reason}</div>
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        </section>
-                    </div>
-
-                    {/* Trade Execution Log */}
-                    <section className="bg-cardBg border border-borderColor rounded-xl p-5 mb-6 shadow-[0_4px_12px_rgba(0,0,0,0.4)]">
-                        <h2 className="text-accentBlue text-xl border-l-4 border-accentBlue pl-3 mb-5 uppercase tracking-wide flex items-center">
-                            <i data-lucide="list" className="mr-2"></i> Trade Execution Log (Today)
-                        </h2>
-                        <div className="overflow-x-auto">
-                            <table className="w-full text-left text-sm">
-                                <thead>
-                                    <tr className="border-b-2 border-borderColor text-accentBlue uppercase tracking-wider">
-                                        <th className="p-3 bg-darkBg">Time</th>
-                                        <th className="p-3 bg-darkBg">Symbol</th>
-                                        <th className="p-3 bg-darkBg">Action</th>
-                                        <th className="p-3 bg-darkBg">Qty</th>
-                                        <th className="p-3 bg-darkBg">Price</th>
-                                        <th className="p-3 bg-darkBg">P&L</th>
-                                        <th className="p-3 bg-darkBg">Reason</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {trades.length === 0 ? (
-                                        <tr><td colSpan="7" className="p-4 text-center text-textMuted border-b border-[#21262d]">No trades yet today</td></tr>
-                                    ) : trades.map((t, i) => {
-                                        const isBuy = t.action.toUpperCase() === 'BUY';
-                                        return (
-                                            <tr key={i} className={`hover:bg-[#21262d] border-b border-[#21262d] border-l-4 ${isBuy ? 'border-l-winGreen' : 'border-l-lossRed'}`}>
-                                                <td className="p-3 text-textMuted">{t.time.substring(11, 19)}</td>
-                                                <td className="p-3 font-bold">{t.sym}</td>
-                                                <td className="p-3">
-                                                    <span className={`px-2 py-1 rounded text-xs font-bold ${isBuy ? 'bg-[#1a3a1a] text-winGreen' : 'bg-[#3a1a1a] text-lossRed'}`}>
-                                                        {t.action.toUpperCase()}
-                                                    </span>
-                                                </td>
-                                                <td className="p-3">{t.qty}</td>
-                                                <td className="p-3">${parseFloat(t.price).toFixed(2)}</td>
-                                                <td className={`p-3 font-bold ${t.pct > 0 ? 'text-winGreen' : (t.pct < 0 ? 'text-lossRed' : '')}`}>
-                                                    {t.pct ? `${t.pct > 0 ? '+' : ''}${t.pct.toFixed(2)}%` : '-'}
-                                                </td>
-                                                <td className="p-3 text-textMuted max-w-xs truncate" title={t.reason}>{t.reason}</td>
-                                            </tr>
-                                        );
-                                    })}
-                                </tbody>
-                            </table>
-                        </div>
-                    </section>
-
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                        {/* Daily Performance */}
-                        <section className="bg-cardBg border border-borderColor rounded-xl p-5 shadow-[0_4px_12px_rgba(0,0,0,0.4)]">
-                            <h2 className="text-accentBlue text-xl border-l-4 border-accentBlue pl-3 mb-5 uppercase tracking-wide flex items-center">
-                                <i data-lucide="pie-chart" className="mr-2"></i> Daily Performance
-                            </h2>
-                            <div className="space-y-3">
-                                <div className="flex justify-between items-center p-3 border-b border-[#21262d]">
-                                    <span className="text-textMuted">Total Trades</span>
-                                    <span className="text-xl font-bold text-accentBlue">{stats.total_trades}</span>
-                                </div>
-                                <div className="flex justify-between items-center p-3 border-b border-[#21262d]">
-                                    <span className="text-textMuted">Winning Trades</span>
-                                    <span className="text-xl font-bold text-winGreen">{stats.wins}</span>
-                                </div>
-                                <div className="flex justify-between items-center p-3 border-b border-[#21262d]">
-                                    <span className="text-textMuted">Losing Trades</span>
-                                    <span className="text-xl font-bold text-lossRed">{stats.losses}</span>
-                                </div>
-                                <div className="flex justify-between items-center p-3 border-b border-[#21262d]">
-                                    <span className="text-textMuted">Win Rate</span>
-                                    <span className="text-xl font-bold text-accentBlue">{stats.win_rate}%</span>
-                                </div>
-                                <div className="flex justify-between items-center p-3 border-b border-[#21262d]">
-                                    <span className="text-textMuted">Avg Win</span>
-                                    <span className="text-xl font-bold text-winGreen">+{stats.avg_win.toFixed(2)}%</span>
-                                </div>
-                                <div className="flex justify-between items-center p-3">
-                                    <span className="text-textMuted">Avg Loss</span>
-                                    <span className="text-xl font-bold text-lossRed">{stats.avg_loss.toFixed(2)}%</span>
-                                </div>
-                            </div>
-                        </section>
-
-                        {/* Activity Log */}
-                        <section className="bg-cardBg border border-borderColor rounded-xl p-5 shadow-[0_4px_12px_rgba(0,0,0,0.4)] flex flex-col">
-                            <h2 className="text-accentBlue text-xl border-l-4 border-accentBlue pl-3 mb-5 uppercase tracking-wide flex items-center">
-                                <i data-lucide="terminal" className="mr-2"></i> Activity Log
-                            </h2>
-                            <div className="bg-darkBg rounded-lg p-4 font-mono text-sm overflow-y-auto max-h-[300px] custom-scroll flex-1 border border-[#21262d]">
-                                {activity_log.length === 0 ? (
-                                    <div className="text-textMuted italic">No activity yet</div>
-                                ) : activity_log.map((log, i) => (
-                                    <div key={i} className="mb-2">
-                                        <span className="text-accentBlue">[{log.t || "00:00:00"}]</span> <span className="text-[#c9d1d9]">{log.m}</span>
-                                    </div>
-                                ))}
-                            </div>
-                        </section>
-                    </div>
+              <div key={s.key} style={{
+                display:'flex', alignItems:'center', justifyContent:'space-between',
+                padding:'10px 14px', borderBottom:'1px solid rgba(22,36,64,.5)',
+              }}>
+                <span style={{fontSize:13}}>{s.icon} {s.label}</span>
+                <div style={{display:'flex',alignItems:'center',gap:7}}>
+                  <Dot on={ok} />
+                  <span style={{fontSize:12,fontWeight:600,color:ok?'#10b981':'#ef4444'}}>{st.toUpperCase()}</span>
                 </div>
+              </div>
             );
-        };
+          })}
+        </div>
+      );
+    };
 
-        const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(<Dashboard />);
-    </script>
+    /* ── Strategy editor ─────────────────────────────────────── */
+    const Strategy = ({ params }) => {
+      const [editing, setEditing] = useState(false);
+      const [form,    setForm]    = useState({});
+      const [saved,   setSaved]   = useState(false);
+
+      useEffect(() => { if (params) setForm(params); }, [JSON.stringify(params)]);
+
+      const defs = [
+        { key:'ema_fast',            label:'EMA Fast',             desc:'Fast EMA period'               },
+        { key:'ema_slow',            label:'EMA Slow',             desc:'Slow EMA period'               },
+        { key:'rsi_buy_min',         label:'RSI Min',              desc:'Min RSI to enter'              },
+        { key:'rsi_buy_max',         label:'RSI Max',              desc:'Max RSI to enter'              },
+        { key:'stop_loss_pct',       label:'Stop Loss %',          desc:'Per-trade stop loss'           },
+        { key:'take_profit_pct',     label:'Take Profit %',        desc:'Per-trade target'              },
+        { key:'partial_tp_pct',      label:'Partial TP %',         desc:'Sell 50% at this gain'         },
+        { key:'max_positions',       label:'Max Positions',        desc:'Max concurrent trades'         },
+        { key:'budget_per_trade',    label:'Budget / Trade $',     desc:'Dollar size per trade'         },
+        { key:'min_confidence',      label:'Min AI Confidence',    desc:'AI score threshold (0-100)'    },
+        { key:'daily_loss_limit_pct',label:'Daily Loss Limit %',   desc:'Pause trading after this loss' },
+        { key:'vix_pause_threshold', label:'VIX Pause',            desc:'Reduce size above this'        },
+        { key:'vix_stop_threshold',  label:'VIX Stop',             desc:'Stop trading above this'       },
+        { key:'rel_vol_min',         label:'Min Rel Volume',       desc:'Relative volume threshold'     },
+      ];
+
+      const save = async () => {
+        try {
+          await fetch('/api/config', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify(form),
+          });
+          setSaved(true); setEditing(false);
+          setTimeout(() => setSaved(false), 3000);
+        } catch {}
+      };
+
+      return (
+        <div className="card fadein">
+          <div className="card-hdr">
+            <span className="card-title">⚙️ Strategy Parameters</span>
+            <div style={{display:'flex',gap:8,alignItems:'center'}}>
+              {saved && <span style={{color:'#10b981',fontSize:12,fontWeight:600}}>✓ Saved</span>}
+              {editing
+                ? <>
+                    <button className="btn btn-ghost" style={{padding:'4px 12px',fontSize:12}} onClick={() => setEditing(false)}>Cancel</button>
+                    <button className="btn btn-green" style={{padding:'4px 12px',fontSize:12}} onClick={save}>Save Changes</button>
+                  </>
+                : <button className="btn btn-blue" style={{padding:'4px 12px',fontSize:12}} onClick={() => setEditing(true)}>✏️ Edit</button>
+              }
+            </div>
+          </div>
+          <div style={{padding:16, display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(260px,1fr))', gap:12}}>
+            {defs.map(d => (
+              <div key={d.key} style={{
+                background:'rgba(6,13,24,.7)', border:'1px solid var(--border)',
+                borderRadius:8, padding:'12px 14px',
+              }}>
+                <div style={{fontSize:10,color:'var(--muted)',fontWeight:700,letterSpacing:'.06em',textTransform:'uppercase',marginBottom:7}}>{d.label}</div>
+                {editing
+                  ? <input type="number" step="any"
+                      value={form[d.key] ?? ''}
+                      onChange={e => setForm(f => ({...f, [d.key]: parseFloat(e.target.value)}))}
+                    />
+                  : <div style={{fontSize:20,fontWeight:700,fontFamily:'JetBrains Mono',color:'#3b82f6'}}>
+                      {params?.[d.key] ?? '—'}
+                    </div>
+                }
+                <div style={{fontSize:11,color:'#475569',marginTop:5}}>{d.desc}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    };
+
+    /* ── System tab ──────────────────────────────────────────── */
+    const SystemTab = ({ health, data }) => {
+      const m = data?.metrics || {};
+      const rows = [
+        { label:'Bot Started',    value: m.started  || '—' },
+        { label:'Last Scan',      value: m.last_scan || '—' },
+        { label:'Regime',         value: <Regime v={m.regime} /> },
+        { label:'VIX',            value: <span style={{fontFamily:'JetBrains Mono',fontWeight:700,color:m.vix==null?'#64748b':m.vix<20?'#10b981':m.vix<28?'#f59e0b':'#ef4444'}}>{m.vix?.toFixed(1)??'—'}</span> },
+        { label:'Trading Paused', value: <span style={{color:m.paused?'#f59e0b':'#10b981',fontWeight:600}}>{m.paused?'Yes':'No'}</span> },
+        { label:'Open Positions', value: <span style={{fontFamily:'JetBrains Mono',fontWeight:700}}>{m.open_positions??0} / {data?.params?.max_positions??3}</span> },
+      ];
+      return (
+        <div className="fadein" style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16}}>
+          <Health health={health} />
+          <div className="card">
+            <div className="card-hdr"><span className="card-title">📈 Runtime Info</span></div>
+            {rows.map((r, i) => (
+              <div key={i} style={{
+                display:'flex', justifyContent:'space-between', alignItems:'center',
+                padding:'11px 16px', borderBottom:'1px solid rgba(22,36,64,.5)',
+              }}>
+                <span style={{color:'var(--muted)',fontSize:13}}>{r.label}</span>
+                <span style={{fontWeight:500,fontSize:13}}>{r.value}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    };
+
+    /* ── Daily stats card ────────────────────────────────────── */
+    const DailyStats = ({ stats = {} }) => (
+      <div className="card">
+        <div className="card-hdr"><span className="card-title">📊 Daily Stats</span></div>
+        <div style={{padding:'4px 0'}}>
+          {[
+            { label:'Total Trades',   value: stats.total_trades ?? 0,    color:'#3b82f6'  },
+            { label:'Win Rate',       value: `${stats.win_rate ?? 0}%`,  color:'#3b82f6'  },
+            { label:'Avg Win',        value: `+${stats.avg_win?.toFixed(2)??0}%`, color:'#10b981' },
+            { label:'Avg Loss',       value: `${stats.avg_loss?.toFixed(2)??0}%`, color:'#ef4444' },
+          ].map((r, i) => (
+            <div key={i} style={{
+              display:'flex', justifyContent:'space-between', alignItems:'center',
+              padding:'10px 16px', borderBottom:'1px solid rgba(22,36,64,.5)',
+            }}>
+              <span style={{color:'var(--muted)',fontSize:13}}>{r.label}</span>
+              <span style={{fontFamily:'JetBrains Mono',fontWeight:700,fontSize:15,color:r.color}}>{r.value}</span>
+            </div>
+          ))}
+          <div style={{padding:'10px 16px'}}>
+            <WinBar wins={stats.wins??0} losses={stats.losses??0} />
+          </div>
+        </div>
+      </div>
+    );
+
+    /* ══════════════════════════════════════════════════════════ */
+    /*  APP                                                       */
+    /* ══════════════════════════════════════════════════════════ */
+    const App = () => {
+      const [data,      setData]      = useState(null);
+      const [health,    setHealth]    = useState(null);
+      const [tab,       setTab]       = useState('overview');
+      const [connected, setConnected] = useState(false);
+      const [clock,     setClock]     = useState('');
+
+      /* Clock */
+      useEffect(() => {
+        const tick = () => setClock(
+          new Date().toLocaleTimeString('en-US', {
+            timeZone:'America/New_York', hour12:false,
+            hour:'2-digit', minute:'2-digit', second:'2-digit',
+          }) + ' ET'
+        );
+        tick();
+        const id = setInterval(tick, 1000);
+        return () => clearInterval(id);
+      }, []);
+
+      /* SSE real-time feed */
+      useEffect(() => {
+        let es;
+        const connect = () => {
+          es = new EventSource('/api/stream');
+          es.addEventListener('snapshot', e => {
+            try { setData(JSON.parse(e.data)); setConnected(true); } catch {}
+          });
+          es.onerror = () => {
+            setConnected(false);
+            es.close();
+            setTimeout(connect, 5000);
+          };
+        };
+        connect();
+        return () => es?.close();
+      }, []);
+
+      /* Health polling */
+      useEffect(() => {
+        const poll = () => fetch('/api/health').then(r => r.json()).then(setHealth).catch(() => {});
+        poll();
+        const id = setInterval(poll, 15000);
+        return () => clearInterval(id);
+      }, []);
+
+      const sendAction = (action) =>
+        fetch('/api/action', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({action}),
+        });
+
+      if (!data) return (
+        <div style={{height:'100vh',display:'flex',alignItems:'center',justifyContent:'center',flexDirection:'column',gap:12,color:'var(--muted)'}}>
+          <div style={{width:32,height:32,border:'3px solid var(--border)',borderTopColor:'#3b82f6',borderRadius:'50%'}} className="spin" />
+          <div>Connecting to trading server…</div>
+        </div>
+      );
+
+      const { metrics: m, stats, picks, trades, positions, activity_log, curve, params } = data;
+      const paused = m?.paused;
+
+      const TABS = [
+        { id:'overview',  label:'📊 Overview' },
+        { id:'trades',    label:'📋 Trades'   },
+        { id:'strategy',  label:'⚙️ Strategy' },
+        { id:'system',    label:'💻 System'   },
+      ];
+
+      return (
+        <div>
+
+          {/* ── Header ─────────────────────────────────────────── */}
+          <header style={{
+            background:'var(--bg-card)', borderBottom:'1px solid var(--border)',
+            position:'sticky', top:0, zIndex:100,
+          }}>
+            <div style={{
+              display:'flex', alignItems:'center', justifyContent:'space-between',
+              padding:'10px 20px', flexWrap:'wrap', gap:12,
+              maxWidth:1640, margin:'0 auto',
+            }}>
+              {/* Logo */}
+              <div style={{display:'flex',alignItems:'center',gap:10,flexShrink:0}}>
+                <span style={{fontSize:26}}>📈</span>
+                <div>
+                  <div style={{fontWeight:700,fontSize:16,letterSpacing:'-.02em'}}>AlgoTrader</div>
+                  <div style={{fontSize:10,color:'var(--muted)',letterSpacing:'.08em',textTransform:'uppercase'}}>Alpaca Paper</div>
+                </div>
+              </div>
+
+              {/* Status + metrics row */}
+              <div style={{display:'flex',alignItems:'center',gap:20,flexWrap:'wrap'}}>
+
+                {/* Live dot */}
+                <div style={{display:'flex',alignItems:'center',gap:6}}>
+                  <Dot on={connected} pulse />
+                  <span style={{fontSize:12,fontWeight:600,color:connected?'#10b981':'#ef4444'}}>{connected?'LIVE':'OFFLINE'}</span>
+                </div>
+
+                {/* Bot status */}
+                <div style={{display:'flex',alignItems:'center',gap:6}}>
+                  <Dot on={!paused} pulse={!paused} />
+                  <span style={{fontSize:12,fontWeight:600,color:paused?'#f59e0b':'var(--muted)'}}>BOT: {paused?'PAUSED':'RUNNING'}</span>
+                </div>
+
+                <Regime v={m?.regime} />
+
+                {/* Equity */}
+                <div style={{textAlign:'right'}}>
+                  <div style={{fontSize:10,color:'var(--muted)',marginBottom:2,letterSpacing:'.06em',textTransform:'uppercase'}}>Equity</div>
+                  <div style={{fontSize:16,fontWeight:700,fontFamily:'JetBrains Mono'}}>{f$(m?.equity)}</div>
+                </div>
+
+                {/* Day P&L */}
+                <div style={{textAlign:'right'}}>
+                  <div style={{fontSize:10,color:'var(--muted)',marginBottom:2,letterSpacing:'.06em',textTransform:'uppercase'}}>Day P&L</div>
+                  <div style={{fontSize:16,fontWeight:700,fontFamily:'JetBrains Mono',color:clr(m?.daily_pnl)}}>
+                    {f$(m?.daily_pnl)}
+                    <span style={{fontSize:12,opacity:.75,marginLeft:4}}>({fpct(m?.daily_pnl_pct)})</span>
+                  </div>
+                </div>
+
+                {/* Clock */}
+                <div style={{textAlign:'right',flexShrink:0}}>
+                  <div style={{fontSize:10,color:'var(--muted)',marginBottom:2,letterSpacing:'.06em',textTransform:'uppercase'}}>Time</div>
+                  <div style={{fontSize:14,fontWeight:600,fontFamily:'JetBrains Mono'}}>{clock}</div>
+                </div>
+              </div>
+            </div>
+
+            {/* Nav tabs */}
+            <div style={{display:'flex',padding:'0 16px',borderTop:'1px solid var(--border)',maxWidth:1640,margin:'0 auto'}}>
+              {TABS.map(t => (
+                <button key={t.id} onClick={() => setTab(t.id)} style={{
+                  padding:'9px 16px', fontSize:13, fontWeight:500,
+                  background:'none', border:'none',
+                  color: tab === t.id ? '#3b82f6' : 'var(--muted)',
+                  borderBottom: `2px solid ${tab === t.id ? '#3b82f6' : 'transparent'}`,
+                  cursor:'pointer', transition:'color .15s',
+                }}>{t.label}</button>
+              ))}
+            </div>
+          </header>
+
+          {/* ── Page content ───────────────────────────────────── */}
+          <main style={{padding:'16px 20px 48px',maxWidth:1640,margin:'0 auto'}}>
+
+            {/* OVERVIEW */}
+            {tab === 'overview' && (
+              <div className="fadein">
+
+                {/* Paused banner */}
+                {paused && (
+                  <div style={{
+                    background:'rgba(245,158,11,.08)', border:'1px solid rgba(245,158,11,.3)',
+                    borderRadius:8, padding:'11px 16px', marginBottom:16,
+                    color:'#f59e0b', display:'flex', alignItems:'center', gap:8, fontSize:13,
+                  }}>
+                    <span style={{fontSize:18}}>⚠️</span>
+                    <span style={{fontWeight:700}}>Trading Paused</span>
+                    {m?.pause_reason && <span style={{color:'#94a3b8'}}>— {m.pause_reason}</span>}
+                  </div>
+                )}
+
+                {/* Metrics grid */}
+                <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(170px,1fr))',gap:12,marginBottom:16}}>
+                  <MetCard label="Account Equity" value={f$(m?.equity)} color={clr((m?.equity??100000)-100000,'#10b981','#ef4444','#e2e8f0')} />
+                  <MetCard label="Buying Power"   value={f$(m?.buying_power)} />
+                  <MetCard label="Day P&L"        value={fpct(m?.daily_pnl_pct)} sub={f$(m?.daily_pnl)} color={clr(m?.daily_pnl)} />
+                  <MetCard label="Win Rate"       value={`${stats?.win_rate??0}%`} color="#3b82f6">
+                    <WinBar wins={stats?.wins??0} losses={stats?.losses??0} />
+                  </MetCard>
+                  <MetCard label="Trades Today"   value={stats?.total_trades??0}  sub={`${stats?.wins??0}W · ${stats?.losses??0}L`} color="#8b5cf6" />
+                  <MetCard label="Open Positions" value={`${positions?.length??0} / ${params?.max_positions??3}`} color="#3b82f6" />
+                  <MetCard
+                    label="VIX"
+                    value={m?.vix?.toFixed(1)??'—'}
+                    sub={m?.vix==null?'N/A':m.vix<20?'Low Fear':m.vix<28?'Elevated':'High Fear'}
+                    color={m?.vix==null?'#64748b':m.vix<20?'#10b981':m.vix<28?'#f59e0b':'#ef4444'}
+                  />
+                  <div style={{background:'var(--bg-card)',border:'1px solid var(--border)',borderRadius:10,padding:'14px 16px'}}>
+                    <div style={{fontSize:10,fontWeight:700,letterSpacing:'.1em',textTransform:'uppercase',color:'var(--muted)',marginBottom:8}}>Regime</div>
+                    <Regime v={m?.regime} />
+                    {stats?.avg_win ? <div style={{fontSize:11,color:'var(--muted)',marginTop:6}}>Avg W: +{stats.avg_win}%</div> : null}
+                  </div>
+                </div>
+
+                {/* Positions + Chart */}
+                <div style={{display:'grid',gridTemplateColumns:'1fr 1.5fr',gap:16,marginBottom:16}}>
+                  <Positions rows={positions??[]} />
+                  <div className="card">
+                    <div className="card-hdr">
+                      <span className="card-title">📈 Intraday P&L</span>
+                      <span style={{fontFamily:'JetBrains Mono',fontWeight:700,fontSize:14,color:clr(m?.daily_pnl)}}>{f$(m?.daily_pnl)}</span>
+                    </div>
+                    <div style={{padding:'12px 16px 16px'}}><PnLChart curve={curve} /></div>
+                  </div>
+                </div>
+
+                {/* Picks + Trades */}
+                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16,marginBottom:16}}>
+                  <Picks rows={picks??[]} />
+                  <Trades rows={trades??[]} />
+                </div>
+
+                {/* Log + Controls + Health */}
+                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16}}>
+                  <div style={{display:'flex',flexDirection:'column',gap:16}}>
+                    <Log rows={activity_log??[]} />
+                    <DailyStats stats={stats} />
+                  </div>
+                  <div style={{display:'flex',flexDirection:'column',gap:16}}>
+                    <Controls onAction={sendAction} paused={paused} pauseReason={m?.pause_reason} />
+                    <Health health={health} />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* TRADES */}
+            {tab === 'trades' && (
+              <div className="fadein"><Trades rows={trades??[]} full /></div>
+            )}
+
+            {/* STRATEGY */}
+            {tab === 'strategy' && (
+              <div className="fadein"><Strategy params={params} /></div>
+            )}
+
+            {/* SYSTEM */}
+            {tab === 'system' && (
+              <div className="fadein"><SystemTab health={health} data={data} /></div>
+            )}
+
+          </main>
+        </div>
+      );
+    };
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
 </body>
 </html>
