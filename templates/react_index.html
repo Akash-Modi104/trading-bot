@@ -588,7 +588,7 @@
 
       useEffect(() => { if (params) setForm(params); }, [JSON.stringify(params)]);
 
-      const defs = [
+      const numDefs = [
         { key:'ema_fast',            label:'EMA Fast',             desc:'Fast EMA period'               },
         { key:'ema_slow',            label:'EMA Slow',             desc:'Slow EMA period'               },
         { key:'rsi_buy_min',         label:'RSI Min',              desc:'Min RSI to enter'              },
@@ -603,6 +603,9 @@
         { key:'vix_pause_threshold', label:'VIX Pause',            desc:'Reduce size above this'        },
         { key:'vix_stop_threshold',  label:'VIX Stop',             desc:'Stop trading above this'       },
         { key:'rel_vol_min',         label:'Min Rel Volume',       desc:'Relative volume threshold'     },
+      ];
+      const txtDefs = [
+        { key:'ollama_model', label:'Ollama Model', desc:'e.g. qwen2.5:3b · llama3.2:1b · mistral:7b' },
       ];
 
       const save = async () => {
@@ -632,20 +635,27 @@
             </div>
           </div>
           <div style={{padding:16, display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(260px,1fr))', gap:12}}>
-            {defs.map(d => (
-              <div key={d.key} style={{
-                background:'rgba(6,13,24,.7)', border:'1px solid var(--border)',
-                borderRadius:8, padding:'12px 14px',
-              }}>
+            {numDefs.map(d => (
+              <div key={d.key} style={{background:'rgba(6,13,24,.7)',border:'1px solid var(--border)',borderRadius:8,padding:'12px 14px'}}>
                 <div style={{fontSize:10,color:'var(--muted)',fontWeight:700,letterSpacing:'.06em',textTransform:'uppercase',marginBottom:7}}>{d.label}</div>
                 {editing
-                  ? <input type="number" step="any"
+                  ? <input type="number" step="any" value={form[d.key] ?? ''}
+                      onChange={e => setForm(f => ({...f, [d.key]: parseFloat(e.target.value)}))} />
+                  : <div style={{fontSize:20,fontWeight:700,fontFamily:'JetBrains Mono',color:'#3b82f6'}}>{params?.[d.key] ?? '—'}</div>
+                }
+                <div style={{fontSize:11,color:'#475569',marginTop:5}}>{d.desc}</div>
+              </div>
+            ))}
+            {txtDefs.map(d => (
+              <div key={d.key} style={{background:'rgba(6,13,24,.7)',border:'1px solid var(--border)',borderRadius:8,padding:'12px 14px'}}>
+                <div style={{fontSize:10,color:'var(--muted)',fontWeight:700,letterSpacing:'.06em',textTransform:'uppercase',marginBottom:7}}>{d.label}</div>
+                {editing
+                  ? <input type="text"
                       value={form[d.key] ?? ''}
-                      onChange={e => setForm(f => ({...f, [d.key]: parseFloat(e.target.value)}))}
+                      onChange={e => setForm(f => ({...f, [d.key]: e.target.value}))}
+                      style={{width:'100%',background:'var(--bg-input)',border:'1px solid var(--border)',borderRadius:6,color:'var(--text)',padding:'6px 10px',fontSize:13,fontFamily:'JetBrains Mono',outline:'none'}}
                     />
-                  : <div style={{fontSize:20,fontWeight:700,fontFamily:'JetBrains Mono',color:'#3b82f6'}}>
-                      {params?.[d.key] ?? '—'}
-                    </div>
+                  : <div style={{fontSize:15,fontWeight:700,fontFamily:'JetBrains Mono',color:'#8b5cf6'}}>{params?.[d.key] || <span style={{color:'var(--muted)'}}>—</span>}</div>
                 }
                 <div style={{fontSize:11,color:'#475569',marginTop:5}}>{d.desc}</div>
               </div>
