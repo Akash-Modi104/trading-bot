@@ -172,9 +172,12 @@ def technical_score(sym):
 # ── DuckDuckGo news search ────────────────────────────────────
 def search_news(query, max_results=5, retries=3):
     """Search internet using DuckDuckGo with retry on rate-limit."""
+    try:
+        from ddgs import DDGS
+    except ImportError:
+        from duckduckgo_search import DDGS
     for attempt in range(retries):
         try:
-            from duckduckgo_search import DDGS
             with DDGS() as ddgs:
                 results = list(ddgs.text(query, max_results=max_results))
             return [r.get("body", "") + " " + r.get("title", "") for r in results]
