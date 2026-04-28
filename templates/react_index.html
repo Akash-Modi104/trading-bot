@@ -603,6 +603,11 @@
         { key:'vix_pause_threshold', label:'VIX Pause',            desc:'Reduce size above this'        },
         { key:'vix_stop_threshold',  label:'VIX Stop',             desc:'Stop trading above this'       },
         { key:'rel_vol_min',         label:'Min Rel Volume',       desc:'Relative volume threshold'     },
+        { key:'max_drawdown_pct',    label:'Max Drawdown %',       desc:'Pause if 7d equity dip exceeds this' },
+        { key:'consecutive_loss_pause',     label:'Consec Losses Pause',  desc:'# of losses before cooldown'  },
+        { key:'consecutive_loss_cooldown_min', label:'Cooldown Min',     desc:'Pause duration in minutes'   },
+        { key:'risk_per_trade_pct',  label:'Risk / Trade %',       desc:'ATR-scaled position sizing'   },
+        { key:'max_spread_pct',      label:'Max Spread %',         desc:'Reject if bid-ask too wide'   },
       ];
       const txtDefs = [
         { key:'ollama_model', label:'Ollama Model', desc:'e.g. qwen2.5:3b · llama3.2:1b · mistral:7b' },
@@ -690,6 +695,144 @@
                 <span style={{fontWeight:500,fontSize:13}}>{r.value}</span>
               </div>
             ))}
+          </div>
+        </div>
+      );
+    };
+
+    /* ── Equity curve chart (line, like PnLChart but $ over time) ─── */
+    const EquityChart = ({ history }) => {
+      const ref = useRef(null), chart = useRef(null);
+      const dep = JSON.stringify(history);
+      useEffect(() => {
+        if (!ref.current || !window.Chart) return;
+        chart.current?.destroy();
+        const labels = history.map(h => h.date);
+        const vals   = history.map(h => h.equity);
+        chart.current = new window.Chart(ref.current.getContext('2d'), {
+          type: 'line',
+          data: {
+            labels,
+            datasets: [{
+              data: vals,
+              borderColor: '#3b82f6',
+              backgroundColor: 'rgba(59,130,246,.1)',
+              fill: true, tension: 0.3, pointRadius: 2, borderWidth: 2,
+            }],
+          },
+          options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: { legend: { display: false },
+              tooltip: { callbacks: { label: ctx => ' ' + f$(ctx.raw) } } },
+            scales: {
+              x: { grid: { color: 'rgba(22,36,64,.6)' },
+                   ticks: { color: '#64748b', font: { size: 10 }, maxTicksLimit: 12 } },
+              y: { grid: { color: 'rgba(22,36,64,.6)' },
+                   ticks: { color: '#64748b', font: { size: 10 },
+                            callback: v => '$' + v.toLocaleString() } },
+            },
+          },
+        });
+        return () => chart.current?.destroy();
+      }, [dep]);
+      return (
+        <div style={{ height: 280, position: 'relative' }}>
+          <canvas ref={ref} />
+          {!history?.length && (
+            <div style={{position:'absolute',inset:0,display:'flex',alignItems:'center',
+                         justifyContent:'center',color:'var(--muted)'}}>
+              No equity history yet — bot writes one snapshot per day.
+            </div>
+          )}
+        </div>
+      );
+    };
+
+    /* ── Analytics tab (Sharpe / MDD / signal attribution) ─── */
+    const AnalyticsTab = () => {
+      const [a,    setA]    = useState(null);
+      const [eq,   setEq]   = useState(null);
+      const [load, setLoad] = useState(true);
+
+      useEffect(() => {
+        Promise.all([
+          fetch('/api/analytics').then(r => r.json()),
+          fetch('/api/equity').then(r => r.json()),
+        ]).then(([an, eqd]) => { setA(an); setEq(eqd); })
+          .finally(() => setLoad(false));
+      }, []);
+
+      if (load) return <div className="empty">Loading analytics…</div>;
+      if (a?.error) return (
+        <div className="card" style={{padding:24,textAlign:'center'}}>
+          <div style={{fontSize:36,marginBottom:8}}>📊</div>
+          <div style={{color:'var(--muted)'}}>{a.error}</div>
+        </div>
+      );
+
+      const sharpeColor =  a?.sharpe_ratio  >= 1   ? '#10b981'
+                         : a?.sharpe_ratio  >= 0.5 ? '#f59e0b' : '#ef4444';
+      const sortinoColor = a?.sortino_ratio >= 1.5 ? '#10b981'
+                         : a?.sortino_ratio >= 0.7 ? '#f59e0b' : '#ef4444';
+
+      return (
+        <div className="fadein">
+          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(170px,1fr))',gap:12,marginBottom:16}}>
+            <MetCard label="Sharpe Ratio"  value={a?.sharpe_ratio}    color={sharpeColor}
+                     sub={a?.sharpe_ratio>=1?'Good':a?.sharpe_ratio>=0.5?'OK':'Weak'} />
+            <MetCard label="Sortino Ratio" value={a?.sortino_ratio}   color={sortinoColor} />
+            <MetCard label="Max Drawdown"  value={fpct(a?.max_drawdown)} color="#ef4444"
+                     sub="Worst cumulative dip" />
+            <MetCard label="Profit Factor" value={a?.profit_factor}   color={a?.profit_factor>=1.5?'#10b981':'#f59e0b'}
+                     sub="Wins$ / Losses$" />
+            <MetCard label="Expectancy"    value={`${a?.expectancy ?? 0}%`} color="#3b82f6"
+                     sub="Per-trade edge" />
+            <MetCard label="Avg Slippage"  value={`${a?.avg_slippage_pct ?? 0}%`} color="#f59e0b"
+                     sub="Buy-side fills" />
+            <MetCard label="Total Trades"  value={a?.total_trades}    color="#8b5cf6" />
+            <MetCard label="Equity Peak"   value={f$(eq?.peak)}       color="#10b981"
+                     sub={`DD: ${fpct(eq?.drawdown_pct)}`} />
+          </div>
+
+          <div className="card" style={{marginBottom:16}}>
+            <div className="card-hdr">
+              <span className="card-title">📈 Equity Curve (daily snapshots)</span>
+              {eq?.current && <span style={{fontFamily:'JetBrains Mono',fontWeight:700,fontSize:14,color:'#3b82f6'}}>{f$(eq.current)}</span>}
+            </div>
+            <div style={{padding:'12px 16px 16px'}}>
+              <EquityChart history={eq?.history || []} />
+            </div>
+          </div>
+
+          <div className="card" style={{marginBottom:16}}>
+            <div className="card-hdr">
+              <span className="card-title">🎯 Signal Attribution — Which signals win?</span>
+            </div>
+            <div style={{overflowX:'auto'}}>
+              {!a?.signal_attribution?.length
+                ? <div className="empty">Need at least one closed trade with logged reasons</div>
+                : <table>
+                    <thead><tr>
+                      <th>Signal</th><th>Trades</th><th>Win Rate</th><th>Avg %</th>
+                    </tr></thead>
+                    <tbody>
+                      {a.signal_attribution.map((s, i) => (
+                        <tr key={i}>
+                          <td style={{fontWeight:700}}>{s.signal}</td>
+                          <td className="mono">{s.trades}</td>
+                          <td className="mono" style={{color:s.win_rate>=50?'#10b981':'#ef4444',fontWeight:700}}>{s.win_rate}%</td>
+                          <td className="mono" style={{color:clr(s.avg_pct),fontWeight:700}}>{fpct(s.avg_pct)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+              }
+            </div>
+          </div>
+
+          <div style={{display:'flex',gap:8,justifyContent:'flex-end'}}>
+            <a href="/api/export.csv" className="btn btn-blue"
+               style={{textDecoration:'none',padding:'8px 16px'}}>📥 Export All Trades (CSV)</a>
           </div>
         </div>
       );
@@ -979,12 +1122,13 @@
       const paused = m?.paused;
 
       const TABS = [
-        { id:'overview',  label:'📊 Overview' },
-        { id:'trades',    label:'📋 Trades'   },
-        { id:'history',   label:'📅 History'  },
-        { id:'reports',   label:'📄 Reports'  },
-        { id:'strategy',  label:'⚙️ Strategy' },
-        { id:'system',    label:'💻 System'   },
+        { id:'overview',  label:'📊 Overview'  },
+        { id:'trades',    label:'📋 Trades'    },
+        { id:'history',   label:'📅 History'   },
+        { id:'analytics', label:'📈 Analytics' },
+        { id:'reports',   label:'📄 Reports'   },
+        { id:'strategy',  label:'⚙️ Strategy'  },
+        { id:'system',    label:'💻 System'    },
       ];
 
       return (
@@ -1146,6 +1290,9 @@
             {/* HISTORY */}
             {tab === 'history' && <HistoryTab />}
 
+            {/* ANALYTICS */}
+            {tab === 'analytics' && <AnalyticsTab />}
+
             {/* REPORTS */}
             {tab === 'reports' && <ReportsTab />}
 
@@ -1158,6 +1305,14 @@
             {tab === 'system' && (
               <div className="fadein"><SystemTab health={health} data={data} /></div>
             )}
+
+            <div style={{textAlign:'center',marginTop:32,padding:'20px 0',
+                         borderTop:'1px solid var(--border)',color:'var(--muted)',fontSize:12}}>
+              ⚠️ Trading involves risk of loss. Read the&nbsp;
+              <a href="/disclaimer" target="_blank" rel="noopener"
+                 style={{color:'#3b82f6'}}>Terms & Disclaimer</a>
+              &nbsp;before use. Not financial advice.
+            </div>
 
           </main>
         </div>

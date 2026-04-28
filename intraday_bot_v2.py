@@ -107,6 +107,12 @@ DEFAULTS = {
     "sector_cap": True,           # max 1 position per sector
     "partial_tp_pct": 2.0,        # sell 50% at +2%
     "partial_tp_frac": 0.5,       # fraction to sell on partial
+    # ── New safety controls ───────────────────────────────────
+    "max_drawdown_pct": 8.0,           # pause entries if 7d drawdown exceeds
+    "consecutive_loss_pause": 3,       # # losses to trigger cooldown
+    "consecutive_loss_cooldown_min": 30,
+    "risk_per_trade_pct": 1.0,         # ATR-scaled sizing target
+    "max_spread_pct": 0.3,             # reject illiquid quotes
 }
 
 def params():
@@ -176,9 +182,12 @@ def get_positions():
     p = api("GET", "/positions")
     return p if isinstance(p, list) else []
 
-def place_order(sym, qty, side, limit_price=None):
+def place_order(sym, qty, side, limit_price=None,
+                bracket_stop=None, bracket_tp=None):
     """Place order. Uses LIMIT (not market) for slippage protection.
-    Limit set 0.15% beyond current price → fills aggressively without runaway slippage."""
+    If bracket_stop AND bracket_tp are provided, submits a BRACKET order:
+    SL+TP are attached atomically — if the bot crashes after the buy fills,
+    Alpaca still enforces the exits."""
     body = {
         "symbol": sym, "qty": str(qty), "side": side,
         "type": "limit" if limit_price else "market",
@@ -187,13 +196,42 @@ def place_order(sym, qty, side, limit_price=None):
     }
     if limit_price:
         body["limit_price"] = f"{round(limit_price, 2):.2f}"
+    if bracket_stop and bracket_tp and side == "buy":
+        body["order_class"] = "bracket"
+        body["take_profit"] = {"limit_price": f"{round(bracket_tp, 2):.2f}"}
+        body["stop_loss"]   = {"stop_price":  f"{round(bracket_stop, 2):.2f}"}
     return api("POST", "/orders", json=body)
+
+def get_quote(sym):
+    """Latest NBBO quote — used for spread check."""
+    d = data_get(f"/stocks/{sym}/quotes/latest")
+    if isinstance(d, dict):
+        q = d.get("quote", {})
+        return q.get("bp"), q.get("ap")  # bid, ask
+    return None, None
+
+def spread_ok(sym, max_pct=0.3):
+    """Reject illiquid stocks with wide spreads (default >0.3% of mid)."""
+    bid, ask = get_quote(sym)
+    if not bid or not ask or bid <= 0 or ask <= 0:
+        return True  # quote unavailable, don't block
+    mid = (bid + ask) / 2
+    spread_pct = (ask - bid) / mid * 100
+    if spread_pct > max_pct:
+        log_event(f"{sym} spread {spread_pct:.2f}% > {max_pct}% — skip")
+        return False
+    return True
+
+def get_clock():
+    """Alpaca /clock — knows market open/close including holidays."""
+    return api("GET", "/clock")
 
 def get_order(order_id):
     return api("GET", f"/orders/{order_id}")
 
-def wait_for_fill(order_id, timeout=10):
-    """Poll order until filled or timed out. Returns (filled_qty, avg_fill_price) or (0, None)."""
+def wait_for_fill(order_id, timeout=10, requested_qty=None, min_fill_pct=0.5):
+    """Poll order until filled or timed out.
+    Accepts partial fills ≥ min_fill_pct of requested_qty (default 50%)."""
     end = time.time() + timeout
     while time.time() < end:
         o = get_order(order_id)
@@ -204,10 +242,23 @@ def wait_for_fill(order_id, timeout=10):
             return int(float(o.get("filled_qty", 0))), float(o.get("filled_avg_price") or 0)
         if status in ("canceled", "rejected", "expired"):
             log_event(f"Order {order_id[:8]} {status}: {o.get('reject_reason') or ''}")
+            # Salvage partial fill if any
+            partial = int(float(o.get("filled_qty", 0)))
+            avg     = float(o.get("filled_avg_price") or 0)
+            if partial > 0 and avg > 0:
+                return partial, avg
             return 0, None
         time.sleep(0.5)
-    # Timeout — cancel pending order so we don't get a late surprise fill
+    # Timeout: cancel and check if any partial fill happened
     api("DELETE", f"/orders/{order_id}")
+    o = get_order(order_id) or {}
+    partial = int(float(o.get("filled_qty", 0)))
+    avg     = float(o.get("filled_avg_price") or 0)
+    if requested_qty and partial >= max(1, int(requested_qty * min_fill_pct)):
+        log_event(f"Order {order_id[:8]} partial fill {partial}/{requested_qty} accepted")
+        return partial, avg
+    if partial > 0:
+        log_event(f"Order {order_id[:8]} partial fill {partial} below threshold — closing")
     log_event(f"Order {order_id[:8]} timeout, cancelled")
     return 0, None
 
@@ -333,13 +384,166 @@ def multi_tf(sym, p):
 
 # ── Market Filters ────────────────────────────────────────────
 def get_vix():
-    """Fetch VIX via VIXY ETF as proxy"""
+    """Fetch real ^VIX from Yahoo Finance public quote endpoint.
+    Falls back to VIXY ETF proxy if Yahoo fails."""
+    try:
+        r = requests.get(
+            "https://query1.finance.yahoo.com/v8/finance/chart/%5EVIX",
+            params={"interval": "5m", "range": "1d"},
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=5,
+        )
+        d = r.json()
+        meta = d.get("chart", {}).get("result", [{}])[0].get("meta", {})
+        v = meta.get("regularMarketPrice")
+        if v: return float(v)
+    except Exception:
+        pass
+    # Fallback
     try:
         bars = get_bars("VIXY", "5Min", 5)
         if bars: return bars[-1]["c"]
     except Exception:
         pass
     return None
+
+# ── PDT (Pattern Day Trader) protection ─────────────────────────
+def count_day_trades_5d():
+    """A day-trade is buy+sell of the same symbol same day. Count over last 5 trading days.
+    Returns the count from local trade_log.json."""
+    log = load_log()
+    from collections import defaultdict
+    by_day_sym = defaultdict(lambda: {"buys": 0, "sells": 0})
+    for t in log:
+        d = str(t.get("time", ""))[:10]
+        if not d: continue
+        sym = t.get("sym", "")
+        if t.get("action") == "buy":  by_day_sym[(d, sym)]["buys"]  += 1
+        if t.get("action") == "sell": by_day_sym[(d, sym)]["sells"] += 1
+
+    # Count day-trades in last 5 weekdays
+    from datetime import timedelta
+    today = now_et().date()
+    cutoff = today - timedelta(days=10)  # generous window for weekends
+    count = 0
+    for (d, sym), c in by_day_sym.items():
+        try:
+            dt = datetime.strptime(d, "%Y-%m-%d").date()
+        except Exception:
+            continue
+        if dt >= cutoff and c["buys"] >= 1 and c["sells"] >= 1:
+            count += 1
+    return count
+
+def pdt_blocks_new_trade(equity):
+    """If account < $25K and 4+ day-trades in 5d, NO new round-trips allowed."""
+    if equity >= 25000:
+        return False, ""
+    cnt = count_day_trades_5d()
+    if cnt >= 3:  # 3 already done = next would be the 4th = PDT lock
+        return True, f"PDT guard: {cnt} day-trades in 5d, account ${equity:.0f} < $25K"
+    return False, ""
+
+# ── Drawdown stop & consecutive-loss circuit breaker ────────────
+EQUITY_HIST_F = os.path.join(BASE_DIR, "equity_history.json")
+
+def load_equity_history():
+    if not os.path.exists(EQUITY_HIST_F): return []
+    try:
+        with open(EQUITY_HIST_F) as f: return json.load(f)
+    except Exception: return []
+
+def append_equity_snapshot(equity):
+    """Append current equity once per day (overwrites today's entry)."""
+    h = load_equity_history()
+    today = now_et().strftime("%Y-%m-%d")
+    h = [e for e in h if e.get("date") != today]
+    h.append({"date": today, "equity": round(equity, 2),
+              "ts": now_et().isoformat()})
+    h = h[-180:]  # keep ~6 months
+    try:
+        with open(EQUITY_HIST_F, "w") as f:
+            json.dump(h, f, indent=2)
+    except Exception:
+        pass
+
+def rolling_drawdown_pct(equity, lookback_days=7):
+    """Returns drawdown % from peak equity over last N days."""
+    h = load_equity_history()
+    if not h: return 0.0
+    recent = h[-lookback_days:]
+    peak = max((e["equity"] for e in recent), default=equity)
+    peak = max(peak, equity)
+    if peak <= 0: return 0.0
+    return (equity - peak) / peak * 100   # negative when in drawdown
+
+def consecutive_losses_today():
+    """Count losing sells since last winning sell (today only)."""
+    log = load_log()
+    today = now_et().strftime("%Y-%m-%d")
+    sells_today = [t for t in log
+                   if str(t.get("time", "")).startswith(today)
+                   and t.get("action") == "sell"]
+    if not sells_today: return 0
+    n = 0
+    for t in reversed(sells_today):
+        if float(t.get("pct", 0)) <= 0: n += 1
+        else: break
+    return n
+
+# ── ATR-scaled position sizing ──────────────────────────────────
+def atr_scaled_qty(price, atr, budget, target_risk_pct=1.0):
+    """Size position so each trade risks ~target_risk_pct of budget given ATR-based stop.
+    Smaller qty for high-ATR (volatile) names, larger qty for low-ATR (stable) names."""
+    if not atr or atr <= 0:
+        return int(budget // price)
+    risk_per_share = atr * 1.5  # matches atr_multiplier
+    if risk_per_share <= 0:
+        return int(budget // price)
+    risk_dollars = budget * (target_risk_pct / 100.0) * 10  # 10x leverage on the risk slice
+    qty_by_risk  = int(risk_dollars // risk_per_share)
+    qty_by_cash  = int(budget // price)
+    return max(1, min(qty_by_risk, qty_by_cash))
+
+# ── Persisted positions (for stop, trail_hi, partial_taken) ─────
+POSITIONS_F = os.path.join(BASE_DIR, "positions_state.json")
+
+def save_positions():
+    try:
+        with open(POSITIONS_F, "w") as f:
+            json.dump(open_positions, f, indent=2, default=str)
+    except Exception:
+        pass
+
+def load_positions_from_disk():
+    if not os.path.exists(POSITIONS_F): return {}
+    try:
+        with open(POSITIONS_F) as f: return json.load(f)
+    except Exception: return {}
+
+# ── Earnings filter (best-effort; gracefully skips if not available) ──
+_earnings_cache = {"date": None, "syms": set()}
+def has_earnings_today(sym):
+    """Avoid trading into earnings — outsized gap risk.
+    Uses Alpaca's corporate-actions/announcements; fails open if endpoint denies."""
+    today = now_et().strftime("%Y-%m-%d")
+    if _earnings_cache["date"] != today:
+        _earnings_cache["date"] = today
+        _earnings_cache["syms"] = set()
+        try:
+            r = requests.get(
+                f"{BASE_URL}/corporate_actions/announcements",
+                headers=HEADERS,
+                params={"ca_types": "earnings", "since": today, "until": today},
+                timeout=8,
+            )
+            if r.status_code == 200:
+                for a in (r.json() or []):
+                    s = a.get("target_symbol") or a.get("symbol")
+                    if s: _earnings_cache["syms"].add(s.upper())
+        except Exception:
+            pass
+    return sym.upper() in _earnings_cache["syms"]
 
 def spy_trend(p):
     """True = SPY above its fast EMA → market bullish"""
@@ -538,7 +742,7 @@ def check_exits(alpaca_pos, p):
         if sym.upper() in bad_news:
             log_event(f"NEWS KILL {sym} | negative headline detected")
             close_position(sym)
-            open_positions.pop(sym, None)
+            open_positions.pop(sym, None); save_positions()
             alert_sell(sym, qty, curr, pct, "news_kill_switch")
             # Realized P&L in $: (exit-entry)*qty. daily_pnl is dollar-summed and recomputed
             # from the live equity each cycle by calc_daily_pnl(), so this is just bookkeeping.
@@ -589,7 +793,7 @@ def check_exits(alpaca_pos, p):
         if reason:
             log_event(f"EXIT {sym} | {reason}")
             close_position(sym)
-            open_positions.pop(sym, None)
+            open_positions.pop(sym, None); save_positions()
             alert_sell(sym, qty, curr, pct, reason)
             # Realized P&L in $: (exit-entry)*qty. daily_pnl is dollar-summed and recomputed
             # from the live equity each cycle by calc_daily_pnl(), so this is just bookkeeping.
@@ -610,6 +814,15 @@ def run():
     _state["started"] = now_et().isoformat()
     _state["equity"]  = start_eq
 
+    # Restore in-memory tracking (trail_hi, partial_taken, etc.) from disk
+    persisted = load_positions_from_disk()
+    if persisted:
+        open_positions.update(persisted)
+        log_event(f"Restored {len(persisted)} tracked positions from disk")
+
+    # Snapshot equity once per day for drawdown calc
+    append_equity_snapshot(start_eq)
+
     print("=" * 62)
     print(f"  ADVANCED TRADING BOT v2  |  {now_et().strftime('%Y-%m-%d')}")
     print(f"  Equity: ${start_eq:,.2f}  |  Buying Power: ${bp:,.2f}")
@@ -617,6 +830,10 @@ def run():
 
     wl = get_watchlist()
     alert_startup(start_eq, bp, len(wl))
+
+    # Track previous regime so we only alert on change
+    last_dd_alert = 0
+    cooldown_until = 0  # UNIX ts — set by consecutive-loss breaker
 
     while True:
         p   = params()
@@ -665,6 +882,32 @@ def run():
         if _state["trading_paused"] and (not vix or vix < vix_stop):
             _state["trading_paused"] = False
 
+        # ── Rolling 7-day drawdown stop ────────────────────
+        cur_equity = float(get_account().get("equity", start_eq))
+        dd_pct = rolling_drawdown_pct(cur_equity, lookback_days=7)
+        max_dd = float(p.get("max_drawdown_pct", 8.0))  # default: pause at -8%
+        if dd_pct <= -max_dd:
+            if time.time() - last_dd_alert > 1800:  # alert at most every 30 min
+                log_event(f"DRAWDOWN STOP: 7d drawdown {dd_pct:.2f}% <= -{max_dd}% — entries paused")
+                last_dd_alert = time.time()
+            _state["trading_paused"] = True
+            _state["pause_reason"]   = f"7d drawdown {dd_pct:.2f}%"
+            alpaca_pos = {p2["symbol"]: p2 for p2 in get_positions()}
+            check_exits(alpaca_pos, p)
+            save_state(); time.sleep(60); continue
+
+        # ── Consecutive-loss circuit breaker ───────────────
+        cl_threshold = int(p.get("consecutive_loss_pause", 3))
+        cl_cooldown_min = int(p.get("consecutive_loss_cooldown_min", 30))
+        if cooldown_until > time.time():
+            mins_left = int((cooldown_until - time.time()) / 60)
+            log_event(f"Cooldown active ({mins_left}m left) — entries paused")
+            alpaca_pos = {p2["symbol"]: p2 for p2 in get_positions()}
+            check_exits(alpaca_pos, p); save_state(); time.sleep(60); continue
+        if consecutive_losses_today() >= cl_threshold:
+            cooldown_until = time.time() + cl_cooldown_min * 60
+            log_event(f"⛔ {cl_threshold} consecutive losses — pausing entries {cl_cooldown_min}m")
+
         # ── Daily loss limit ───────────────────────────────
         daily_pnl = calc_daily_pnl(start_eq)
         _state["daily_pnl"] = daily_pnl
@@ -711,6 +954,11 @@ def run():
         _state["equity"] = float(acc.get("equity", start_eq))
         _state["buying_power"] = bp
 
+        # ── PDT guard (block entries if rule would lock account) ──
+        pdt_blocked, pdt_reason = pdt_blocks_new_trade(cur_equity)
+        if pdt_blocked:
+            log_event(pdt_reason); save_state(); time.sleep(60); continue
+
         if cur_count < p["max_positions"] and bp > p["budget_per_trade"] and spy_bull:
             wl = get_watchlist()
             _state["watchlist"] = wl
@@ -721,10 +969,10 @@ def run():
 
             for sym in wl:
                 if sym in held_syms or sym == "SPY" or sym == "VIXY": continue
-                # Skip if breaking negative news on this ticker
                 if sym.upper() in bad_news:
-                    log_event(f"{sym} skipped — negative news")
-                    continue
+                    log_event(f"{sym} skipped — negative news"); continue
+                if has_earnings_today(sym):
+                    log_event(f"{sym} skipped — earnings today"); continue
                 sc, reasons, bars5, _ = score_stock(sym, p, regime)
                 log_event(f"{sym:6s} score={sc:3d}  {list(reasons.keys())}")
                 if sc >= p.get("min_confidence", 60):
@@ -753,8 +1001,15 @@ def run():
                 price = bars5[-1]["c"] if bars5 else get_latest_price(sym)
                 if not price: continue
 
+                # Spread check — reject illiquid quotes
+                if not spread_ok(sym, max_pct=float(p.get("max_spread_pct", 0.3))):
+                    continue
+
                 budget = p["budget_per_trade"] * vix_size_mult
-                qty    = int(budget // price)
+                # Volatility-scaled qty: high-ATR names get fewer shares
+                atr = atr_val(bars5, 14)
+                qty = atr_scaled_qty(price, atr, budget,
+                                     target_risk_pct=float(p.get("risk_per_trade_pct", 1.0)))
                 if qty < 1: continue
 
                 stop = atr_stop(bars5, price, p["atr_multiplier"])
@@ -762,15 +1017,21 @@ def run():
 
                 # Slippage cap: 0.15% above current — fills aggressively, blocks runaway prints
                 limit_px = round(price * 1.0015, 2)
-                log_event(f"BUY {qty}x {sym} @ ~${price:.2f} (limit ${limit_px}) | stop=${stop:.2f} tp=${tp:.2f} score={sc} sector={sector}")
-                res = place_order(sym, qty, "buy", limit_price=limit_px)
+                log_event(f"BUY {qty}x {sym} @ ~${price:.2f} (limit ${limit_px}) | "
+                          f"stop=${stop:.2f} tp=${tp:.2f} ATR={atr:.2f if atr else 0} "
+                          f"score={sc} sector={sector}")
+                # BRACKET ORDER: SL+TP attached atomically. Even if bot crashes after fill,
+                # Alpaca enforces the exits — true crash-safe execution.
+                res = place_order(sym, qty, "buy", limit_price=limit_px,
+                                  bracket_stop=stop, bracket_tp=tp)
 
                 if res.get("_error") or not res.get("id"):
                     log_event(f"Order REJECTED {sym}: {res.get('message','no id')}")
                     continue
 
-                # Verify the fill before tracking the position
-                filled_qty, fill_px = wait_for_fill(res["id"], timeout=10)
+                # Verify the fill (accept ≥50% partial fills)
+                filled_qty, fill_px = wait_for_fill(res["id"], timeout=10,
+                                                   requested_qty=qty, min_fill_pct=0.5)
                 if filled_qty == 0 or not fill_px:
                     log_event(f"Order {sym} did not fill — skipping")
                     continue
@@ -789,6 +1050,7 @@ def run():
                 taken_sectors.add(sector)
                 buys_made += 1
                 _state["daily_trades"] += 1
+                save_positions()
                 alert_buy(sym, filled_qty, fill_px, actual_stop, actual_tp, sc, reasons)
                 append_log({"time": now_et().isoformat(), "sym": sym,
                             "action": "buy", "qty": filled_qty, "price": fill_px,

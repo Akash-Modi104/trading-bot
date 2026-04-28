@@ -29,13 +29,23 @@ PICKS_F = os.path.join(BASE_DIR, "claude_picks.json")
 STRAT_F = os.path.join(BASE_DIR, "strategy_params.json")
 ET      = pytz.timezone("America/New_York")
 
-# ── Optional HTTP Basic Auth ──────────────────────────────────────
+# ── HTTP Basic Auth (fail-closed by default) ─────────────────────
+# To intentionally disable auth (NOT recommended), set DASHBOARD_AUTH_DISABLED=1.
+# If DASHBOARD_PASS is empty AND override is not set, all endpoints return 503.
 def _require_auth(f):
     @wraps(f)
     def decorated(*args, **kwargs):
         pw = os.environ.get("DASHBOARD_PASS", "")
+        disabled = os.environ.get("DASHBOARD_AUTH_DISABLED", "").lower() in ("1", "true", "yes")
         if not pw:
-            return f(*args, **kwargs)
+            if disabled:
+                return f(*args, **kwargs)
+            # Fail-closed: refuse to serve until password is set
+            return Response(
+                "Server misconfigured: DASHBOARD_PASS not set. "
+                "Set the env var or DASHBOARD_AUTH_DISABLED=1 to override.",
+                503,
+            )
         auth = request.authorization
         user = os.environ.get("DASHBOARD_USER", "admin")
         if not auth or auth.username != user or auth.password != pw:
@@ -328,6 +338,127 @@ def api_report_file(fname):
 @_require_auth
 def api_scan_stats():
     return jsonify(read_json(os.path.join(BASE_DIR, "scan_stats.json"), {}))
+
+@app.route("/api/equity")
+@_require_auth
+def api_equity():
+    """Equity curve over time — daily snapshots from intraday_bot_v2."""
+    h = read_json(os.path.join(BASE_DIR, "equity_history.json"), [])
+    if not h: return jsonify({"history": [], "peak": 0, "current": 0, "drawdown_pct": 0})
+    cur  = h[-1]["equity"]
+    peak = max(e["equity"] for e in h)
+    dd   = (cur - peak) / peak * 100 if peak else 0
+    return jsonify({"history": h, "peak": peak, "current": cur,
+                    "drawdown_pct": round(dd, 2)})
+
+@app.route("/api/analytics")
+@_require_auth
+def api_analytics():
+    """Sharpe, Sortino, max drawdown, win/loss expectancy, signal attribution."""
+    import math
+    log = read_json(LOG_F, [])
+    sells = [t for t in log if t.get("action") == "sell"]
+    pcts  = [float(t.get("pct", 0)) for t in sells if t.get("pct") is not None]
+
+    if not pcts:
+        return jsonify({"error": "no closed trades yet"})
+
+    mean = sum(pcts) / len(pcts)
+    var  = sum((x - mean) ** 2 for x in pcts) / len(pcts)
+    sd   = math.sqrt(var) if var else 0
+    # Sharpe: assume risk-free 0; annualize ~252 trading days, ~5 trades/day -> 1260
+    sharpe = (mean / sd) * math.sqrt(1260) if sd else 0
+
+    neg_pcts = [x for x in pcts if x < 0]
+    downside_var = sum(x ** 2 for x in neg_pcts) / len(pcts) if neg_pcts else 0
+    downside_sd  = math.sqrt(downside_var) if downside_var else 0
+    sortino = (mean / downside_sd) * math.sqrt(1260) if downside_sd else 0
+
+    # Max drawdown of the cumulative trade-pct curve
+    cum = 0; peak = 0; mdd = 0
+    for x in pcts:
+        cum += x
+        peak = max(peak, cum)
+        mdd  = min(mdd, cum - peak)
+
+    wins   = [x for x in pcts if x > 0]
+    losses = [x for x in pcts if x <= 0]
+    win_rate = len(wins) / len(pcts) * 100
+    avg_win  = sum(wins)   / len(wins)   if wins   else 0
+    avg_loss = sum(losses) / len(losses) if losses else 0
+    expectancy = (win_rate/100 * avg_win) + ((1 - win_rate/100) * avg_loss)
+    profit_factor = abs(sum(wins) / sum(losses)) if losses and sum(losses) != 0 else 0
+
+    # Signal attribution: which entry signal contributed most?
+    buys = [t for t in log if t.get("action") == "buy"]
+    sells_by_sym_date = {}
+    for s in sells:
+        key = (s.get("sym"), str(s.get("time", ""))[:10])
+        sells_by_sym_date.setdefault(key, []).append(s)
+    sig_stats = {}
+    for b in buys:
+        key = (b.get("sym"), str(b.get("time", ""))[:10])
+        if key not in sells_by_sym_date: continue
+        sells_for = sells_by_sym_date[key]
+        avg_pct = sum(float(s.get("pct", 0)) for s in sells_for) / len(sells_for)
+        for sig_name in (b.get("reasons") or {}).keys():
+            d = sig_stats.setdefault(sig_name, {"trades": 0, "wins": 0, "pnl": 0.0})
+            d["trades"] += 1
+            d["pnl"]    += avg_pct
+            if avg_pct > 0: d["wins"] += 1
+    sig_table = sorted([
+        {"signal": k, "trades": v["trades"],
+         "win_rate": round(v["wins"]/v["trades"]*100, 1),
+         "avg_pct": round(v["pnl"]/v["trades"], 2)}
+        for k, v in sig_stats.items() if v["trades"] >= 1
+    ], key=lambda x: -x["avg_pct"])
+
+    # Slippage stats
+    slips = [float(t.get("slippage_pct") or 0) for t in buys if t.get("slippage_pct") is not None]
+    avg_slip = round(sum(slips)/len(slips), 3) if slips else 0
+
+    return jsonify({
+        "sharpe_ratio":  round(sharpe, 2),
+        "sortino_ratio": round(sortino, 2),
+        "max_drawdown":  round(mdd, 2),
+        "profit_factor": round(profit_factor, 2),
+        "expectancy":    round(expectancy, 3),
+        "total_trades":  len(pcts),
+        "win_rate":      round(win_rate, 1),
+        "avg_win":       round(avg_win, 2),
+        "avg_loss":      round(avg_loss, 2),
+        "avg_slippage_pct": avg_slip,
+        "signal_attribution": sig_table,
+    })
+
+@app.route("/api/export.csv")
+@_require_auth
+def api_export_csv():
+    """Download all trades as CSV (for tax/audit)."""
+    import csv, io
+    log = read_json(LOG_F, [])
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["time", "symbol", "action", "qty", "price", "entry_price",
+                "pct", "pnl_abs", "slippage_pct", "reason", "score", "regime"])
+    for t in log:
+        w.writerow([t.get("time"), t.get("sym"), t.get("action"),
+                    t.get("qty"), t.get("price"), t.get("entry_price"),
+                    t.get("pct"), t.get("pnl_abs"), t.get("slippage_pct"),
+                    t.get("reason") or ",".join((t.get("reasons") or {}).keys()),
+                    t.get("score"), t.get("regime")])
+    return Response(buf.getvalue(), mimetype="text/csv",
+                    headers={"Content-Disposition":
+                             "attachment; filename=trades.csv"})
+
+@app.route("/disclaimer")
+def disclaimer():
+    """Terms & disclaimer page (no auth — must be public)."""
+    path = os.path.join(BASE_DIR, "templates", "disclaimer.html")
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as f:
+            return f.read()
+    return "Disclaimer page missing.", 404
 
 @app.route("/api/config", methods=["GET"])
 @_require_auth
