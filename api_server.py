@@ -1,12 +1,41 @@
-from flask import Flask, jsonify, request, Response
+from flask import (Flask, jsonify, request, Response, redirect,
+                   make_response, g, render_template_string, send_from_directory)
 from flask_cors import CORS
 from functools import wraps
-import json, os, subprocess, time, threading
+import json, os, subprocess, time, threading, secrets
 from datetime import datetime
 import pytz
 
+import db
+import auth
+
 app = Flask(__name__)
-CORS(app)
+app.secret_key = os.environ.get("FLASK_SECRET_KEY") or secrets.token_hex(32)
+CORS(app, supports_credentials=True)
+
+# Initialize DB and bootstrap legacy admin from .env if needed
+db.init()
+auth.bootstrap_admin_from_env()
+auth.cleanup_expired_sessions()
+
+SESSION_COOKIE = "algotrader_session"
+
+# ── Security headers (CSP, HSTS, etc.) ───────────────────────────
+@app.after_request
+def add_security_headers(resp):
+    resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+    resp.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+    resp.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    # CSP loose enough for in-browser Babel + Chart.js + Google Fonts CDNs
+    csp = ("default-src 'self'; "
+           "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://unpkg.com https://cdn.jsdelivr.net; "
+           "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+           "font-src 'self' https://fonts.gstatic.com data:; "
+           "img-src 'self' data: blob:; "
+           "connect-src 'self'; "
+           "frame-ancestors 'self';")
+    resp.headers.setdefault("Content-Security-Policy", csp)
+    return resp
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -29,33 +58,39 @@ PICKS_F = os.path.join(BASE_DIR, "claude_picks.json")
 STRAT_F = os.path.join(BASE_DIR, "strategy_params.json")
 ET      = pytz.timezone("America/New_York")
 
-# ── HTTP Basic Auth (fail-closed by default) ─────────────────────
-# To intentionally disable auth (NOT recommended), set DASHBOARD_AUTH_DISABLED=1.
-# If DASHBOARD_PASS is empty AND override is not set, all endpoints return 503.
+# ── Session-based auth ────────────────────────────────────────────
+def _current_user():
+    """Returns the user row for the current request, or None."""
+    if hasattr(g, "_cached_user"):
+        return g._cached_user
+    token = request.cookies.get(SESSION_COOKIE)
+    user = auth.get_user_by_session(token) if token else None
+    g._cached_user = user
+    return user
+
 def _require_auth(f):
+    """API endpoints: return 401 JSON if not authenticated."""
     @wraps(f)
     def decorated(*args, **kwargs):
-        pw = os.environ.get("DASHBOARD_PASS", "")
-        disabled = os.environ.get("DASHBOARD_AUTH_DISABLED", "").lower() in ("1", "true", "yes")
-        if not pw:
-            if disabled:
-                return f(*args, **kwargs)
-            # Fail-closed: refuse to serve until password is set
-            return Response(
-                "Server misconfigured: DASHBOARD_PASS not set. "
-                "Set the env var or DASHBOARD_AUTH_DISABLED=1 to override.",
-                503,
-            )
-        auth = request.authorization
-        user = os.environ.get("DASHBOARD_USER", "admin")
-        if not auth or auth.username != user or auth.password != pw:
-            return Response(
-                "Authentication required.",
-                401,
-                {"WWW-Authenticate": 'Basic realm="AlgoTrader"'},
-            )
+        u = _current_user()
+        if not u:
+            return jsonify({"error": "auth_required"}), 401
         return f(*args, **kwargs)
     return decorated
+
+def _require_login_html(f):
+    """HTML pages: redirect to /login if not authenticated."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        u = _current_user()
+        if not u:
+            return redirect("/login")
+        return f(*args, **kwargs)
+    return decorated
+
+def _client_ip():
+    return (request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+            or request.remote_addr or "")
 
 # ── Helpers ───────────────────────────────────────────────────────
 def read_json(path, default=None):
@@ -140,15 +175,228 @@ def build_data():
         "params":       params,
     }
 
-# ── Routes ────────────────────────────────────────────────────────
+# ── Public routes (no auth) ──────────────────────────────────────
+def _render_template_file(name: str, **ctx):
+    path = os.path.join(BASE_DIR, "templates", name)
+    if not os.path.exists(path):
+        return f"Template {name} not found.", 404
+    with open(path, encoding="utf-8") as f:
+        return render_template_string(f.read(), **ctx)
+
+@app.route("/login", methods=["GET"])
+def login_page():
+    if _current_user():
+        return redirect("/")
+    return _render_template_file("login.html", error=request.args.get("error", ""))
+
+@app.route("/register", methods=["GET"])
+def register_page():
+    if _current_user():
+        return redirect("/")
+    return _render_template_file("login.html",
+                                 error=request.args.get("error", ""),
+                                 register=True)
+
+@app.route("/api/login", methods=["POST"])
+def api_login():
+    body = request.get_json(force=True, silent=True) or {}
+    email = (body.get("email") or "").strip().lower()
+    pw    = body.get("password") or ""
+    ip    = _client_ip()
+    if auth.is_rate_limited(ip):
+        return jsonify({"error": "too_many_attempts",
+                        "message": "Too many failed attempts — try again in 15 minutes."}), 429
+    user = auth.get_user_by_email(email)
+    if not user or not auth.check_pw(pw, user["password_hash"]):
+        auth.record_login_attempt(ip, email, success=False)
+        auth.audit(user["id"] if user else None, "login_failed", ip, email)
+        return jsonify({"error": "invalid_credentials",
+                        "message": "Invalid email or password."}), 401
+    token = auth.create_session(user["id"], ip,
+                                request.headers.get("User-Agent", ""))
+    auth.update_user(user["id"], last_login_at=datetime.utcnow().isoformat())
+    auth.record_login_attempt(ip, email, success=True)
+    auth.audit(user["id"], "login_success", ip)
+    resp = jsonify({"ok": True})
+    resp.set_cookie(SESSION_COOKIE, token,
+                    max_age=30*24*3600, httponly=True,
+                    samesite="Lax", secure=request.is_secure)
+    return resp
+
+@app.route("/api/register", methods=["POST"])
+def api_register():
+    body = request.get_json(force=True, silent=True) or {}
+    email = (body.get("email") or "").strip().lower()
+    pw    = body.get("password") or ""
+    name  = (body.get("name") or "").strip()
+    accept_tos = body.get("accept_tos")
+    if not accept_tos:
+        return jsonify({"error": "tos_required",
+                        "message": "You must accept the Terms & Disclaimer."}), 400
+    if not email or "@" not in email:
+        return jsonify({"error": "invalid_email"}), 400
+    if len(pw) < 8:
+        return jsonify({"error": "weak_password",
+                        "message": "Password must be at least 8 characters."}), 400
+    try:
+        user = auth.create_user(email, pw, name=name)
+    except ValueError as e:
+        return jsonify({"error": "registration_failed", "message": str(e)}), 400
+    ip = _client_ip()
+    token = auth.create_session(user["id"], ip,
+                                request.headers.get("User-Agent", ""))
+    auth.audit(user["id"], "register", ip)
+    resp = jsonify({"ok": True})
+    resp.set_cookie(SESSION_COOKIE, token,
+                    max_age=30*24*3600, httponly=True,
+                    samesite="Lax", secure=request.is_secure)
+    return resp
+
+@app.route("/api/logout", methods=["POST"])
+def api_logout():
+    token = request.cookies.get(SESSION_COOKIE)
+    auth.delete_session(token)
+    u = _current_user()
+    if u:
+        auth.audit(u["id"], "logout", _client_ip())
+    resp = jsonify({"ok": True})
+    resp.delete_cookie(SESSION_COOKIE)
+    return resp
+
+# ── Authenticated routes ─────────────────────────────────────────
 @app.route("/")
-@_require_auth
+@_require_login_html
 def index():
     path = os.path.join(BASE_DIR, "templates", "react_index.html")
     if os.path.exists(path):
         with open(path, encoding="utf-8") as f:
             return f.read()
     return "Dashboard template not found.", 503
+
+@app.route("/api/me")
+@_require_auth
+def api_me():
+    u = _current_user()
+    notif = {}
+    try: notif = json.loads(u["notifications"] or "{}")
+    except Exception: pass
+    return jsonify({
+        "id":    u["id"],
+        "email": u["email"],
+        "name":  u["name"],
+        "role":  u["role"],
+        "plan":  u["plan"],
+        "theme": u["theme"] or "dark",
+        "notifications": notif,
+        "alpaca": auth.get_alpaca_status(u["id"]),
+    })
+
+@app.route("/api/profile", methods=["POST"])
+@_require_auth
+def api_profile_update():
+    u = _current_user()
+    body = request.get_json(force=True, silent=True) or {}
+    fields = {}
+    if "name"  in body: fields["name"]  = (body["name"] or "")[:100]
+    if "theme" in body and body["theme"] in ("dark", "light", "auto"):
+        fields["theme"] = body["theme"]
+    if "notifications" in body and isinstance(body["notifications"], dict):
+        fields["notifications"] = body["notifications"]
+    if fields:
+        auth.update_user(u["id"], **fields)
+        auth.audit(u["id"], "profile_update", _client_ip(), list(fields.keys()))
+    return jsonify({"ok": True})
+
+@app.route("/api/change_password", methods=["POST"])
+@_require_auth
+def api_change_password():
+    u = _current_user()
+    body = request.get_json(force=True, silent=True) or {}
+    cur = body.get("current_password", "")
+    new = body.get("new_password", "")
+    if not auth.check_pw(cur, u["password_hash"]):
+        return jsonify({"error": "wrong_password"}), 401
+    try:
+        auth.change_password(u["id"], new)
+    except ValueError as e:
+        return jsonify({"error": "invalid", "message": str(e)}), 400
+    auth.audit(u["id"], "password_changed", _client_ip())
+    # Revoke session — user must log in again
+    resp = jsonify({"ok": True, "logout": True})
+    resp.delete_cookie(SESSION_COOKIE)
+    return resp
+
+@app.route("/api/alpaca/connect", methods=["POST"])
+@_require_auth
+def api_alpaca_connect():
+    u = _current_user()
+    body = request.get_json(force=True, silent=True) or {}
+    api_key  = (body.get("api_key") or "").strip()
+    sec_key  = (body.get("secret_key") or "").strip()
+    is_paper = bool(body.get("is_paper", True))
+    if not api_key or not sec_key:
+        return jsonify({"error": "missing_keys"}), 400
+    ok, info = auth.validate_alpaca(api_key, sec_key, is_paper)
+    if not ok:
+        return jsonify({"error": "validation_failed", "details": info}), 400
+    acct_no = (info or {}).get("account_number", "")
+    auth.save_alpaca_creds(u["id"], api_key, sec_key,
+                           is_paper=is_paper, account_number=acct_no)
+    auth.audit(u["id"], "alpaca_connected", _client_ip(),
+               {"is_paper": is_paper, "acct": acct_no[:8]})
+    return jsonify({"ok": True, "account": {
+        "account_number": acct_no,
+        "equity": info.get("equity"),
+        "buying_power": info.get("buying_power"),
+        "currency": info.get("currency"),
+        "is_paper": is_paper,
+    }})
+
+@app.route("/api/alpaca/disconnect", methods=["POST"])
+@_require_auth
+def api_alpaca_disconnect():
+    u = _current_user()
+    auth.delete_alpaca_creds(u["id"])
+    auth.audit(u["id"], "alpaca_disconnected", _client_ip())
+    return jsonify({"ok": True})
+
+@app.route("/api/sessions")
+@_require_auth
+def api_sessions():
+    u = _current_user()
+    sessions = []
+    cur_token = request.cookies.get(SESSION_COOKIE)
+    for s in auth.list_sessions(u["id"]):
+        sessions.append({
+            "ip":         s["ip"],
+            "user_agent": (s["user_agent"] or "")[:160],
+            "created_at": s["created_at"],
+            "expires_at": s["expires_at"],
+            "current":    (s["token"] == cur_token),
+            "token_tail": s["token"][-8:],
+        })
+    return jsonify(sessions)
+
+@app.route("/api/sessions/revoke", methods=["POST"])
+@_require_auth
+def api_revoke_session():
+    u = _current_user()
+    body = request.get_json(force=True, silent=True) or {}
+    tail = body.get("token_tail", "")
+    if not tail or len(tail) < 6:
+        return jsonify({"error": "bad_request"}), 400
+    for s in auth.list_sessions(u["id"]):
+        if s["token"].endswith(tail):
+            auth.delete_session(s["token"])
+            return jsonify({"ok": True})
+    return jsonify({"error": "not_found"}), 404
+
+@app.route("/api/audit")
+@_require_auth
+def api_audit_log():
+    u = _current_user()
+    rows = auth.get_audit(u["id"], limit=100)
+    return jsonify([dict(r) for r in rows])
 
 @app.route("/api/data")
 @_require_auth

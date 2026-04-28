@@ -22,7 +22,7 @@
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-    :root {
+    :root, html[data-theme="dark"] {
       --bg:          #060d18;
       --bg-card:     #0b1629;
       --bg-hover:    #0f1e35;
@@ -44,6 +44,36 @@
       --text:        #e2e8f0;
       --muted:       #64748b;
       --dim:         #334155;
+    }
+
+    html[data-theme="light"] {
+      --bg:          #f5f7fa;
+      --bg-card:     #ffffff;
+      --bg-hover:    #f1f5f9;
+      --bg-input:    #f8fafc;
+      --border:      #e2e8f0;
+      --border-lt:   #cbd5e1;
+
+      --text:        #0f172a;
+      --muted:       #64748b;
+      --dim:         #94a3b8;
+    }
+    html[data-theme="light"] thead th { background: rgba(245,247,250,.95); }
+    html[data-theme="light"] ::-webkit-scrollbar-thumb { background: #cbd5e1; }
+
+    /* ── Mobile responsive ──────────────────────────────────── */
+    @media (max-width: 900px) {
+      header > div:first-child { padding: 8px 12px !important; }
+      .responsive-grid-2 { grid-template-columns: 1fr !important; }
+      .hide-on-mobile { display: none !important; }
+      table { font-size: 11px; }
+      thead th, tbody td { padding: 7px 8px !important; }
+      .card-hdr { flex-wrap: wrap; }
+      main { padding: 12px !important; }
+    }
+    @media (max-width: 640px) {
+      .header-stack { flex-direction: column !important; align-items: flex-start !important; }
+      .header-stack > * { width: 100%; justify-content: space-between !important; }
     }
 
     html { font-size: 14px; }
@@ -700,6 +730,331 @@
       );
     };
 
+    /* ── Toast notification system ──────────────────────────── */
+    const ToastCtx = React.createContext({ push: () => {} });
+    const ToastProvider = ({ children }) => {
+      const [toasts, setToasts] = useState([]);
+      const push = useCallback((msg, type = 'info') => {
+        const id = Date.now() + Math.random();
+        setToasts(t => [...t, { id, msg, type }]);
+        setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 4500);
+      }, []);
+      return (
+        <ToastCtx.Provider value={{ push }}>
+          {children}
+          <div style={{position:'fixed',bottom:20,right:20,zIndex:9999,
+                       display:'flex',flexDirection:'column',gap:8,maxWidth:340}}>
+            {toasts.map(t => {
+              const colors = {
+                success: ['#10b981', 'rgba(16,185,129,.95)'],
+                error:   ['#ef4444', 'rgba(239,68,68,.95)'],
+                warning: ['#f59e0b', 'rgba(245,158,11,.95)'],
+                info:    ['#3b82f6', 'rgba(59,130,246,.95)'],
+              }[t.type] || ['#3b82f6', 'rgba(59,130,246,.95)'];
+              return (
+                <div key={t.id} className="fadein" style={{
+                  background: colors[1], color: '#fff', padding: '11px 16px',
+                  borderRadius: 8, fontSize: 13, fontWeight: 500,
+                  boxShadow: '0 8px 24px rgba(0,0,0,.3)',
+                  borderLeft: `4px solid ${colors[0]}`,
+                }}>{t.msg}</div>
+              );
+            })}
+          </div>
+        </ToastCtx.Provider>
+      );
+    };
+    const useToast = () => React.useContext(ToastCtx);
+
+    /* ── Profile tab: name, theme, Alpaca connect, sessions, security ── */
+    const ProfileTab = ({ me, onMe }) => {
+      const toast = useToast();
+      const [name,  setName]  = useState(me?.name  || '');
+      const [theme, setTheme] = useState(me?.theme || 'dark');
+
+      // Alpaca connect form
+      const [apiKey,    setApiKey]    = useState('');
+      const [secKey,    setSecKey]    = useState('');
+      const [isPaper,   setIsPaper]   = useState(true);
+      const [busy,      setBusy]      = useState(false);
+
+      // Password change
+      const [curPw, setCurPw] = useState('');
+      const [newPw, setNewPw] = useState('');
+
+      // Sessions + audit
+      const [sessions, setSessions] = useState([]);
+      const [audit,    setAudit]    = useState([]);
+
+      useEffect(() => {
+        fetch('/api/sessions').then(r => r.json()).then(setSessions).catch(() => {});
+        fetch('/api/audit').then(r => r.json()).then(setAudit).catch(() => {});
+      }, []);
+
+      const saveProfile = async () => {
+        const r = await fetch('/api/profile', {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ name, theme }),
+        });
+        if (r.ok) {
+          toast.push('Profile saved', 'success');
+          applyThemeAttr(theme);
+          onMe();
+        } else {
+          toast.push('Save failed', 'error');
+        }
+      };
+
+      const connectAlpaca = async () => {
+        if (!apiKey || !secKey) {
+          toast.push('Both keys are required', 'error');
+          return;
+        }
+        setBusy(true);
+        try {
+          const r = await fetch('/api/alpaca/connect', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ api_key: apiKey, secret_key: secKey, is_paper: isPaper }),
+          });
+          const d = await r.json();
+          if (r.ok) {
+            toast.push(`Connected to Alpaca ${isPaper ? 'paper' : 'LIVE'} (${d.account?.account_number?.slice(0,8) || '—'})`, 'success');
+            setApiKey(''); setSecKey('');
+            onMe();
+          } else {
+            toast.push(d.message || 'Validation failed: ' + (d.details?.message || JSON.stringify(d.details).slice(0,80)), 'error');
+          }
+        } finally { setBusy(false); }
+      };
+
+      const disconnectAlpaca = async () => {
+        if (!confirm('Disconnect your Alpaca account from this dashboard?')) return;
+        await fetch('/api/alpaca/disconnect', { method: 'POST' });
+        toast.push('Alpaca disconnected', 'info');
+        onMe();
+      };
+
+      const changePassword = async () => {
+        if (newPw.length < 8) { toast.push('New password must be 8+ chars', 'error'); return; }
+        const r = await fetch('/api/change_password', {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ current_password: curPw, new_password: newPw }),
+        });
+        const d = await r.json();
+        if (r.ok) {
+          toast.push('Password changed — please log in again', 'success');
+          setTimeout(() => window.location.href = '/login', 1500);
+        } else {
+          toast.push(d.message || 'Failed to change password', 'error');
+        }
+      };
+
+      const revokeSession = async (tail) => {
+        if (!confirm('Revoke this session?')) return;
+        await fetch('/api/sessions/revoke', {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ token_tail: tail }),
+        });
+        toast.push('Session revoked', 'info');
+        fetch('/api/sessions').then(r => r.json()).then(setSessions);
+      };
+
+      const logout = async () => {
+        await fetch('/api/logout', { method: 'POST' });
+        window.location.href = '/login';
+      };
+
+      const alp = me?.alpaca || {};
+
+      return (
+        <div className="fadein" style={{display:'grid',gridTemplateColumns:'1fr',gap:16,maxWidth:880,margin:'0 auto'}}>
+
+          {/* Account */}
+          <div className="card">
+            <div className="card-hdr"><span className="card-title">👤 Account</span></div>
+            <div style={{padding:18,display:'grid',gridTemplateColumns:'1fr 1fr',gap:14}}>
+              <div>
+                <label style={{fontSize:11,color:'var(--muted)',fontWeight:700,letterSpacing:'.06em',textTransform:'uppercase'}}>Email</label>
+                <div style={{fontFamily:'JetBrains Mono',fontSize:14,marginTop:6}}>{me?.email}</div>
+              </div>
+              <div>
+                <label style={{fontSize:11,color:'var(--muted)',fontWeight:700,letterSpacing:'.06em',textTransform:'uppercase'}}>Plan</label>
+                <div style={{fontSize:14,marginTop:6}}>
+                  <Badge color={me?.plan==='pro'?'#10b981':'#64748b'}>{me?.plan?.toUpperCase()}</Badge>
+                </div>
+              </div>
+              <div>
+                <label style={{fontSize:11,color:'var(--muted)',fontWeight:700,letterSpacing:'.06em',textTransform:'uppercase'}}>Display name</label>
+                <input type="text" value={name} onChange={e => setName(e.target.value)}
+                  style={{width:'100%',marginTop:6,background:'var(--bg-input)',border:'1px solid var(--border)',
+                          borderRadius:6,padding:'7px 10px',color:'var(--text)',fontSize:13}} />
+              </div>
+              <div>
+                <label style={{fontSize:11,color:'var(--muted)',fontWeight:700,letterSpacing:'.06em',textTransform:'uppercase'}}>Theme</label>
+                <div style={{display:'flex',gap:6,marginTop:6}}>
+                  {['dark','light','auto'].map(t => (
+                    <button key={t} onClick={() => setTheme(t)}
+                      className={`btn ${theme===t?'btn-blue':'btn-ghost'}`}
+                      style={{flex:1,padding:'7px 10px',fontSize:12,textTransform:'capitalize'}}>{t}</button>
+                  ))}
+                </div>
+              </div>
+              <div style={{gridColumn:'span 2',display:'flex',gap:8,justifyContent:'flex-end'}}>
+                <button className="btn btn-green" onClick={saveProfile}>Save changes</button>
+              </div>
+            </div>
+          </div>
+
+          {/* Alpaca connection */}
+          <div className="card">
+            <div className="card-hdr">
+              <span className="card-title">🔌 Alpaca Account</span>
+              {alp.connected && (
+                <Badge color={alp.is_paper ? '#3b82f6' : '#ef4444'}>
+                  {alp.is_paper ? 'PAPER' : 'LIVE'}
+                </Badge>
+              )}
+            </div>
+            <div style={{padding:18}}>
+              {alp.connected ? (
+                <div>
+                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:14}}>
+                    <div>
+                      <div style={{fontSize:11,color:'var(--muted)',fontWeight:700,letterSpacing:'.06em',textTransform:'uppercase'}}>Account #</div>
+                      <div style={{fontFamily:'JetBrains Mono',fontSize:13,marginTop:5}}>{alp.account_number || '—'}</div>
+                    </div>
+                    <div>
+                      <div style={{fontSize:11,color:'var(--muted)',fontWeight:700,letterSpacing:'.06em',textTransform:'uppercase'}}>API key</div>
+                      <div style={{fontFamily:'JetBrains Mono',fontSize:13,marginTop:5}}>{alp.key_preview}</div>
+                    </div>
+                  </div>
+                  <div style={{display:'flex',gap:8,justifyContent:'flex-end'}}>
+                    <button className="btn btn-red" onClick={disconnectAlpaca}>Disconnect</button>
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <div style={{padding:'10px 14px',background:'rgba(59,130,246,.08)',
+                               border:'1px solid rgba(59,130,246,.25)',borderRadius:7,fontSize:13,marginBottom:14}}>
+                    <b>Get your keys:</b> visit <a href="https://app.alpaca.markets/paper/dashboard/overview"
+                       target="_blank" rel="noopener" style={{color:'#3b82f6'}}>alpaca.markets → Paper Account → View API Keys</a>.
+                    Your secret key is shown only once at creation.
+                  </div>
+                  <label style={{fontSize:11,color:'var(--muted)',fontWeight:700,letterSpacing:'.06em',textTransform:'uppercase'}}>API Key ID</label>
+                  <input type="text" value={apiKey} onChange={e => setApiKey(e.target.value)}
+                    placeholder="PKxxxxxxxxxxxxxxxxxx"
+                    style={{width:'100%',marginTop:5,background:'var(--bg-input)',border:'1px solid var(--border)',
+                            borderRadius:6,padding:'9px 12px',color:'var(--text)',fontSize:13,fontFamily:'JetBrains Mono'}} />
+                  <label style={{fontSize:11,color:'var(--muted)',fontWeight:700,letterSpacing:'.06em',textTransform:'uppercase',marginTop:12,display:'block'}}>Secret Key</label>
+                  <input type="password" value={secKey} onChange={e => setSecKey(e.target.value)}
+                    placeholder="••••••••••••••••••••••••••••••••"
+                    style={{width:'100%',marginTop:5,background:'var(--bg-input)',border:'1px solid var(--border)',
+                            borderRadius:6,padding:'9px 12px',color:'var(--text)',fontSize:13,fontFamily:'JetBrains Mono'}} />
+                  <div style={{marginTop:14,display:'flex',gap:14,alignItems:'center',flexWrap:'wrap'}}>
+                    <label style={{display:'flex',alignItems:'center',gap:6,fontSize:13,cursor:'pointer'}}>
+                      <input type="radio" checked={isPaper} onChange={() => setIsPaper(true)} />
+                      Paper trading <Badge color="#3b82f6">Recommended</Badge>
+                    </label>
+                    <label style={{display:'flex',alignItems:'center',gap:6,fontSize:13,cursor:'pointer'}}>
+                      <input type="radio" checked={!isPaper} onChange={() => setIsPaper(false)} />
+                      Live trading <Badge color="#ef4444">Real money</Badge>
+                    </label>
+                  </div>
+                  {!isPaper && (
+                    <div style={{marginTop:12,padding:'10px 14px',background:'rgba(239,68,68,.1)',
+                                 border:'1px solid rgba(239,68,68,.3)',borderRadius:7,fontSize:13,color:'#ef4444'}}>
+                      ⚠️ Live trading uses real money. Test thoroughly in paper mode for at least 30 days first.
+                    </div>
+                  )}
+                  <div style={{marginTop:16,display:'flex',justifyContent:'flex-end'}}>
+                    <button className="btn btn-green" disabled={busy} onClick={connectAlpaca}>
+                      {busy ? 'Validating…' : 'Validate & Connect'}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Security */}
+          <div className="card">
+            <div className="card-hdr"><span className="card-title">🔒 Security</span></div>
+            <div style={{padding:18}}>
+              <h3 style={{fontSize:13,fontWeight:600,marginBottom:10}}>Change password</h3>
+              <input type="password" placeholder="Current password" value={curPw} onChange={e => setCurPw(e.target.value)}
+                     style={{width:'100%',background:'var(--bg-input)',border:'1px solid var(--border)',borderRadius:6,padding:'8px 12px',color:'var(--text)',fontSize:13,marginBottom:8}} />
+              <input type="password" placeholder="New password (min 8 chars)" value={newPw} onChange={e => setNewPw(e.target.value)}
+                     style={{width:'100%',background:'var(--bg-input)',border:'1px solid var(--border)',borderRadius:6,padding:'8px 12px',color:'var(--text)',fontSize:13}} />
+              <div style={{marginTop:12,display:'flex',justifyContent:'flex-end',gap:8}}>
+                <button className="btn btn-blue" onClick={changePassword}>Update password</button>
+              </div>
+
+              <h3 style={{fontSize:13,fontWeight:600,marginTop:24,marginBottom:10}}>Active sessions</h3>
+              <div style={{maxHeight:200,overflowY:'auto'}}>
+                {sessions.length === 0 ? (
+                  <div className="empty">No sessions</div>
+                ) : (
+                  <table>
+                    <thead><tr><th>IP</th><th>Browser</th><th>Created</th><th></th></tr></thead>
+                    <tbody>
+                      {sessions.map((s, i) => (
+                        <tr key={i}>
+                          <td className="mono" style={{fontSize:11}}>{s.ip || '—'}{s.current && <Badge color="#10b981">CURRENT</Badge>}</td>
+                          <td style={{fontSize:11,color:'var(--muted)',maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{s.user_agent}</td>
+                          <td className="mono" style={{fontSize:11,color:'var(--muted)'}}>{s.created_at?.slice(0,16).replace('T',' ')}</td>
+                          <td>{!s.current && (
+                            <button className="btn btn-red" style={{padding:'3px 10px',fontSize:11}}
+                                    onClick={() => revokeSession(s.token_tail)}>Revoke</button>
+                          )}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Audit log */}
+          <div className="card">
+            <div className="card-hdr"><span className="card-title">📜 Activity Log (last 100)</span></div>
+            <div style={{maxHeight:240,overflowY:'auto'}}>
+              {audit.length === 0 ? <div className="empty">No activity</div> :
+                <table>
+                  <thead><tr><th>When</th><th>Event</th><th>IP</th></tr></thead>
+                  <tbody>
+                    {audit.map((a, i) => (
+                      <tr key={i}>
+                        <td className="mono" style={{fontSize:11,color:'var(--muted)'}}>{a.created_at?.slice(0,19).replace('T',' ')}</td>
+                        <td><Badge color={a.event?.includes('failed')||a.event?.includes('change')?'#f59e0b':'#3b82f6'}>{a.event}</Badge></td>
+                        <td className="mono" style={{fontSize:11,color:'var(--muted)'}}>{a.ip||'—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              }
+            </div>
+          </div>
+
+          {/* Logout */}
+          <div style={{display:'flex',justifyContent:'space-between',padding:'8px 4px'}}>
+            <span style={{fontSize:12,color:'var(--muted)'}}>Logged in as <b>{me?.email}</b></span>
+            <button className="btn btn-red" onClick={logout}>Sign out</button>
+          </div>
+
+        </div>
+      );
+    };
+
+    /* Apply theme attribute to <html> */
+    function applyThemeAttr(theme) {
+      const t = (theme === 'auto')
+        ? (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark')
+        : theme;
+      document.documentElement.setAttribute('data-theme', t);
+      try { localStorage.setItem('theme', theme); } catch {}
+    }
+
     /* ── Equity curve chart (line, like PnLChart but $ over time) ─── */
     const EquityChart = ({ history }) => {
       const ref = useRef(null), chart = useRef(null);
@@ -1065,6 +1420,61 @@
       const [tab,       setTab]       = useState('overview');
       const [connected, setConnected] = useState(false);
       const [clock,     setClock]     = useState('');
+      const [me,        setMe]        = useState(null);
+      const lastTradeIds = useRef(new Set());
+
+      /* Load current user (and apply server-side theme preference) */
+      const loadMe = useCallback(() => {
+        fetch('/api/me').then(r => {
+          if (r.status === 401) { window.location.href = '/login'; return null; }
+          return r.json();
+        }).then(d => {
+          if (!d) return;
+          setMe(d);
+          if (d.theme) applyThemeAttr(d.theme);
+        }).catch(() => {});
+      }, []);
+      useEffect(() => { loadMe(); }, [loadMe]);
+
+      /* Apply theme on first paint */
+      useEffect(() => {
+        const saved = localStorage.getItem('theme') || 'dark';
+        applyThemeAttr(saved);
+      }, []);
+
+      /* Browser push notifications: ask permission once */
+      useEffect(() => {
+        if ('Notification' in window && Notification.permission === 'default') {
+          // Defer until user interacts with the page
+          const ask = () => { Notification.requestPermission(); window.removeEventListener('click', ask); };
+          window.addEventListener('click', ask);
+          return () => window.removeEventListener('click', ask);
+        }
+      }, []);
+
+      /* Notify on new buy/sell trades */
+      useEffect(() => {
+        if (!data?.trades) return;
+        for (const t of data.trades) {
+          const id = `${t.time}_${t.sym}_${t.action}`;
+          if (lastTradeIds.current.has(id)) continue;
+          lastTradeIds.current.add(id);
+          if (lastTradeIds.current.size > 100) {
+            // Trim
+            lastTradeIds.current = new Set([...lastTradeIds.current].slice(-50));
+          }
+          // Don't notify on initial load — only if app has been open >5s
+          if (window._appReadyAt && (Date.now() - window._appReadyAt > 5000)) {
+            const action = t.action?.toUpperCase() || '?';
+            const body = `${action} ${t.qty || ''} ${t.sym} @ $${t.price}` +
+                         (t.pct != null ? ` (${t.pct >= 0 ? '+' : ''}${t.pct.toFixed(2)}%)` : '');
+            if ('Notification' in window && Notification.permission === 'granted') {
+              new Notification(`AlgoTrader — ${action}`, { body, icon: '/favicon.ico' });
+            }
+          }
+        }
+        if (!window._appReadyAt) window._appReadyAt = Date.now();
+      }, [data?.trades?.length]);
 
       /* Clock */
       useEffect(() => {
@@ -1129,7 +1539,22 @@
         { id:'reports',   label:'📄 Reports'   },
         { id:'strategy',  label:'⚙️ Strategy'  },
         { id:'system',    label:'💻 System'    },
+        { id:'profile',   label:'👤 Profile'   },
       ];
+
+      const cycleTheme = () => {
+        const order = ['dark', 'light', 'auto'];
+        const cur = me?.theme || localStorage.getItem('theme') || 'dark';
+        const next = order[(order.indexOf(cur) + 1) % order.length];
+        applyThemeAttr(next);
+        if (me) {
+          fetch('/api/profile', {
+            method: 'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({ theme: next }),
+          }).then(loadMe);
+        }
+      };
+      const themeIcon = { dark:'🌙', light:'☀️', auto:'🖥️' }[me?.theme || localStorage.getItem('theme') || 'dark'] || '🌙';
 
       return (
         <div>
@@ -1186,10 +1611,25 @@
                 </div>
 
                 {/* Clock */}
-                <div style={{textAlign:'right',flexShrink:0}}>
+                <div style={{textAlign:'right',flexShrink:0}} className="hide-on-mobile">
                   <div style={{fontSize:10,color:'var(--muted)',marginBottom:2,letterSpacing:'.06em',textTransform:'uppercase'}}>Time</div>
                   <div style={{fontSize:14,fontWeight:600,fontFamily:'JetBrains Mono'}}>{clock}</div>
                 </div>
+
+                {/* Theme + user menu */}
+                <button onClick={cycleTheme} title="Toggle theme"
+                  style={{background:'var(--bg-input)',border:'1px solid var(--border)',
+                          borderRadius:8,padding:'6px 10px',cursor:'pointer',fontSize:16,
+                          color:'var(--text)'}}>{themeIcon}</button>
+
+                {me && (
+                  <button onClick={() => setTab('profile')} title={me.email}
+                    style={{background:'var(--blue)',color:'#fff',border:'none',
+                            borderRadius:'50%',width:34,height:34,cursor:'pointer',
+                            fontWeight:700,fontSize:14}}>
+                    {(me.name || me.email || '?')[0].toUpperCase()}
+                  </button>
+                )}
               </div>
             </div>
 
@@ -1209,6 +1649,19 @@
 
           {/* ── Page content ───────────────────────────────────── */}
           <main style={{padding:'16px 20px 48px',maxWidth:1640,margin:'0 auto'}}>
+
+            {/* Alpaca-not-connected banner (any tab) */}
+            {me && !me.alpaca?.connected && tab !== 'profile' && (
+              <div style={{
+                background:'rgba(59,130,246,.1)', border:'1px solid rgba(59,130,246,.3)',
+                borderRadius:8, padding:'12px 16px', marginBottom:16,
+                color:'#3b82f6', display:'flex', alignItems:'center', justifyContent:'space-between',
+                gap:12, flexWrap:'wrap',
+              }}>
+                <span>🔌 <b>No Alpaca account connected</b> — connect your API keys to start trading with this dashboard.</span>
+                <button className="btn btn-blue" onClick={() => setTab('profile')}>Connect now →</button>
+              </div>
+            )}
 
             {/* OVERVIEW */}
             {tab === 'overview' && (
@@ -1306,6 +1759,9 @@
               <div className="fadein"><SystemTab health={health} data={data} /></div>
             )}
 
+            {/* PROFILE */}
+            {tab === 'profile' && <ProfileTab me={me} onMe={loadMe} />}
+
             <div style={{textAlign:'center',marginTop:32,padding:'20px 0',
                          borderTop:'1px solid var(--border)',color:'var(--muted)',fontSize:12}}>
               ⚠️ Trading involves risk of loss. Read the&nbsp;
@@ -1319,7 +1775,12 @@
       );
     };
 
-    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    const Root = () => (
+      <ToastProvider>
+        <App />
+      </ToastProvider>
+    );
+    ReactDOM.createRoot(document.getElementById('root')).render(<Root />);
   </script>
 </body>
 </html>

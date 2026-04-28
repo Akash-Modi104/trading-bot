@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% if register %}Sign Up{% else %}Sign In{% endif %} — AlgoTrader</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #060d18; --bg-card: #0b1629; --bg-input: #0d1e38;
+      --border: #162440; --border-lt: #1e3356;
+      --blue: #3b82f6; --green: #10b981; --red: #ef4444; --yellow: #f59e0b;
+      --text: #e2e8f0; --muted: #64748b;
+    }
+    html[data-theme="light"] {
+      --bg: #f5f7fa; --bg-card: #ffffff; --bg-input: #f8fafc;
+      --border: #e2e8f0; --border-lt: #cbd5e1;
+      --text: #0f172a; --muted: #64748b;
+    }
+    body {
+      background: var(--bg); color: var(--text);
+      font-family: 'Inter', system-ui, sans-serif;
+      min-height: 100vh; display: flex; align-items: center; justify-content: center;
+      padding: 16px;
+      background-image: radial-gradient(circle at 20% 30%, rgba(59,130,246,.08) 0%, transparent 50%),
+                        radial-gradient(circle at 80% 70%, rgba(16,185,129,.06) 0%, transparent 50%);
+    }
+    .card {
+      background: var(--bg-card); border: 1px solid var(--border);
+      border-radius: 14px; padding: 32px 36px; width: 100%; max-width: 420px;
+      box-shadow: 0 20px 60px rgba(0,0,0,.3);
+    }
+    .logo { text-align: center; font-size: 32px; margin-bottom: 6px; }
+    h1   { text-align: center; color: var(--blue); font-size: 22px; margin-bottom: 6px; }
+    .sub { text-align: center; color: var(--muted); font-size: 13px; margin-bottom: 24px; }
+    label { display: block; font-size: 11px; font-weight: 700; letter-spacing: .06em;
+            text-transform: uppercase; color: var(--muted); margin-bottom: 6px; margin-top: 14px; }
+    input { width: 100%; background: var(--bg-input); border: 1px solid var(--border);
+            border-radius: 8px; color: var(--text); padding: 11px 14px;
+            font-size: 14px; font-family: inherit; outline: none;
+            transition: border-color .15s; }
+    input:focus { border-color: var(--blue); }
+    button[type=submit] {
+      width: 100%; margin-top: 20px; padding: 12px; border-radius: 8px;
+      background: var(--blue); color: white; border: none; font-weight: 600;
+      font-size: 14px; cursor: pointer; transition: filter .15s;
+    }
+    button[type=submit]:hover:not(:disabled) { filter: brightness(1.1); }
+    button[type=submit]:disabled { opacity: .6; cursor: wait; }
+    .footer { text-align: center; margin-top: 18px; color: var(--muted); font-size: 13px; }
+    .footer a { color: var(--blue); text-decoration: none; font-weight: 600; }
+    .footer a:hover { text-decoration: underline; }
+    .err {
+      background: rgba(239,68,68,.1); border: 1px solid rgba(239,68,68,.3);
+      color: var(--red); padding: 10px 14px; border-radius: 7px;
+      font-size: 13px; margin-bottom: 12px;
+    }
+    .checkbox-row {
+      display: flex; align-items: flex-start; gap: 8px;
+      font-size: 13px; color: var(--muted); margin-top: 14px;
+    }
+    .checkbox-row input { width: auto; margin-top: 3px; }
+    .checkbox-row a { color: var(--blue); }
+    .theme-toggle {
+      position: fixed; top: 20px; right: 20px;
+      background: var(--bg-card); border: 1px solid var(--border);
+      border-radius: 8px; padding: 8px 12px; cursor: pointer;
+      color: var(--text); font-size: 14px;
+    }
+    .strength-bar { height: 4px; background: var(--border); border-radius: 2px;
+                    margin-top: 6px; overflow: hidden; }
+    .strength-fill { height: 100%; transition: width .25s, background .25s; }
+  </style>
+</head>
+<body>
+
+<button class="theme-toggle" onclick="toggleTheme()" id="theme-btn">🌙</button>
+
+<div class="card">
+  <div class="logo">📈</div>
+  <h1>AlgoTrader</h1>
+  <div class="sub">{% if register %}Create your account{% else %}Sign in to your account{% endif %}</div>
+
+  <div id="err-box"></div>
+
+  <form id="auth-form">
+    {% if register %}
+    <label>Full name</label>
+    <input type="text" name="name" autocomplete="name" placeholder="Jane Doe">
+    {% endif %}
+
+    <label>Email</label>
+    <input type="email" name="email" required autocomplete="email" placeholder="you@example.com">
+
+    <label>Password {% if register %}<span style="color:var(--muted);text-transform:none;letter-spacing:0;font-weight:400">— min 8 chars</span>{% endif %}</label>
+    <input type="password" name="password" required minlength="8"
+           autocomplete="{% if register %}new-password{% else %}current-password{% endif %}"
+           placeholder="••••••••" id="pw-input">
+    {% if register %}
+    <div class="strength-bar"><div class="strength-fill" id="strength-fill" style="width:0%;background:var(--red)"></div></div>
+
+    <div class="checkbox-row">
+      <input type="checkbox" name="accept_tos" id="accept-tos" required>
+      <label for="accept-tos" style="font-weight:400;text-transform:none;letter-spacing:0;font-size:13px;color:var(--muted);margin:0">
+        I agree to the <a href="/disclaimer" target="_blank">Terms & Risk Disclaimer</a>
+        and understand trading involves risk of loss.
+      </label>
+    </div>
+    {% endif %}
+
+    <button type="submit" id="submit-btn">{% if register %}Create account{% else %}Sign in{% endif %}</button>
+  </form>
+
+  <div class="footer">
+    {% if register %}
+      Already have an account? <a href="/login">Sign in</a>
+    {% else %}
+      No account? <a href="/register">Sign up</a>
+    {% endif %}
+  </div>
+</div>
+
+<script>
+const REGISTER = {% if register %}true{% else %}false{% endif %};
+
+// Theme management
+function applyTheme(t) {
+  document.documentElement.setAttribute('data-theme', t);
+  document.getElementById('theme-btn').textContent = t === 'light' ? '☀️' : '🌙';
+}
+function toggleTheme() {
+  const cur = localStorage.getItem('theme') || 'dark';
+  const next = cur === 'dark' ? 'light' : 'dark';
+  localStorage.setItem('theme', next);
+  applyTheme(next);
+}
+applyTheme(localStorage.getItem('theme') || 'dark');
+
+// Password strength
+const pwInput = document.getElementById('pw-input');
+const fill    = document.getElementById('strength-fill');
+if (pwInput && fill) {
+  pwInput.addEventListener('input', () => {
+    const v = pwInput.value;
+    let s = 0;
+    if (v.length >= 8)  s += 25;
+    if (v.length >= 12) s += 25;
+    if (/[A-Z]/.test(v) && /[a-z]/.test(v)) s += 25;
+    if (/\d/.test(v) && /[^\w\s]/.test(v))  s += 25;
+    const colors = ['var(--red)', 'var(--yellow)', 'var(--blue)', 'var(--green)'];
+    const idx    = Math.min(3, Math.floor(s / 26));
+    fill.style.width = s + '%';
+    fill.style.background = colors[idx];
+  });
+}
+
+// Form submit
+document.getElementById('auth-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  const body = {
+    email:    fd.get('email'),
+    password: fd.get('password'),
+  };
+  if (REGISTER) {
+    body.name        = fd.get('name') || '';
+    body.accept_tos  = !!fd.get('accept_tos');
+  }
+  const btn = document.getElementById('submit-btn');
+  const err = document.getElementById('err-box');
+  err.innerHTML = '';
+  btn.disabled = true;
+  btn.textContent = REGISTER ? 'Creating account…' : 'Signing in…';
+  try {
+    const r = await fetch(REGISTER ? '/api/register' : '/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const d = await r.json();
+    if (r.ok) {
+      window.location.href = '/';
+      return;
+    }
+    err.innerHTML = `<div class="err">${d.message || d.error || 'Authentication failed'}</div>`;
+  } catch (ex) {
+    err.innerHTML = `<div class="err">Network error — please try again.</div>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = REGISTER ? 'Create account' : 'Sign in';
+  }
+});
+
+// Server-rendered error
+{% if error %}
+document.getElementById('err-box').innerHTML = `<div class="err">{{ error|e }}</div>`;
+{% endif %}
+</script>
+
+</body>
+</html>
