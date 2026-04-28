@@ -409,6 +409,66 @@ def kpi_card(label, value, color):
       <div class="kpi-value" style="color:{color}">{value}</div>
     </div>'''
 
+def load_live_trades_today(date_str):
+    """Read trade_log.json and return today's actual executed trades (buy+sell pairs)."""
+    log_f = os.path.join(BASE_DIR, "trade_log.json")
+    if not os.path.exists(log_f):
+        return []
+    try:
+        with open(log_f) as f:
+            log = json.load(f)
+    except Exception:
+        return []
+    return [t for t in log if str(t.get("time", "")).startswith(date_str)]
+
+def build_live_trades_html(live_trades):
+    """Render today's actual buys/sells with realized P&L."""
+    if not live_trades:
+        return ('<div class="card"><h2>Live Trades Today</h2>'
+                f'<p style="color:{COLORS["muted"]}">No trades executed today.</p></div>')
+    sells = [t for t in live_trades if t.get("action") == "sell"]
+    buys  = [t for t in live_trades if t.get("action") == "buy"]
+    realized = sum(float(t.get("pnl_abs") or 0) for t in sells)
+    wins  = sum(1 for t in sells if float(t.get("pct", 0)) > 0)
+    wr    = (wins / len(sells) * 100) if sells else 0
+
+    rows = ""
+    for t in live_trades[-30:]:
+        side = t.get("action", "")
+        time_s = str(t.get("time", ""))[11:19]
+        sym  = t.get("sym", "")
+        qty  = t.get("qty", "")
+        px   = t.get("price", 0)
+        pct  = t.get("pct")
+        pnl  = t.get("pnl_abs")
+        reason = t.get("reason", "") or ", ".join(list((t.get("reasons") or {}).keys())[:3])
+        if side == "sell":
+            cls = "pos" if (pct or 0) > 0 else "neg"
+            pct_html = f'<span class="{cls}">{pct:+.2f}%</span>' if pct is not None else "-"
+            pnl_html = f'<span class="{cls}">${pnl:+.2f}</span>' if pnl is not None else "-"
+        else:
+            pct_html = "-"; pnl_html = "-"
+        rows += (f"<tr><td>{time_s}</td><td><b>{side.upper()}</b></td>"
+                 f"<td>{sym}</td><td>{qty}</td><td>${px:.2f}</td>"
+                 f"<td>{pct_html}</td><td>{pnl_html}</td><td>{reason}</td></tr>")
+
+    pnl_clr = COLORS["green"] if realized >= 0 else COLORS["red"]
+    return f"""
+    <div class="card">
+      <h2>Live Trades Executed Today</h2>
+      <div class="kpi-row">
+        {kpi_card("Buys",          str(len(buys)),       COLORS['blue'])}
+        {kpi_card("Sells",         str(len(sells)),      COLORS['blue'])}
+        {kpi_card("Win Rate",      f"{wr:.0f}%",         COLORS['green'] if wr>=50 else COLORS['red'])}
+        {kpi_card("Realized P&L",  f"${realized:+,.2f}", pnl_clr)}
+      </div>
+      <table>
+        <tr><th>Time</th><th>Side</th><th>Sym</th><th>Qty</th><th>Price</th>
+            <th>%</th><th>$ P&L</th><th>Reason</th></tr>
+        {rows}
+      </table>
+    </div>"""
+
 def build_html(date_str, account, results, all_trades, new_params, opt_notes):
     bp     = float(account.get("buying_power", 0))
     equity = float(account.get("equity", 0))
@@ -559,6 +619,8 @@ def build_html(date_str, account, results, all_trades, new_params, opt_notes):
     {kpi_card("Gross P&L",        f"{gross_pnl:+.2f}%", COLORS['muted'])}
     {kpi_card("Cost Drag",        f"-{cost_drag:.2f}%", COLORS['yellow'])}
   </div>
+
+  {build_live_trades_html(load_live_trades_today(date_str))}
 
   {pnl_section}
   {wl_section}

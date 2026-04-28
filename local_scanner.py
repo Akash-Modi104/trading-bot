@@ -28,7 +28,7 @@ API_KEY      = os.environ["ALPACA_API_KEY"]
 SECRET_KEY   = os.environ["ALPACA_SECRET_KEY"]
 DATA_URL     = os.environ.get("ALPACA_DATA_URL", "https://data.alpaca.markets/v2")
 OLLAMA_URL   = os.environ.get("OLLAMA_URL", "http://localhost:11434")
-OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5:3b")
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5:1.5b")
 PICKS_FILE   = os.path.join(BASE_DIR, "claude_picks.json")
 NEG_NEWS_F   = os.path.join(BASE_DIR, "negative_news.json")
 STRAT_F      = os.path.join(BASE_DIR, "strategy_params.json")
@@ -354,9 +354,12 @@ def run_scan(force=False):
     neg_tickers = {}
     candidates = [s for s in watchlist if s not in ("SPY", "QQQ", "VIXY")]
 
-    # ── Parallel analysis (3 workers — Ollama is the bottleneck) ─
-    # Ollama on a 3B model handles ~3 concurrent requests fine.
-    with ThreadPoolExecutor(max_workers=3) as pool:
+    # ── Parallel analysis ─────────────────────────────────────
+    # 4 workers chosen for 2-core server + qwen2.5:1.5b warm path.
+    # With 1.5b @ ~5s warm: 12 stocks / 4 = 3 batches × 5s ≈ 15s Ollama.
+    # Total scan target: <60s. Configurable via SCAN_WORKERS env.
+    workers = int(os.environ.get("SCAN_WORKERS", "4"))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
         futures = {
             pool.submit(analyse_ticker, sym, ollama_ok, in_premarket): sym
             for sym in candidates
@@ -379,8 +382,22 @@ def run_scan(force=False):
     with open(PICKS_FILE, "w") as f:
         json.dump(picks, f, indent=2)
 
-    elapsed = round(time.time() - t0)
+    elapsed = round(time.time() - t0, 1)
     log(f"Wrote {len(picks)} picks in {elapsed}s")
+    # Persist scan stats so dashboard can show health (target: <60s)
+    try:
+        stats_f = os.path.join(BASE_DIR, "scan_stats.json")
+        with open(stats_f, "w") as sf:
+            json.dump({
+                "last_scan": now_et().isoformat(),
+                "duration_sec": elapsed,
+                "picks": len(picks),
+                "watchlist_size": len(watchlist),
+                "model": _active_model(),
+                "scan_type": scan_type,
+            }, sf, indent=2)
+    except Exception:
+        pass
     for p in picks:
         log(f"  {p['symbol']:6s} conf={p['confidence']} | {p['reason'][:60]}")
 
@@ -394,13 +411,20 @@ def run_scan(force=False):
 # ── Scheduler ─────────────────────────────────────────────────
 def main():
     force = "--force" in sys.argv
-    log(f"Scanner starting (model: {_active_model()}{'  [FORCE]' if force else ''})")
+    log(f"Scanner starting (model: {_active_model()}, workers: {os.environ.get('SCAN_WORKERS','4')}"
+        f"{'  [FORCE]' if force else ''})")
 
-    run_scan(force=force)
+    # On startup: if we're inside the pre-market or market window, run immediately
+    # (catches scenario where bot restart happens after 09:00 and before 09:30).
+    if force or premarket_window() or market_open():
+        run_scan(force=True)
+    else:
+        log("Outside market hours — first scan deferred to schedule")
+
     schedule.every(15).minutes.do(run_scan)
-
     for day in ("monday", "tuesday", "wednesday", "thursday", "friday"):
         getattr(schedule.every(), day).at("09:00").do(run_scan, force=True)
+        getattr(schedule.every(), day).at("09:15").do(run_scan, force=True)  # second pre-mkt pass
 
     while True:
         schedule.run_pending()

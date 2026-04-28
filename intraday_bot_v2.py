@@ -140,25 +140,77 @@ def log_event(msg):
     print(f"  [{ts}] {msg}")
     _state["log"] = ([{"t": ts, "m": msg}] + _state["log"])[:100]
 
-# ── Alpaca helpers ────────────────────────────────────────────
-def api(method, path, **kw):
-    r = requests.request(method, f"{BASE_URL}{path}", headers=HEADERS, **kw)
-    try: return r.json()
-    except: return {}
+# ── Alpaca helpers (with retry, error logging, fill verification) ──
+def api(method, path, retries=2, **kw):
+    last_err = None
+    for attempt in range(retries + 1):
+        try:
+            r = requests.request(method, f"{BASE_URL}{path}",
+                                 headers=HEADERS, timeout=10, **kw)
+            data = r.json() if r.content else {}
+            # Surface Alpaca error responses (422, 403, 500…)
+            if r.status_code >= 400:
+                msg = data.get("message") if isinstance(data, dict) else str(data)
+                log_event(f"ALPACA ERR {method} {path} → {r.status_code}: {msg}")
+                if r.status_code in (429, 500, 502, 503, 504) and attempt < retries:
+                    time.sleep(1.5 * (attempt + 1)); continue
+                return {"_error": True, "status_code": r.status_code, "message": msg}
+            return data
+        except Exception as e:
+            last_err = e
+            if attempt < retries:
+                time.sleep(1.5 * (attempt + 1))
+    log_event(f"ALPACA NETWORK FAIL {method} {path}: {last_err}")
+    return {"_error": True, "message": str(last_err)}
 
 def data_get(path, params=None):
-    r = requests.get(f"{DATA_URL}{path}", headers=HEADERS, params=params or {})
-    try: return r.json()
-    except: return {}
+    try:
+        r = requests.get(f"{DATA_URL}{path}", headers=HEADERS,
+                         params=params or {}, timeout=10)
+        return r.json() if r.content else {}
+    except Exception:
+        return {}
 
 def get_account():       return api("GET", "/account")
 def get_positions():
     p = api("GET", "/positions")
     return p if isinstance(p, list) else []
-def place_order(sym, qty, side):
-    return api("POST", "/orders", json={
+
+def place_order(sym, qty, side, limit_price=None):
+    """Place order. Uses LIMIT (not market) for slippage protection.
+    Limit set 0.15% beyond current price → fills aggressively without runaway slippage."""
+    body = {
         "symbol": sym, "qty": str(qty), "side": side,
-        "type": "market", "time_in_force": "day"})
+        "type": "limit" if limit_price else "market",
+        "time_in_force": "day",
+        "extended_hours": False,
+    }
+    if limit_price:
+        body["limit_price"] = f"{round(limit_price, 2):.2f}"
+    return api("POST", "/orders", json=body)
+
+def get_order(order_id):
+    return api("GET", f"/orders/{order_id}")
+
+def wait_for_fill(order_id, timeout=10):
+    """Poll order until filled or timed out. Returns (filled_qty, avg_fill_price) or (0, None)."""
+    end = time.time() + timeout
+    while time.time() < end:
+        o = get_order(order_id)
+        if not isinstance(o, dict) or o.get("_error"):
+            return 0, None
+        status = o.get("status")
+        if status == "filled":
+            return int(float(o.get("filled_qty", 0))), float(o.get("filled_avg_price") or 0)
+        if status in ("canceled", "rejected", "expired"):
+            log_event(f"Order {order_id[:8]} {status}: {o.get('reject_reason') or ''}")
+            return 0, None
+        time.sleep(0.5)
+    # Timeout — cancel pending order so we don't get a late surprise fill
+    api("DELETE", f"/orders/{order_id}")
+    log_event(f"Order {order_id[:8]} timeout, cancelled")
+    return 0, None
+
 def close_position(sym): return api("DELETE", f"/positions/{sym}")
 def close_all():         return api("DELETE", "/positions")
 
@@ -488,10 +540,14 @@ def check_exits(alpaca_pos, p):
             close_position(sym)
             open_positions.pop(sym, None)
             alert_sell(sym, qty, curr, pct, "news_kill_switch")
-            _state["daily_pnl"] += pct / p["max_positions"]
+            # Realized P&L in $: (exit-entry)*qty. daily_pnl is dollar-summed and recomputed
+            # from the live equity each cycle by calc_daily_pnl(), so this is just bookkeeping.
+            realized_usd = (curr - entry) * qty
             append_log({"time": now_et().isoformat(), "sym": sym,
-                        "action": "sell", "price": curr,
-                        "pct": round(pct,2), "reason": "news_kill_switch"})
+                        "action": "sell", "qty": qty, "price": curr,
+                        "entry_price": entry, "pct": round(pct,2),
+                        "pnl_abs": round((curr-entry)*qty, 2),
+                        "reason": "news_kill_switch"})
             continue
 
         # Update trailing stop
@@ -515,7 +571,9 @@ def check_exits(alpaca_pos, p):
                 alert_sell(sym, sell_qty, curr, pct, "partial_take")
                 append_log({"time": now_et().isoformat(), "sym": sym,
                             "action": "sell", "qty": sell_qty, "price": curr,
-                            "pct": round(pct,2), "reason": "partial_take"})
+                            "entry_price": entry, "pct": round(pct,2),
+                            "pnl_abs": round((curr-entry)*sell_qty, 2),
+                            "reason": "partial_take"})
                 continue  # Don't also full-exit this cycle
 
         reason = None
@@ -533,10 +591,14 @@ def check_exits(alpaca_pos, p):
             close_position(sym)
             open_positions.pop(sym, None)
             alert_sell(sym, qty, curr, pct, reason)
-            _state["daily_pnl"] += pct / p["max_positions"]
+            # Realized P&L in $: (exit-entry)*qty. daily_pnl is dollar-summed and recomputed
+            # from the live equity each cycle by calc_daily_pnl(), so this is just bookkeeping.
+            realized_usd = (curr - entry) * qty
             append_log({"time": now_et().isoformat(), "sym": sym,
-                        "action": "sell", "price": curr,
-                        "pct": round(pct,2), "reason": reason})
+                        "action": "sell", "qty": qty, "price": curr,
+                        "entry_price": entry, "pct": round(pct,2),
+                        "pnl_abs": round((curr-entry)*qty, 2),
+                        "reason": reason})
 
 # ── Main loop ─────────────────────────────────────────────────
 def run():
@@ -698,26 +760,41 @@ def run():
                 stop = atr_stop(bars5, price, p["atr_multiplier"])
                 tp   = round(price * (1 + p["take_profit_pct"]/100), 2)
 
-                log_event(f"BUY {qty}x {sym} @ ${price:.2f} | stop=${stop:.2f} tp=${tp:.2f} score={sc} sector={sector}")
-                res = place_order(sym, qty, "buy")
+                # Slippage cap: 0.15% above current — fills aggressively, blocks runaway prints
+                limit_px = round(price * 1.0015, 2)
+                log_event(f"BUY {qty}x {sym} @ ~${price:.2f} (limit ${limit_px}) | stop=${stop:.2f} tp=${tp:.2f} score={sc} sector={sector}")
+                res = place_order(sym, qty, "buy", limit_price=limit_px)
 
-                if res.get("status") in ("accepted","pending_new","new"):
-                    open_positions[sym] = {
-                        "qty": qty, "entry": price,
-                        "stop": stop, "trail_hi": price, "tp": tp,
-                        "partial_taken": False, "original_qty": qty,
-                        "sector": sector,
-                    }
-                    taken_sectors.add(sector)
-                    buys_made += 1
-                    _state["daily_trades"] += 1
-                    alert_buy(sym, qty, price, stop, tp, sc, reasons)
-                    append_log({"time": now_et().isoformat(), "sym": sym,
-                                "action": "buy", "qty": qty, "price": price,
-                                "stop": stop, "tp": tp, "score": sc,
-                                "reasons": reasons, "regime": regime})
-                else:
-                    log_event(f"Order rejected: {res.get('message','')}")
+                if res.get("_error") or not res.get("id"):
+                    log_event(f"Order REJECTED {sym}: {res.get('message','no id')}")
+                    continue
+
+                # Verify the fill before tracking the position
+                filled_qty, fill_px = wait_for_fill(res["id"], timeout=10)
+                if filled_qty == 0 or not fill_px:
+                    log_event(f"Order {sym} did not fill — skipping")
+                    continue
+
+                # Re-derive stops from ACTUAL fill price (not pre-fill estimate)
+                actual_stop = atr_stop(bars5, fill_px, p["atr_multiplier"])
+                actual_tp   = round(fill_px * (1 + p["take_profit_pct"]/100), 2)
+
+                open_positions[sym] = {
+                    "qty": filled_qty, "entry": fill_px,
+                    "stop": actual_stop, "trail_hi": fill_px, "tp": actual_tp,
+                    "partial_taken": False, "original_qty": filled_qty,
+                    "sector": sector, "order_id": res["id"],
+                    "entry_time": now_et().isoformat(),
+                }
+                taken_sectors.add(sector)
+                buys_made += 1
+                _state["daily_trades"] += 1
+                alert_buy(sym, filled_qty, fill_px, actual_stop, actual_tp, sc, reasons)
+                append_log({"time": now_et().isoformat(), "sym": sym,
+                            "action": "buy", "qty": filled_qty, "price": fill_px,
+                            "intended_price": price, "slippage_pct": round((fill_px-price)/price*100, 3),
+                            "stop": actual_stop, "tp": actual_tp, "score": sc,
+                            "order_id": res["id"], "reasons": reasons, "regime": regime})
 
         # ── Dashboard state update ─────────────────────────
         _state["last_scan"] = now.isoformat()

@@ -83,6 +83,11 @@ def build_data():
     wins   = sum(1 for t in sells if t.get("pct", 0) > 0)
     losses = sum(1 for t in sells if t.get("pct", 0) <= 0)
     total  = len(sells)
+    realized_pnl_today = round(sum(float(t.get("pnl_abs") or 0) for t in sells), 2)
+    unrealized_pnl     = round(sum(
+        (float(pos.get("curr", 0)) - float(pos.get("entry", 0))) * float(pos.get("qty", 0))
+        for pos in s.get("positions", [])
+    ), 2)
     avg_win  = (sum(t.get("pct", 0) for t in sells if t.get("pct", 0) > 0) / wins)  if wins   else 0.0
     avg_loss = (sum(t.get("pct", 0) for t in sells if t.get("pct", 0) <= 0) / losses) if losses else 0.0
 
@@ -96,8 +101,10 @@ def build_data():
         "metrics": {
             "equity":       round(equity, 2),
             "buying_power": round(s.get("buying_power", 0), 2),
-            "daily_pnl":    round(daily_pnl, 2),
-            "daily_pnl_pct": round(daily_pnl / equity * 100, 3) if equity else 0,
+            "daily_pnl":      round(daily_pnl, 2),
+            "daily_pnl_pct":  round(daily_pnl / equity * 100, 3) if equity else 0,
+            "realized_pnl":   realized_pnl_today,
+            "unrealized_pnl": unrealized_pnl,
             "trades_count": s.get("daily_trades", len(today_trades)),
             "open_positions": len(s.get("positions", [])),
             "vix":          s.get("vix"),
@@ -189,6 +196,138 @@ def api_health():
         pass
 
     return jsonify({"services": svcs, "ollama": ollama})
+
+@app.route("/api/history")
+@_require_auth
+def api_history():
+    """
+    Filterable trade history.
+      ?range=day   → today only
+      ?range=week  → last 7 days
+      ?range=month → last 30 days
+      ?range=all   → everything in trade_log.json
+      ?from=YYYY-MM-DD&to=YYYY-MM-DD → custom range
+    Returns aggregated daily P&L + per-trade list, both realized.
+    """
+    from datetime import timedelta
+    rng   = request.args.get("range", "day")
+    today = datetime.now(ET).date()
+
+    # Determine date window
+    if request.args.get("from"):
+        try:
+            d_from = datetime.strptime(request.args["from"], "%Y-%m-%d").date()
+            d_to   = datetime.strptime(request.args.get("to", str(today)), "%Y-%m-%d").date()
+        except Exception:
+            return jsonify({"error": "bad date format"}), 400
+    else:
+        spans = {"day": 0, "week": 6, "month": 29, "all": 9999}
+        d_from = today - timedelta(days=spans.get(rng, 0))
+        d_to   = today
+
+    log = read_json(LOG_F, [])
+    in_range = []
+    for t in log:
+        ts = str(t.get("time", ""))[:10]
+        try:
+            dt = datetime.strptime(ts, "%Y-%m-%d").date()
+        except Exception:
+            continue
+        if d_from <= dt <= d_to:
+            in_range.append(t)
+
+    # Realized P&L per day
+    sells = [t for t in in_range if t.get("action") == "sell"]
+    by_day = {}
+    for t in sells:
+        d = str(t.get("time", ""))[:10]
+        e = by_day.setdefault(d, {"date": d, "pnl_abs": 0.0, "trades": 0,
+                                   "wins": 0, "losses": 0, "best": 0, "worst": 0})
+        pnl = float(t.get("pnl_abs") or 0)
+        pct = float(t.get("pct") or 0)
+        e["pnl_abs"] += pnl
+        e["trades"] += 1
+        if pct > 0: e["wins"] += 1
+        else:       e["losses"] += 1
+        e["best"]  = max(e["best"], pct)
+        e["worst"] = min(e["worst"], pct)
+    daily = sorted(by_day.values(), key=lambda x: x["date"])
+    for d in daily:
+        d["pnl_abs"] = round(d["pnl_abs"], 2)
+        d["win_rate"] = round(d["wins"] / d["trades"] * 100, 1) if d["trades"] else 0
+
+    # Monthly aggregate (for /history?range=all dashboards)
+    by_month = {}
+    for d in daily:
+        m = d["date"][:7]
+        e = by_month.setdefault(m, {"month": m, "pnl_abs": 0.0, "trades": 0, "wins": 0})
+        e["pnl_abs"] += d["pnl_abs"]
+        e["trades"]  += d["trades"]
+        e["wins"]    += d["wins"]
+    monthly = sorted(by_month.values(), key=lambda x: x["month"])
+    for m in monthly:
+        m["pnl_abs"]  = round(m["pnl_abs"], 2)
+        m["win_rate"] = round(m["wins"] / m["trades"] * 100, 1) if m["trades"] else 0
+
+    total_pnl = round(sum(float(t.get("pnl_abs") or 0) for t in sells), 2)
+
+    # Unrealized = current open positions from live state
+    state = read_json(STATE_F, {})
+    unrealized = sum(
+        (float(p.get("curr", 0)) - float(p.get("entry", 0))) * float(p.get("qty", 0))
+        for p in state.get("positions", [])
+    )
+
+    return jsonify({
+        "range": rng,
+        "from": str(d_from),
+        "to":   str(d_to),
+        "summary": {
+            "total_trades":   len([t for t in in_range if t.get("action") == "buy"]),
+            "closed_trades":  len(sells),
+            "realized_pnl":   total_pnl,
+            "unrealized_pnl": round(unrealized, 2),
+            "wins":           sum(1 for t in sells if float(t.get("pct",0)) > 0),
+            "losses":         sum(1 for t in sells if float(t.get("pct",0)) <= 0),
+            "win_rate":       round(sum(1 for t in sells if float(t.get("pct",0)) > 0)
+                                     / max(len(sells), 1) * 100, 1),
+        },
+        "daily":   daily,
+        "monthly": monthly,
+        "trades":  in_range[-200:],
+    })
+
+@app.route("/api/reports")
+@_require_auth
+def api_reports():
+    """List all available daily HTML reports."""
+    rdir = os.path.join(BASE_DIR, "reports")
+    if not os.path.isdir(rdir):
+        return jsonify([])
+    out = []
+    for f in sorted(os.listdir(rdir), reverse=True):
+        if f.startswith("trading_report_") and f.endswith(".html"):
+            out.append({
+                "date": f.replace("trading_report_", "").replace(".html", ""),
+                "url":  f"/api/reports/{f}",
+            })
+    return jsonify(out)
+
+@app.route("/api/reports/<path:fname>")
+@_require_auth
+def api_report_file(fname):
+    rdir = os.path.join(BASE_DIR, "reports")
+    safe = os.path.basename(fname)  # prevent path traversal
+    fp = os.path.join(rdir, safe)
+    if not os.path.exists(fp) or not safe.startswith("trading_report_"):
+        return "Not found", 404
+    with open(fp, encoding="utf-8") as f:
+        return f.read()
+
+@app.route("/api/scan_stats")
+@_require_auth
+def api_scan_stats():
+    return jsonify(read_json(os.path.join(BASE_DIR, "scan_stats.json"), {}))
 
 @app.route("/api/config", methods=["GET"])
 @_require_auth

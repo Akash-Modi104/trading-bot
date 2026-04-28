@@ -695,6 +695,198 @@
       );
     };
 
+    /* ── History tab (daily / weekly / monthly P&L) ─────────── */
+    const HistoryTab = () => {
+      const [range,   setRange]   = useState('week');
+      const [history, setHistory] = useState(null);
+      const [loading, setLoading] = useState(false);
+      const [err,     setErr]     = useState(null);
+
+      const load = useCallback(async (r) => {
+        setLoading(true); setErr(null);
+        try {
+          const res  = await fetch(`/api/history?range=${r}`);
+          const json = await res.json();
+          setHistory(json);
+        } catch (e) { setErr('Failed to load history'); }
+        finally { setLoading(false); }
+      }, []);
+
+      useEffect(() => { load(range); }, [range, load]);
+
+      const ranges = [
+        { id:'day',   label:'Today'      },
+        { id:'week',  label:'7 Days'     },
+        { id:'month', label:'30 Days'    },
+        { id:'all',   label:'All Time'   },
+      ];
+
+      const sum = history?.summary || {};
+      const realized   = sum.realized_pnl   ?? 0;
+      const unrealized = sum.unrealized_pnl ?? 0;
+
+      return (
+        <div className="fadein">
+          {/* Range selector */}
+          <div style={{display:'flex',gap:8,marginBottom:16,flexWrap:'wrap'}}>
+            {ranges.map(r => (
+              <button key={r.id} onClick={() => setRange(r.id)}
+                className={`btn ${range === r.id ? 'btn-blue' : 'btn-ghost'}`}
+                style={{padding:'8px 18px'}}>{r.label}</button>
+            ))}
+            <button className="btn btn-ghost" style={{padding:'8px 14px',marginLeft:'auto'}}
+              onClick={() => load(range)}>🔄 Refresh</button>
+          </div>
+
+          {err && <div style={{padding:14,background:'rgba(239,68,68,.1)',color:'#ef4444',borderRadius:8,marginBottom:16}}>{err}</div>}
+
+          {/* Summary */}
+          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(170px,1fr))',gap:12,marginBottom:16}}>
+            <MetCard label="Realized P&L"   value={f$(realized)}    color={clr(realized)} />
+            <MetCard label="Unrealized P&L" value={f$(unrealized)}  color={clr(unrealized)} />
+            <MetCard label="Total P&L"      value={f$(realized + unrealized)} color={clr(realized + unrealized)} />
+            <MetCard label="Closed Trades"  value={sum.closed_trades ?? 0}    color="#3b82f6" />
+            <MetCard label="Win Rate"       value={`${sum.win_rate ?? 0}%`}   color="#3b82f6">
+              <WinBar wins={sum.wins ?? 0} losses={sum.losses ?? 0} />
+            </MetCard>
+            <MetCard label="Buy Orders"     value={sum.total_trades ?? 0}     color="#8b5cf6" />
+          </div>
+
+          {/* Daily breakdown */}
+          <div className="card" style={{marginBottom:16}}>
+            <div className="card-hdr">
+              <span className="card-title">📅 Daily Breakdown</span>
+              {history?.from && (
+                <span style={{fontSize:11,color:'var(--muted)',fontFamily:'JetBrains Mono'}}>
+                  {history.from} → {history.to}
+                </span>
+              )}
+            </div>
+            <div style={{overflowX:'auto',maxHeight:380,overflowY:'auto'}}>
+              {loading
+                ? <div className="empty"><div className="spin" style={{display:'inline-block',width:20,height:20,border:'2px solid var(--border)',borderTopColor:'#3b82f6',borderRadius:'50%'}} /></div>
+                : !history?.daily?.length
+                  ? <div className="empty">No closed trades in this range</div>
+                  : <table>
+                      <thead><tr>
+                        <th>Date</th><th>Trades</th><th>Wins</th><th>Losses</th>
+                        <th>Win Rate</th><th>Best %</th><th>Worst %</th><th>Realized P&L</th>
+                      </tr></thead>
+                      <tbody>
+                        {history.daily.slice().reverse().map((d, i) => (
+                          <tr key={i}>
+                            <td className="mono">{d.date}</td>
+                            <td className="mono">{d.trades}</td>
+                            <td className="mono" style={{color:'#10b981'}}>{d.wins}</td>
+                            <td className="mono" style={{color:'#ef4444'}}>{d.losses}</td>
+                            <td className="mono" style={{color:'#3b82f6',fontWeight:700}}>{d.win_rate}%</td>
+                            <td className="mono" style={{color:'#10b981'}}>{fpct(d.best)}</td>
+                            <td className="mono" style={{color:'#ef4444'}}>{fpct(d.worst)}</td>
+                            <td className="mono" style={{color:clr(d.pnl_abs),fontWeight:700}}>{f$(d.pnl_abs)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+              }
+            </div>
+          </div>
+
+          {/* Monthly breakdown */}
+          {history?.monthly?.length > 1 && (
+            <div className="card" style={{marginBottom:16}}>
+              <div className="card-hdr"><span className="card-title">🗓️ Monthly Summary</span></div>
+              <div style={{overflowX:'auto'}}>
+                <table>
+                  <thead><tr>
+                    <th>Month</th><th>Trades</th><th>Wins</th><th>Win Rate</th><th>Realized P&L</th>
+                  </tr></thead>
+                  <tbody>
+                    {history.monthly.slice().reverse().map((m, i) => (
+                      <tr key={i}>
+                        <td className="mono">{m.month}</td>
+                        <td className="mono">{m.trades}</td>
+                        <td className="mono" style={{color:'#10b981'}}>{m.wins}</td>
+                        <td className="mono" style={{color:'#3b82f6',fontWeight:700}}>{m.win_rate}%</td>
+                        <td className="mono" style={{color:clr(m.pnl_abs),fontWeight:700}}>{f$(m.pnl_abs)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* Recent trades */}
+          <div className="card">
+            <div className="card-hdr">
+              <span className="card-title">📋 All Trades In Range</span>
+              <Badge color="#64748b">{history?.trades?.length ?? 0}</Badge>
+            </div>
+            <div style={{overflowX:'auto',maxHeight:500,overflowY:'auto'}}>
+              <Trades rows={(history?.trades || []).slice().reverse()} full />
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    /* ── Reports tab (past EOD HTML reports) ────────────────── */
+    const ReportsTab = () => {
+      const [list,    setList]    = useState([]);
+      const [picked,  setPicked]  = useState(null);
+      const [loading, setLoading] = useState(true);
+
+      useEffect(() => {
+        fetch('/api/reports')
+          .then(r => r.json())
+          .then(d => { setList(d || []); if (d?.[0]) setPicked(d[0].url); })
+          .catch(() => {})
+          .finally(() => setLoading(false));
+      }, []);
+
+      return (
+        <div className="fadein" style={{display:'grid',gridTemplateColumns:'260px 1fr',gap:16}}>
+          <div className="card">
+            <div className="card-hdr">
+              <span className="card-title">📄 Past Reports</span>
+              <Badge color="#3b82f6">{list.length}</Badge>
+            </div>
+            <div style={{maxHeight:700,overflowY:'auto'}}>
+              {loading
+                ? <div className="empty">Loading…</div>
+                : list.length === 0
+                  ? <div className="empty">No daily reports yet. They are generated at market close.</div>
+                  : list.map((r, i) => (
+                    <div key={i} onClick={() => setPicked(r.url)} style={{
+                      padding:'11px 16px', cursor:'pointer',
+                      borderBottom:'1px solid rgba(22,36,64,.5)',
+                      background: picked === r.url ? 'var(--blue-bg)' : 'transparent',
+                      borderLeft: `3px solid ${picked === r.url ? '#3b82f6' : 'transparent'}`,
+                    }}>
+                      <div style={{fontWeight:600,fontSize:13,fontFamily:'JetBrains Mono'}}>{r.date}</div>
+                      <div style={{fontSize:10,color:'var(--muted)',marginTop:2}}>EOD report</div>
+                    </div>
+                  ))
+              }
+            </div>
+          </div>
+          <div className="card" style={{minHeight:700}}>
+            <div className="card-hdr">
+              <span className="card-title">📊 Report Viewer</span>
+              {picked && (
+                <a href={picked} target="_blank" rel="noopener" className="btn btn-blue"
+                   style={{padding:'4px 12px',fontSize:11,textDecoration:'none'}}>↗ Open in new tab</a>
+              )}
+            </div>
+            {picked
+              ? <iframe src={picked} style={{width:'100%',height:'calc(100vh - 220px)',border:'none',background:'#0d1117'}} />
+              : <div className="empty">Select a report from the list</div>
+            }
+          </div>
+        </div>
+      );
+    };
+
     /* ── Daily stats card ────────────────────────────────────── */
     const DailyStats = ({ stats = {} }) => (
       <div className="card">
@@ -789,6 +981,8 @@
       const TABS = [
         { id:'overview',  label:'📊 Overview' },
         { id:'trades',    label:'📋 Trades'   },
+        { id:'history',   label:'📅 History'  },
+        { id:'reports',   label:'📄 Reports'  },
         { id:'strategy',  label:'⚙️ Strategy' },
         { id:'system',    label:'💻 System'   },
       ];
@@ -948,6 +1142,12 @@
             {tab === 'trades' && (
               <div className="fadein"><Trades rows={trades??[]} full /></div>
             )}
+
+            {/* HISTORY */}
+            {tab === 'history' && <HistoryTab />}
+
+            {/* REPORTS */}
+            {tab === 'reports' && <ReportsTab />}
 
             {/* STRATEGY */}
             {tab === 'strategy' && (
