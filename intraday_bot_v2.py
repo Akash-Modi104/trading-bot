@@ -1037,8 +1037,9 @@ def run():
 
                 # Slippage cap: 0.15% above current — fills aggressively, blocks runaway prints
                 limit_px = round(price * 1.0015, 2)
+                atr_str = f"{atr:.2f}" if atr else "0"
                 log_event(f"BUY {qty}x {sym} @ ~${price:.2f} (limit ${limit_px}) | "
-                          f"stop=${stop:.2f} tp=${tp:.2f} ATR={atr:.2f if atr else 0} "
+                          f"stop=${stop:.2f} tp=${tp:.2f} ATR={atr_str} "
                           f"score={sc} sector={sector}")
                 # BRACKET ORDER: SL+TP attached atomically. Even if bot crashes after fill,
                 # Alpaca enforces the exits — true crash-safe execution.
