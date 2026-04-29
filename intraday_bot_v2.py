@@ -550,13 +550,20 @@ def has_earnings_today(sym):
     return sym.upper() in _earnings_cache["syms"]
 
 def spy_trend(p):
-    """True = SPY above its fast EMA → market bullish"""
+    """Smart SPY filter — bull unless SPY is clearly weak.
+    Uses a 21-EMA on 5min bars (≈ 105 min lookback) with a 0.2% tolerance
+    band so minor intraday dips don't whipsaw the bot out of every entry.
+    Old version used a 9-EMA which was too noisy and blocked trades on
+    routine pullbacks. Returns True (bull) if data missing — fail open."""
     if not p.get("spy_filter", True): return True
-    bars = get_bars("SPY", "5Min", 30)
-    if len(bars) < p["ema_fast"]+2: return True
+    bars = get_bars("SPY", "5Min", 60)
+    if len(bars) < 25: return True
     closes = [b["c"] for b in bars]
-    ef = ema_val(closes, p["ema_fast"])
-    return closes[-1] > ef if ef else True
+    ef = ema_val(closes, 21)
+    if not ef: return True
+    # Tolerance: SPY can be up to 0.2% below EMA-21 and still count as bull.
+    # Only blocks when the market is meaningfully weak (≥ 0.2% below trend).
+    return closes[-1] >= ef * 0.998
 
 def market_regime(bars_spy):
     """
