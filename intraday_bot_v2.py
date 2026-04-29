@@ -88,18 +88,22 @@ RISK     = cfg.get("risk", {})
 # ── Strategy defaults ─────────────────────────────────────────
 DEFAULTS = {
     "ema_fast": 9, "ema_slow": 21, "rsi_period": 14,
-    "rsi_buy_min": 50, "rsi_buy_max": 70,
+    # Wider RSI band — don't miss stocks at 45 or 73
+    "rsi_buy_min": 45, "rsi_buy_max": 75,
     "atr_period": 14, "atr_multiplier": 1.5,
-    "rel_vol_min": 1.8,
+    # Relative volume is a score bonus, not a hard filter
+    "rel_vol_min": 1.2,
     "stop_loss_pct": 1.5, "take_profit_pct": 3.0,
     "trail_pct": 1.0,
     "bar_timeframe": "5Min", "max_positions": 3,
     "budget_per_trade": 333,
-    "trade_start_hour": 10, "trade_start_min": 0,
-    "trade_end_hour": 14,   "trade_end_min": 0,
+    "trade_start_hour": 9,  "trade_start_min": 45,  # enter from 9:45 ET
+    "trade_end_hour": 15,   "trade_end_min": 20,     # last entry 15:20 ET
     "close_hour": 15,       "close_min": 45,
-    "vwap_required": True, "orb_required": True,
-    "multi_tf_required": True, "min_confidence": 60,
+    # Soft filters — score bonuses, not hard gates
+    "vwap_required": False, "orb_required": False,
+    "multi_tf_required": False,
+    "min_confidence": 45,   # was 60 — lower bar so bot can actually trade
     "daily_loss_limit_pct": 3.0,
     "vix_pause_threshold": 28, "vix_stop_threshold": 35,
     "spy_filter": True,
@@ -112,7 +116,7 @@ DEFAULTS = {
     "consecutive_loss_pause": 3,       # # losses to trigger cooldown
     "consecutive_loss_cooldown_min": 30,
     "risk_per_trade_pct": 1.0,         # ATR-scaled sizing target
-    "max_spread_pct": 0.3,             # reject illiquid quotes
+    "max_spread_pct": 0.5,             # reject illiquid quotes (relaxed to 0.5%)
 }
 
 def params():
@@ -590,65 +594,74 @@ def score_stock(sym, p, regime):
         bb_up, bb_mid, bb_lo = bollinger(closes)
         if bb_lo and current <= bb_lo * 1.002:
             score += 40; reasons["bb_bounce"] = f"Price near lower BB ${bb_lo:.2f}"
-        else:
-            return 0, {"skip": "choppy day, no BB setup"}, bars5, {}
+        # No hard rejection in choppy — other signals can still earn score
     else:
-        # 1. Multi-TF EMA confluence
+        # 1. EMA signal on primary 5-min timeframe (never a hard gate)
+        ema5_sig = ema_cross(closes, p["ema_fast"], p["ema_slow"])
+        if ema5_sig == "sell":
+            # Active bearish crossover — skip this candidate entirely
+            return 0, {"ema": "5min bearish"}, bars5, {}
+
+        # 2. Multi-TF confluence BONUS — soft, not required
         tf_sig = multi_tf(sym, p)
         if tf_sig == "buy":
-            score += 25; reasons["multi_tf"] = "3-TF bullish"
+            score += 30; reasons["multi_tf"] = "multi-TF bullish"
+        elif ema5_sig == "buy":
+            score += 18; reasons["ema"] = "5min bullish cross"
         else:
-            return score, {"multi_tf": "no confluence"}, bars5, {}
+            score += 5; reasons["ema"] = "5min holding"
 
-    # 2. RSI
+    # 3. RSI — only reject extremes; wide-band bonus
     rsi = rsi_val(closes, p["rsi_period"])
-    if rsi > 78 or rsi < 35:
+    if rsi > 82 or rsi < 30:
         return 0, {"skip": f"RSI {rsi:.0f} extreme"}, bars5, {}
     if p["rsi_buy_min"] <= rsi <= p["rsi_buy_max"]:
         score += 15; reasons["rsi"] = f"RSI {rsi:.0f}"
+    elif 40 <= rsi < p["rsi_buy_min"]:
+        score += 5; reasons["rsi"] = f"RSI {rsi:.0f} acceptable"
 
-    # 3. VWAP
+    # 4. VWAP — soft bonus/penalty, never a hard gate
     vw = vwap_val(bars5)
     if vw and current > vw:
-        score += 15; reasons["vwap"] = f"${current:.2f} > VWAP ${vw:.2f}"
-    elif p.get("vwap_required"):
-        return score, {"vwap": "below VWAP"}, bars5, {}
+        score += 15; reasons["vwap"] = f"above VWAP"
+    elif vw and current <= vw:
+        score -= 8; reasons["vwap"] = "below VWAP"
 
-    # 4. ORB
+    # 5. ORB — bonus only
     orb_hi, orb_lo = orb_levels(bars1)
     if orb_hi and current > orb_hi:
-        score += 15; reasons["orb"] = f"breakout > ${orb_hi:.2f}"
-    elif p.get("orb_required") and orb_hi:
-        score -= 5
+        score += 15; reasons["orb"] = f"ORB breakout > ${orb_hi:.2f}"
 
-    # 5. Relative Volume
+    # 6. Relative Volume
     rv = rel_vol(bars5)
     if rv >= p["rel_vol_min"]:
         score += 10; reasons["rvol"] = f"{rv:.1f}x"
+    elif rv >= 1.0:
+        score += 3   # at least average volume
 
-    # 6. MACD
+    # 7. MACD
     ml, sl, hist = macd(closes)
     if ml is not None:
         if ml > sl and hist > 0:
-            score += 10; reasons["macd"] = f"bullish hist={hist:.3f}"
+            score += 10; reasons["macd"] = f"MACD bullish"
         elif ml < sl:
             score -= 5
 
-    # 7. Bollinger position
+    # 8. Bollinger position
     bb_up, bb_mid, bb_lo = bollinger(closes)
     if bb_up and bb_lo:
         bb_pct = (current - bb_lo) / (bb_up - bb_lo) if bb_up != bb_lo else 0.5
         if bb_pct < 0.4:
-            score += 10; reasons["bb"] = f"lower third {bb_pct:.0%}"
-        elif bb_pct > 0.85:
-            score -= 10; reasons["bb"] = "near upper band"
+            score += 10; reasons["bb"] = f"BB lower-third"
+        elif bb_pct > 0.88:
+            score -= 10; reasons["bb"] = "BB upper-band"
 
-    # 8. Claude AI boost
+    # 9. AI scanner boost (scanner picks add confidence directly)
     for pk in load_picks():
         if pk.get("symbol") == sym:
-            boost = int(pk.get("confidence", 0) * 0.12)
+            boost = int(pk.get("confidence", 0) * 0.15)  # up to +15 from AI
             score += boost
-            reasons["claude"] = f"AI conf {pk.get('confidence')}% (+{boost})"
+            reasons["ai"] = f"scanner={pk.get('confidence')}% (+{boost})"
             break
 
     return min(score, 100), reasons, bars5, {}
@@ -1083,5 +1096,42 @@ def run():
         time.sleep(60)
 
 
+def _sleep_until_next_open():
+    """Sleep until 09:28 ET on the next trading day so the process stays alive."""
+    from datetime import timedelta
+    while True:
+        now  = datetime.now(ET)
+        today_target = now.replace(hour=9, minute=28, second=0, microsecond=0)
+        # If it's a weekday and we haven't reached 09:28 yet → target is today
+        if now.weekday() < 5 and now < today_target:
+            target = today_target
+        else:
+            # Jump ahead to the next weekday
+            days_ahead = 1
+            if   now.weekday() == 4: days_ahead = 3   # Friday  → Monday
+            elif now.weekday() == 5: days_ahead = 2   # Saturday → Monday
+            target = (now + timedelta(days=days_ahead)).replace(
+                hour=9, minute=28, second=0, microsecond=0)
+        secs = max((target - now).total_seconds(), 0)
+        print(f"\n[BOT] Market closed. Next session: {target.strftime('%Y-%m-%d %H:%M ET')}"
+              f" ({secs/3600:.1f}h away). Sleeping…", flush=True)
+        time.sleep(secs + 2)
+        return  # wake up, outer loop calls run() again
+
+
 if __name__ == "__main__":
-    run()
+    import traceback
+    while True:
+        try:
+            run()
+        except KeyboardInterrupt:
+            print("[BOT] Keyboard interrupt — stopping.", flush=True)
+            break
+        except Exception as exc:
+            print(f"\n[BOT CRASH] {exc}", flush=True)
+            traceback.print_exc()
+            print("[BOT] Restarting in 45s…", flush=True)
+            time.sleep(45)
+            continue
+        # run() returned cleanly (EOD break) — sleep until next open
+        _sleep_until_next_open()

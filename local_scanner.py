@@ -144,19 +144,24 @@ def technical_score(sym):
                 score += 20; details["ema_cross"] = "fresh crossover"
             else:
                 score += 10; details["ema"] = "above EMA"
+        elif ef[-1] < es[-1]:
+            # Bearish EMA — penalize but don't hard-reject at scanner level
+            score -= 5; details["ema"] = "bearish"
 
-    if 50 <= r <= 70:
+    if 45 <= r <= 75:   # wider band matches bot's rsi_buy_min/max
         score += 15; details["rsi_ok"] = True
+    elif 35 <= r < 45:
+        score += 5; details["rsi"] = "acceptable"
 
     if vw and curr > vw:
         details["vwap"] = f"${vw:.2f}"; score += 15
     elif vw and curr <= vw:
-        score -= 5
+        score -= 3   # mild penalty, not a reject
 
-    if rv >= 1.8:
+    if rv >= 1.5:
         score += 10; details["high_rvol"] = True
-    elif rv >= 1.3:
-        score += 5
+    elif rv >= 1.0:
+        score += 5   # average volume is fine
 
     return max(0, min(score, 60)), details
 
@@ -188,11 +193,23 @@ def get_movers():
     ]
     found = {}
     ticker_re = re.compile(r'\b([A-Z]{2,5})\b')
+    # Extended noise set — financial/market terms that look like tickers
     noise = {
         "THE","FOR","AND","ARE","HAS","TOP","BIG","NEW","NOW","DAY","ALL","LOW",
         "BUY","SEC","FDA","CEO","GET","SET","USE","INC","LLC","ETF","IPO","USD",
         "NET","GDP","CPI","FED","API","EST","NYSE","NASDAQ","STOCK","YEAR",
         "HIGH","WEEK","TODAY","OPEN","CLOSE","SELL","HOLD","PUTS","CALL",
+        # Technical analysis terms that are NOT tickers
+        "RSI","EMA","MACD","ATR","VWAP","ORB","SMA","WMA","ADX","OBV","ROC",
+        "BB","PPO","DMA","STOCH","CCI","MFI","CMF","ROI","PNL","PEG","TTM",
+        # Financial terms
+        "CNN","DCA","BOT","FAQ","API","URL","HTML","CSS","JSON","XML","PDF",
+        "QE","PE","EPS","FCF","EV","IRR","NPV","DCF","LBO","IPO","SPO","APY",
+        "BPS","YTD","QTD","MTD","YOY","QOQ","MOM","TTM","TBD","NDA","LOI",
+        "ETF","SPX","NDX","RUT","DJI","VIX","VXX","XIV","UVXY","SVXY",
+        # Common English words
+        "BUT","NOT","WITH","FROM","THIS","THAT","THEY","THEIR","HAVE","WILL",
+        "BEEN","MORE","ALSO","WHEN","THAN","INTO","THEN","OVER","SOME","EACH",
     }
     with ThreadPoolExecutor(max_workers=4) as pool:
         futures = {pool.submit(search_news, q, 6): q for q in searches}
@@ -305,13 +322,12 @@ def analyse_ticker(sym, ollama_ok, in_premarket):
     if gap >= 2.0: total += 5; reason = reason + f" Gap +{gap:.1f}%."
     if gap >= 5.0: total += 5
 
-    threshold = 55 if in_premarket else 60
+    threshold = 45 if in_premarket else 50   # lowered to match bot's min_confidence=45
     status = f"tech={t_score} ai={ai_score} total={total} {sentiment}"
 
     if total >= threshold and sentiment != "negative":
-        today = now_et().strftime("%Y-%m-%d")
         pick = {
-            "date":               today,
+            "date":               now_et().strftime("%Y-%m-%d"),
             "symbol":             sym,
             "confidence":         min(total, 100),
             "sector":             sector,
@@ -336,8 +352,8 @@ def run_scan(force=False):
         return
 
     scan_type = "pre-market" if in_premarket and not in_market else "intraday"
-    today = now_et().strftime("%Y-%m-%d")
-    t0 = time.time()
+    today     = now_et().strftime("%Y-%m-%d")
+    t0        = time.time()
     log(f"=== Starting {scan_type} scan ({today}) ===")
 
     ollama_ok, models = ollama_available()
@@ -377,13 +393,29 @@ def run_scan(force=False):
                 log(f"  {sym} error: {e}")
 
     picks.sort(key=lambda x: -x["confidence"])
-    picks = picks[:8]
+
+    # ── Merge with existing today's picks (best confidence wins) ──────────
+    # This ensures morning picks are not erased when afternoon scan yields fewer results.
+    today = now_et().strftime("%Y-%m-%d")
+    existing_picks = []
+    try:
+        with open(PICKS_FILE) as f:
+            existing_picks = [p for p in json.load(f) if p.get("date") == today]
+    except Exception:
+        pass
+
+    pick_map = {p["symbol"]: p for p in existing_picks}
+    for pick in picks:
+        sym = pick["symbol"]
+        if sym not in pick_map or pick["confidence"] >= pick_map[sym]["confidence"]:
+            pick_map[sym] = pick
+    merged = sorted(pick_map.values(), key=lambda x: -x["confidence"])[:10]
 
     with open(PICKS_FILE, "w") as f:
-        json.dump(picks, f, indent=2)
+        json.dump(merged, f, indent=2)
 
     elapsed = round(time.time() - t0, 1)
-    log(f"Wrote {len(picks)} picks in {elapsed}s")
+    log(f"Wrote {len(merged)} picks ({len(picks)} new, {len(existing_picks)} existing) in {elapsed}s")
     # Persist scan stats so dashboard can show health (target: <60s)
     try:
         stats_f = os.path.join(BASE_DIR, "scan_stats.json")
