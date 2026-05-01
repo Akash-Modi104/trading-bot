@@ -242,6 +242,143 @@ def get_alpaca_status(user_id: int) -> dict:
 def delete_alpaca_creds(user_id: int):
     db.execute("DELETE FROM user_alpaca_creds WHERE user_id=?", (user_id,))
 
+# ── Per-user Angel One credentials ───────────────────────────────
+
+def validate_angelone(api_key: str, client_id: str, password: str, totp_secret: str):
+    """
+    Try to log in to Angel One SmartAPI.
+    Returns (ok: bool, data_or_error: dict).
+    """
+    try:
+        from brokers.angelone import AngelOneBroker, AngelOneError
+        broker = AngelOneBroker(api_key, client_id, password, totp_secret)
+        data = broker.login()
+        return True, data
+    except Exception as e:
+        return False, {"error": str(e)}
+
+def save_angelone_creds(user_id: int, api_key: str, client_id: str,
+                        password: str, totp_secret: str,
+                        jwt_token: str = "", refresh_token: str = "",
+                        logged_in_at: str = ""):
+    db.execute(
+        """INSERT OR REPLACE INTO user_angelone_creds
+           (user_id, api_key_enc, client_id_enc, password_enc, totp_secret_enc,
+            jwt_token_enc, refresh_token_enc, logged_in_at, validated_at)
+           VALUES (?,?,?,?,?,?,?,?,?)""",
+        (
+            user_id,
+            encrypt(api_key),
+            encrypt(client_id),
+            encrypt(password),
+            encrypt(totp_secret),
+            encrypt(jwt_token) if jwt_token else b"",
+            encrypt(refresh_token) if refresh_token else b"",
+            logged_in_at or "",
+            datetime.utcnow().isoformat(),
+        ),
+    )
+
+def get_angelone_creds(user_id: int):
+    r = db.query_one("SELECT * FROM user_angelone_creds WHERE user_id=?", (user_id,))
+    if not r:
+        return None
+    return {
+        "api_key":       decrypt(r["api_key_enc"]),
+        "client_id":     decrypt(r["client_id_enc"]),
+        "password":      decrypt(r["password_enc"]),
+        "totp_secret":   decrypt(r["totp_secret_enc"]),
+        "jwt_token":     decrypt(r["jwt_token_enc"]) if r["jwt_token_enc"] else "",
+        "refresh_token": decrypt(r["refresh_token_enc"]) if r["refresh_token_enc"] else "",
+        "logged_in_at":  r["logged_in_at"],
+        "validated_at":  r["validated_at"],
+    }
+
+def get_angelone_status(user_id: int) -> dict:
+    r = db.query_one("SELECT * FROM user_angelone_creds WHERE user_id=?", (user_id,))
+    if not r:
+        return {"connected": False}
+    client_id = decrypt(r["client_id_enc"]) if r["client_id_enc"] else ""
+    return {
+        "connected":    True,
+        "client_id":    client_id,
+        "validated_at": r["validated_at"],
+        "logged_in_at": r["logged_in_at"],
+    }
+
+def update_angelone_tokens(user_id: int, jwt_token: str, refresh_token: str,
+                            logged_in_at: str = ""):
+    """Persist refreshed tokens without touching the core credentials."""
+    ts = logged_in_at or datetime.utcnow().isoformat()
+    db.execute(
+        """UPDATE user_angelone_creds
+           SET jwt_token_enc=?, refresh_token_enc=?, logged_in_at=?
+           WHERE user_id=?""",
+        (encrypt(jwt_token), encrypt(refresh_token), ts, user_id),
+    )
+
+def delete_angelone_creds(user_id: int):
+    db.execute("DELETE FROM user_angelone_creds WHERE user_id=?", (user_id,))
+
+# ── Per-user Zerodha credentials ─────────────────────────────────
+
+def save_zerodha_creds(user_id: int, api_key: str, api_secret: str,
+                       access_token: str = "", request_token: str = "",
+                       session_expiry: str = ""):
+    db.execute(
+        """INSERT OR REPLACE INTO user_zerodha_creds
+           (user_id, api_key_enc, api_secret_enc, access_token_enc,
+            request_token_enc, session_expiry, validated_at)
+           VALUES (?,?,?,?,?,?,?)""",
+        (
+            user_id,
+            encrypt(api_key),
+            encrypt(api_secret),
+            encrypt(access_token) if access_token else b"",
+            encrypt(request_token) if request_token else b"",
+            session_expiry or "",
+            datetime.utcnow().isoformat(),
+        ),
+    )
+
+def get_zerodha_creds(user_id: int):
+    r = db.query_one("SELECT * FROM user_zerodha_creds WHERE user_id=?", (user_id,))
+    if not r:
+        return None
+    return {
+        "api_key":       decrypt(r["api_key_enc"]),
+        "api_secret":    decrypt(r["api_secret_enc"]),
+        "access_token":  decrypt(r["access_token_enc"]) if r["access_token_enc"] else "",
+        "request_token": decrypt(r["request_token_enc"]) if r["request_token_enc"] else "",
+        "session_expiry": r["session_expiry"],
+        "validated_at":  r["validated_at"],
+    }
+
+def get_zerodha_status(user_id: int) -> dict:
+    r = db.query_one("SELECT * FROM user_zerodha_creds WHERE user_id=?", (user_id,))
+    if not r:
+        return {"connected": False}
+    has_token = bool(r["access_token_enc"])
+    api_key   = decrypt(r["api_key_enc"]) if r["api_key_enc"] else ""
+    return {
+        "connected":      True,
+        "has_access_token": has_token,
+        "session_expiry": r["session_expiry"],
+        "validated_at":   r["validated_at"],
+        "login_url":      f"https://kite.trade/connect/login?api_key={api_key}&v=3" if api_key else "",
+    }
+
+def update_zerodha_access_token(user_id: int, access_token: str, session_expiry: str = ""):
+    db.execute(
+        """UPDATE user_zerodha_creds
+           SET access_token_enc=?, session_expiry=?
+           WHERE user_id=?""",
+        (encrypt(access_token), session_expiry, user_id),
+    )
+
+def delete_zerodha_creds(user_id: int):
+    db.execute("DELETE FROM user_zerodha_creds WHERE user_id=?", (user_id,))
+
 # ── Bootstrap admin from .env on first run ───────────────────────
 def bootstrap_admin_from_env():
     """Migrate the legacy DASHBOARD_USER/DASHBOARD_PASS into a real user account.

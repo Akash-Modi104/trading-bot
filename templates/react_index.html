@@ -854,8 +854,6 @@
     };
     const useToast = () => React.useContext(ToastCtx);
 
-    /* ── Profile tab: name, theme, Alpaca connect, sessions, security ── */
-
     /* ── Brokers tab ─────────────────────────────────────────── */
     const BrokersTab = () => {
       const toast = useToast();
@@ -896,23 +894,6 @@
       };
       const delAlpacaLive = async () => { if (!confirm('Remove Alpaca live credentials?')) return;
         await fetch('/api/brokers/alpaca/live', {method:'DELETE'}); load(); };
-
-      // Angel One form
-      const [aK, setAK] = useState(''); const [aC, setAC] = useState(''); const [aP, setAP] = useState('');
-      const [aT, setAT] = useState(''); const [aBusy, setABusy] = useState(false);
-      const saveAngel = async () => {
-        if (!aK || !aC || !aP || !aT) { toast.push('All Angel One fields required', 'error'); return; }
-        setABusy(true);
-        try {
-          const r = await fetch('/api/brokers/angelone', {method:'POST', headers:{'Content-Type':'application/json'},
-            body: JSON.stringify({api_key:aK, client_code:aC, pin:aP, totp_secret:aT})});
-          const d = await r.json();
-          if (r.ok) { toast.push('Angel One connected', 'success'); setAK(''); setAC(''); setAP(''); setAT(''); load(); }
-          else toast.push(d.error + (d.details?.error ? `: ${d.details.error}` : ''), 'error');
-        } finally { setABusy(false); }
-      };
-      const delAngel = async () => { if (!confirm('Remove Angel One credentials?')) return;
-        await fetch('/api/brokers/angelone', {method:'DELETE'}); load(); };
 
       const inp = {width:'100%',background:'var(--bg-input)',border:'1px solid var(--border)',
                    borderRadius:6,padding:'9px 12px',color:'var(--text)',fontSize:13,fontFamily:'JetBrains Mono'};
@@ -980,57 +961,15 @@
         );
       };
 
-      const AngelCard = () => {
-        const cfg = info?.angelone;
-        return (
-          <div className="card">
-            <div className="card-hdr">
-              <span className="card-title">Angel One · SmartAPI</span>
-              {cfg?.configured ? <Badge color="#10b981">CONNECTED</Badge> : <Badge color="#64748b">NOT CONNECTED</Badge>}
-            </div>
-            <div style={{padding:18}}>
-              {!cfg?.configured && (
-                <div style={{padding:'10px 14px',background:'rgba(59,130,246,.08)',border:'1px solid rgba(59,130,246,.25)',borderRadius:7,fontSize:13,marginBottom:14}}>
-                  <b>Setup:</b><br/>
-                  1. Visit <code>smartapi.angelone.in</code> → My Apps → Create App → copy <b>API Key</b>.<br/>
-                  2. Note your <b>Client Code</b> (e.g. A12345).<br/>
-                  3. Use your <b>MPIN</b> (4-digit) as the PIN field.<br/>
-                  4. From your Angel One TOTP setup, get the <b>TOTP secret</b> (the long base32 string, not the 6-digit code).<br/>
-                  Read-only access first; trading via Angel One ships in a follow-up.
-                </div>
-              )}
-              {cfg?.configured && (
-                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:14}}>
-                  <div><div style={lab}>Client</div><div className="mono" style={{marginTop:4,fontSize:13}}>{cfg.client_code || '—'}</div></div>
-                  <div><div style={lab}>Key</div><div className="mono" style={{marginTop:4,fontSize:13}}>{cfg.key_preview}</div></div>
-                </div>
-              )}
-              <label style={lab}>API Key</label>
-              <input style={inp} value={aK} onChange={e=>setAK(e.target.value)} />
-              <label style={lab}>Client Code</label>
-              <input style={inp} value={aC} onChange={e=>setAC(e.target.value)} placeholder="A12345" />
-              <label style={lab}>MPIN</label>
-              <input style={inp} type="password" value={aP} onChange={e=>setAP(e.target.value)} />
-              <label style={lab}>TOTP Secret (base32)</label>
-              <input style={inp} type="password" value={aT} onChange={e=>setAT(e.target.value)} />
-              <div style={{marginTop:14,display:'flex',gap:8,justifyContent:'flex-end'}}>
-                {cfg?.configured && <button className="btn btn-red" onClick={delAngel}>Remove</button>}
-                <button className="btn btn-green" disabled={aBusy} onClick={saveAngel}>{aBusy?'Validating…':'Save & Test'}</button>
-              </div>
-            </div>
-          </div>
-        );
-      };
-
       return (
         <div className="fadein" style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16,maxWidth:1280,margin:'0 auto'}}>
           <PaperCard />
           <LiveCard />
-          <div style={{gridColumn:'span 2'}}><AngelCard /></div>
         </div>
       );
     };
 
+    /* ── Profile tab: name, theme, Alpaca / Angel One / Zerodha connect ── */
     const ProfileTab = ({ me, onMe }) => {
       const toast = useToast();
       const [name,  setName]  = useState(me?.name  || '');
@@ -1041,6 +980,20 @@
       const [secKey,    setSecKey]    = useState('');
       const [isPaper,   setIsPaper]   = useState(true);
       const [busy,      setBusy]      = useState(false);
+
+      // Angel One connect form
+      const [aoApiKey,   setAoApiKey]   = useState('');
+      const [aoClientId, setAoClientId] = useState('');
+      const [aoPassword, setAoPassword] = useState('');
+      const [aoTotp,     setAoTotp]     = useState('');
+      const [aoBusy,     setAoBusy]     = useState(false);
+
+      // Zerodha connect form
+      const [zrdApiKey,    setZrdApiKey]    = useState('');
+      const [zrdApiSecret, setZrdApiSecret] = useState('');
+      const [zrdBusy,      setZrdBusy]      = useState(false);
+      const [zrdReqToken,  setZrdReqToken]  = useState('');
+      const [zrdTokenBusy, setZrdTokenBusy] = useState(false);
 
       // Password change
       const [curPw, setCurPw] = useState('');
@@ -1156,6 +1109,83 @@
         if (!confirm('Disconnect your Alpaca account from this dashboard?')) return;
         await fetch('/api/alpaca/disconnect', { method: 'POST' });
         toast.push('Alpaca disconnected', 'info');
+        onMe();
+      };
+
+      // ── Angel One ──────────────────────────────────────────
+      const connectAngelOne = async () => {
+        if (!aoApiKey || !aoClientId || !aoPassword || !aoTotp) {
+          toast.push('All four Angel One fields are required', 'error'); return;
+        }
+        setAoBusy(true);
+        try {
+          const r = await fetch('/api/angelone/connect', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({ api_key:aoApiKey, client_id:aoClientId, password:aoPassword, totp_secret:aoTotp }),
+          });
+          const d = await r.json();
+          if (r.ok) {
+            toast.push(`Angel One connected: ${d.client_id}`, 'success');
+            setAoApiKey(''); setAoClientId(''); setAoPassword(''); setAoTotp('');
+            onMe();
+          } else {
+            toast.push(d.message || d.details || 'Validation failed', 'error');
+          }
+        } finally { setAoBusy(false); }
+      };
+
+      const disconnectAngelOne = async () => {
+        if (!confirm('Disconnect your Angel One account?')) return;
+        await fetch('/api/angelone/disconnect', { method:'POST' });
+        toast.push('Angel One disconnected', 'info');
+        onMe();
+      };
+
+      // ── Zerodha ─────────────────────────────────────────────
+      const saveZerodha = async () => {
+        if (!zrdApiKey || !zrdApiSecret) {
+          toast.push('API Key and API Secret are required', 'error'); return;
+        }
+        setZrdBusy(true);
+        try {
+          const r = await fetch('/api/zerodha/connect', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({ api_key:zrdApiKey, api_secret:zrdApiSecret }),
+          });
+          const d = await r.json();
+          if (r.ok) {
+            toast.push('Zerodha credentials saved — visit the login URL to activate', 'success');
+            setZrdApiKey(''); setZrdApiSecret('');
+            onMe();
+          } else {
+            toast.push(d.message || 'Save failed', 'error');
+          }
+        } finally { setZrdBusy(false); }
+      };
+
+      const activateZerodha = async () => {
+        if (!zrdReqToken) { toast.push('Paste the request_token', 'error'); return; }
+        setZrdTokenBusy(true);
+        try {
+          const r = await fetch('/api/zerodha/session', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({ request_token: zrdReqToken }),
+          });
+          const d = await r.json();
+          if (r.ok) {
+            toast.push('Zerodha session activated!', 'success');
+            setZrdReqToken('');
+            onMe();
+          } else {
+            toast.push(d.error || 'Session activation failed', 'error');
+          }
+        } finally { setZrdTokenBusy(false); }
+      };
+
+      const disconnectZerodha = async () => {
+        if (!confirm('Disconnect your Zerodha account?')) return;
+        await fetch('/api/zerodha/disconnect', { method:'POST' });
+        toast.push('Zerodha disconnected', 'info');
         onMe();
       };
 
@@ -1300,6 +1330,132 @@
               )}
             </div>
           </div>
+
+          {/* Angel One connection */}
+          {(() => {
+            const ao = me?.angelone || {};
+            const inp = {width:'100%',marginTop:5,background:'var(--bg-input)',border:'1px solid var(--border)',
+                         borderRadius:6,padding:'9px 12px',color:'var(--text)',fontSize:13,fontFamily:'JetBrains Mono'};
+            const lbl = {fontSize:11,color:'var(--muted)',fontWeight:700,letterSpacing:'.06em',textTransform:'uppercase',marginTop:12,display:'block'};
+            return (
+              <div className="card">
+                <div className="card-hdr">
+                  <span className="card-title">🏦 Angel One (SmartAPI)</span>
+                  {ao.connected && <Badge color="#f97316">CONNECTED</Badge>}
+                </div>
+                <div style={{padding:18}}>
+                  {ao.connected ? (
+                    <div>
+                      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:14}}>
+                        <div>
+                          <div style={{fontSize:11,color:'var(--muted)',fontWeight:700,textTransform:'uppercase'}}>Client ID</div>
+                          <div style={{fontFamily:'JetBrains Mono',fontSize:13,marginTop:5}}>{ao.client_id}</div>
+                        </div>
+                        <div>
+                          <div style={{fontSize:11,color:'var(--muted)',fontWeight:700,textTransform:'uppercase'}}>Connected at</div>
+                          <div style={{fontSize:12,marginTop:5,color:'var(--muted)'}}>{ao.validated_at?.slice(0,16).replace('T',' ')}</div>
+                        </div>
+                      </div>
+                      <div style={{display:'flex',gap:8,justifyContent:'space-between',alignItems:'center'}}>
+                        <span style={{fontSize:12,color:'var(--muted)'}}>Trading on NSE · BSE · NFO · MCX</span>
+                        <button className="btn btn-red" onClick={disconnectAngelOne}>Disconnect</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div>
+                      <div style={{padding:'10px 14px',background:'rgba(249,115,22,.08)',border:'1px solid rgba(249,115,22,.25)',borderRadius:7,fontSize:13,marginBottom:14}}>
+                        <b>Get API key:</b> Login to <a href="https://smartapi.angelbroking.com" target="_blank" rel="noopener" style={{color:'#f97316'}}>smartapi.angelbroking.com</a> → My Profile → API Key.
+                        Set up TOTP in the Angel One app and copy the secret key shown during setup.
+                      </div>
+                      <label style={lbl}>API Key</label>
+                      <input type="text" style={inp} value={aoApiKey} onChange={e=>setAoApiKey(e.target.value)} placeholder="xxxxxxxx" />
+                      <label style={lbl}>Client ID (Trading Account)</label>
+                      <input type="text" style={inp} value={aoClientId} onChange={e=>setAoClientId(e.target.value)} placeholder="A12345" />
+                      <label style={lbl}>MPIN / Password</label>
+                      <input type="password" style={inp} value={aoPassword} onChange={e=>setAoPassword(e.target.value)} placeholder="4-digit MPIN" />
+                      <label style={lbl}>TOTP Secret (base-32)</label>
+                      <input type="password" style={inp} value={aoTotp} onChange={e=>setAoTotp(e.target.value)} placeholder="JBSWY3DPEHPK3PXP…" />
+                      <div style={{marginTop:16,display:'flex',justifyContent:'flex-end'}}>
+                        <button className="btn btn-green" disabled={aoBusy} onClick={connectAngelOne}>
+                          {aoBusy ? 'Connecting…' : 'Validate & Connect'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Zerodha connection */}
+          {(() => {
+            const zrd = me?.zerodha || {};
+            const inp = {width:'100%',marginTop:5,background:'var(--bg-input)',border:'1px solid var(--border)',
+                         borderRadius:6,padding:'9px 12px',color:'var(--text)',fontSize:13,fontFamily:'JetBrains Mono'};
+            const lbl = {fontSize:11,color:'var(--muted)',fontWeight:700,letterSpacing:'.06em',textTransform:'uppercase',marginTop:12,display:'block'};
+            return (
+              <div className="card">
+                <div className="card-hdr">
+                  <span className="card-title">📈 Zerodha (Kite API)</span>
+                  {zrd.connected && (
+                    <Badge color={zrd.has_access_token ? '#10b981' : '#f59e0b'}>
+                      {zrd.has_access_token ? 'SESSION ACTIVE' : 'NEEDS LOGIN'}
+                    </Badge>
+                  )}
+                </div>
+                <div style={{padding:18}}>
+                  {zrd.connected ? (
+                    <div>
+                      {!zrd.has_access_token && (
+                        <div style={{padding:'12px 14px',background:'rgba(245,158,11,.1)',border:'1px solid rgba(245,158,11,.3)',borderRadius:7,marginBottom:14,fontSize:13}}>
+                          <b>Daily login required.</b> Zerodha access tokens expire every day. Complete the OAuth flow below.
+                        </div>
+                      )}
+                      {zrd.has_access_token && (
+                        <div style={{padding:'10px 14px',background:'rgba(16,185,129,.08)',border:'1px solid rgba(16,185,129,.3)',borderRadius:7,marginBottom:14,fontSize:13,color:'#10b981'}}>
+                          ✅ Session active — expires ~{zrd.session_expiry?.slice(0,16).replace('T',' ')} UTC
+                        </div>
+                      )}
+                      {/* Daily re-auth step */}
+                      <div style={{marginBottom:14}}>
+                        <a href={zrd.login_url} target="_blank" rel="noopener"
+                          className="btn btn-blue" style={{display:'inline-block',marginBottom:10,textDecoration:'none',fontSize:13}}>
+                          🔗 Open Kite Login (daily)
+                        </a>
+                        <label style={lbl}>Paste request_token from redirect URL</label>
+                        <div style={{display:'flex',gap:8,marginTop:6}}>
+                          <input type="text" value={zrdReqToken} onChange={e=>setZrdReqToken(e.target.value)}
+                            placeholder="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                            style={{...inp, marginTop:0, flex:1}} />
+                          <button className="btn btn-green" disabled={zrdTokenBusy||!zrdReqToken} onClick={activateZerodha}>
+                            {zrdTokenBusy?'Activating…':'Activate'}
+                          </button>
+                        </div>
+                      </div>
+                      <div style={{display:'flex',gap:8,justifyContent:'flex-end'}}>
+                        <button className="btn btn-red" onClick={disconnectZerodha}>Disconnect</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div>
+                      <div style={{padding:'10px 14px',background:'rgba(59,130,246,.08)',border:'1px solid rgba(59,130,246,.25)',borderRadius:7,fontSize:13,marginBottom:14}}>
+                        <b>Get API credentials:</b> Login to <a href="https://developers.kite.trade" target="_blank" rel="noopener" style={{color:'#3b82f6'}}>developers.kite.trade</a> → Create an app. After saving keys below, you'll get a login URL to complete the OAuth flow daily.
+                      </div>
+                      <label style={lbl}>API Key</label>
+                      <input type="text" style={inp} value={zrdApiKey} onChange={e=>setZrdApiKey(e.target.value)} placeholder="xxxxxxxxxxxxxxxx" />
+                      <label style={lbl}>API Secret</label>
+                      <input type="password" style={inp} value={zrdApiSecret} onChange={e=>setZrdApiSecret(e.target.value)} placeholder="••••••••••••••••••••••••" />
+                      <div style={{marginTop:16,display:'flex',justifyContent:'flex-end'}}>
+                        <button className="btn btn-green" disabled={zrdBusy} onClick={saveZerodha}>
+                          {zrdBusy ? 'Saving…' : 'Save & Get Login URL'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Telegram notifications */}
           <div className="card">
@@ -1939,6 +2095,630 @@
     );
 
     /* ══════════════════════════════════════════════════════════ */
+    /* ── Shared Indian broker helpers ───────────────────────── */
+    const INR = v => v == null ? '—' : '₹' + parseFloat(v).toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2});
+
+    const OrderForm = ({ onSubmit, loading, exchanges, products, orderTypes }) => {
+      const [sym,   setSym]   = useState('');
+      const [token, setToken] = useState('');
+      const [side,  setSide]  = useState('BUY');
+      const [qty,   setQty]   = useState('');
+      const [price, setPrice] = useState('0');
+      const [otype, setOtype] = useState('MARKET');
+      const [prod,  setProd]  = useState((products||[])[0]||'INTRADAY');
+      const [exch,  setExch]  = useState((exchanges||[])[0]||'NSE');
+      const [sl,    setSl]    = useState('0');
+      const [target,setTarget]= useState('0');
+
+      const inp = {width:'100%',background:'var(--bg-input)',border:'1px solid var(--border)',
+                   borderRadius:6,padding:'7px 10px',color:'var(--text)',fontSize:13};
+      const lbl = {fontSize:11,color:'var(--muted)',fontWeight:700,letterSpacing:'.06em',textTransform:'uppercase',display:'block',marginBottom:4};
+
+      const submit = () => onSubmit({tradingsymbol:sym.toUpperCase(),symboltoken:token,
+        transaction_type:side,quantity:parseInt(qty)||0,price:parseFloat(price)||0,
+        order_type:otype,product:prod||otype,exchange:exch,
+        stoploss:parseFloat(sl)||0,squareoff:parseFloat(target)||0});
+
+      return (
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+          <div>
+            <label style={lbl}>Symbol</label>
+            <input style={inp} placeholder="RELIANCE-EQ" value={sym} onChange={e=>setSym(e.target.value)} />
+          </div>
+          <div>
+            <label style={lbl}>Symbol Token</label>
+            <input style={inp} placeholder="2885" value={token} onChange={e=>setToken(e.target.value)} />
+          </div>
+          <div>
+            <label style={lbl}>Side</label>
+            <div style={{display:'flex',gap:6}}>
+              {['BUY','SELL'].map(s=>(
+                <button key={s} onClick={()=>setSide(s)}
+                  className={`btn ${side===s?(s==='BUY'?'btn-green':'btn-red'):'btn-ghost'}`}
+                  style={{flex:1,fontSize:13}}>{s}</button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <label style={lbl}>Qty</label>
+            <input style={inp} type="number" min="1" value={qty} onChange={e=>setQty(e.target.value)} />
+          </div>
+          <div>
+            <label style={lbl}>Price (0=Market)</label>
+            <input style={inp} type="number" step="0.05" value={price} onChange={e=>setPrice(e.target.value)} />
+          </div>
+          <div>
+            <label style={lbl}>Order Type</label>
+            <select style={inp} value={otype} onChange={e=>setOtype(e.target.value)}>
+              {(orderTypes||['MARKET','LIMIT','STOPLOSS_LIMIT','STOPLOSS_MARKET']).map(t=>(
+                <option key={t}>{t}</option>
+              ))}
+            </select>
+          </div>
+          {(products||[]).length>0 && (
+            <div>
+              <label style={lbl}>Product</label>
+              <select style={inp} value={prod} onChange={e=>setProd(e.target.value)}>
+                {products.map(p=><option key={p}>{p}</option>)}
+              </select>
+            </div>
+          )}
+          <div>
+            <label style={lbl}>Exchange</label>
+            <select style={inp} value={exch} onChange={e=>setExch(e.target.value)}>
+              {(exchanges||['NSE','BSE']).map(ex=><option key={ex}>{ex}</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={lbl}>Stop Loss (pts/price)</label>
+            <input style={inp} type="number" step="0.05" value={sl} onChange={e=>setSl(e.target.value)} />
+          </div>
+          <div>
+            <label style={lbl}>Target / Squareoff (pts/price)</label>
+            <input style={inp} type="number" step="0.05" value={target} onChange={e=>setTarget(e.target.value)} />
+          </div>
+          <div style={{gridColumn:'span 2',display:'flex',justifyContent:'flex-end',gap:8,marginTop:4}}>
+            <button className={`btn ${side==='BUY'?'btn-green':'btn-red'}`}
+              disabled={loading||!sym||!qty} onClick={submit}>
+              {loading ? 'Placing…' : `Place ${side}`}
+            </button>
+          </div>
+        </div>
+      );
+    };
+
+    const IndianPositionsTable = ({ positions, onSquareOff, squaringOff }) => {
+      if (!positions || positions.length === 0)
+        return <div className="empty">No open positions</div>;
+      return (
+        <div style={{overflowX:'auto'}}>
+          <table>
+            <thead><tr><th>Symbol</th><th>Exchange</th><th>Qty</th><th>Avg Buy</th><th>LTP</th><th>P&amp;L</th><th>Product</th></tr></thead>
+            <tbody>
+              {positions.map((p,i)=>{
+                const qty    = parseInt(p.netqty ?? p.quantity ?? 0);
+                const pnl    = parseFloat(p.unrealisedpnl ?? p.pnl ?? p.unrealised ?? 0);
+                const avgBuy = parseFloat(p.averageprice ?? p.average_price ?? 0);
+                const ltp    = parseFloat(p.ltp ?? 0);
+                if (qty === 0) return null;
+                return (
+                  <tr key={i}>
+                    <td className="mono" style={{fontWeight:700}}>{p.tradingsymbol ?? p.trading_symbol}</td>
+                    <td>{p.exchange}</td>
+                    <td style={{color:qty>0?'#10b981':'#ef4444',fontWeight:600}}>{qty}</td>
+                    <td className="mono">{INR(avgBuy)}</td>
+                    <td className="mono">{INR(ltp)}</td>
+                    <td className="mono" style={{color:pnl>=0?'#10b981':'#ef4444',fontWeight:700}}>{INR(pnl)}</td>
+                    <td><Badge color="#3b82f6">{p.producttype ?? p.product}</Badge></td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          {onSquareOff && (
+            <div style={{marginTop:12,display:'flex',justifyContent:'flex-end'}}>
+              <button className="btn btn-red" disabled={squaringOff} onClick={onSquareOff}>
+                {squaringOff ? 'Squaring Off…' : '⚡ Square Off All Positions'}
+              </button>
+            </div>
+          )}
+        </div>
+      );
+    };
+
+    const IndianOrdersTable = ({ orders, onCancel }) => {
+      if (!orders || orders.length === 0) return <div className="empty">No orders</div>;
+      return (
+        <div style={{overflowX:'auto'}}>
+          <table>
+            <thead><tr><th>Time</th><th>Symbol</th><th>Side</th><th>Type</th><th>Qty</th><th>Price</th><th>Status</th><th></th></tr></thead>
+            <tbody>
+              {orders.slice().reverse().map((o,i)=>{
+                const status = (o.status ?? o.orderstatus ?? '').toUpperCase();
+                const side   = (o.transactiontype ?? o.transaction_type ?? '').toUpperCase();
+                const ts     = (o.ordertime ?? o.order_timestamp ?? o.updatetime ?? '').slice(0,16);
+                return (
+                  <tr key={i}>
+                    <td className="mono" style={{fontSize:11,color:'var(--muted)'}}>{ts}</td>
+                    <td className="mono" style={{fontWeight:700}}>{o.tradingsymbol ?? o.trading_symbol}</td>
+                    <td><Badge color={side==='BUY'?'#10b981':'#ef4444'}>{side}</Badge></td>
+                    <td style={{fontSize:11}}>{o.ordertype ?? o.order_type}</td>
+                    <td className="mono">{o.quantity ?? o.qty}</td>
+                    <td className="mono">{o.price??0 > 0 ? INR(o.price ?? o.averageprice) : 'MKT'}</td>
+                    <td><Badge color={status==='COMPLETE'?'#10b981':status.includes('REJECT')||status.includes('CANCEL')?'#ef4444':'#f59e0b'}>{status}</Badge></td>
+                    <td>
+                      {(status === 'OPEN' || status === 'PENDING' || status === 'TRIGGER PENDING') && onCancel && (
+                        <button className="btn btn-red" style={{padding:'3px 10px',fontSize:11}}
+                          onClick={()=>onCancel(o.orderid ?? o.order_id, o.variety ?? 'NORMAL')}>
+                          Cancel
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      );
+    };
+
+    /* ── Angel One Tab ────────────────────────────────────────── */
+    const AngelOneTab = ({ me }) => {
+      const toast       = useToast();
+      const ao          = me?.angelone || {};
+      const [view,      setView]      = useState('positions');
+      const [positions, setPositions] = useState(null);
+      const [holdings,  setHoldings]  = useState(null);
+      const [orders,    setOrders]    = useState(null);
+      const [account,   setAccount]   = useState(null);
+      const [loading,   setLoading]   = useState(false);
+      const [sqOff,     setSqOff]     = useState(false);
+      const [orderBusy, setOrderBusy] = useState(false);
+      const [search,    setSearch]    = useState('');
+      const [searchRes, setSearchRes] = useState([]);
+      const [searching, setSearching] = useState(false);
+
+      const load = async (what) => {
+        setLoading(true);
+        try {
+          const r = await fetch(`/api/angelone/${what}`);
+          const d = await r.json();
+          if (!r.ok) throw new Error(d.error || 'Failed');
+          if (what === 'positions') setPositions(d);
+          else if (what === 'holdings') setHoldings(d);
+          else if (what === 'orders')   setOrders(d);
+          else if (what === 'account')  setAccount(d);
+        } catch(e) { toast.push(e.message, 'error'); }
+        finally { setLoading(false); }
+      };
+
+      useEffect(() => {
+        if (!ao.connected) return;
+        load('positions');
+        load('account');
+      }, [ao.connected]);
+
+      useEffect(() => {
+        if (!ao.connected) return;
+        if (view === 'holdings') load('holdings');
+        else if (view === 'orders') load('orders');
+        else if (view === 'positions') load('positions');
+      }, [view]);
+
+      const placeOrder = async (params) => {
+        setOrderBusy(true);
+        try {
+          const r = await fetch('/api/angelone/order', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify(params),
+          });
+          const d = await r.json();
+          if (!r.ok) throw new Error(d.error || 'Order failed');
+          toast.push(`Order placed: ${d.order_id}`, 'success');
+          setTimeout(() => load('orders'), 1500);
+        } catch(e) { toast.push(e.message, 'error'); }
+        finally { setOrderBusy(false); }
+      };
+
+      const cancelOrder = async (orderId, variety) => {
+        if (!confirm(`Cancel order ${orderId}?`)) return;
+        try {
+          const r = await fetch(`/api/angelone/order/${orderId}?variety=${variety||'NORMAL'}`, { method:'DELETE' });
+          const d = await r.json();
+          if (!r.ok) throw new Error(d.error || 'Cancel failed');
+          toast.push('Order cancelled', 'info');
+          load('orders');
+        } catch(e) { toast.push(e.message, 'error'); }
+      };
+
+      const squareOff = async () => {
+        if (!confirm('Square off ALL Angel One intraday positions?')) return;
+        setSqOff(true);
+        try {
+          const r = await fetch('/api/angelone/squareoff', { method:'POST' });
+          const d = await r.json();
+          if (!r.ok) throw new Error(d.error || 'Failed');
+          const ok  = (d.results||[]).filter(x=>x.ok).length;
+          const bad = (d.results||[]).filter(x=>!x.ok).length;
+          toast.push(`Square off: ${ok} closed${bad?', '+bad+' failed':''}`, ok?'success':'error');
+          load('positions');
+        } catch(e) { toast.push(e.message, 'error'); }
+        finally { setSqOff(false); }
+      };
+
+      const doSearch = async () => {
+        if (!search) return;
+        setSearching(true);
+        try {
+          const r = await fetch(`/api/angelone/search?exchange=NSE&q=${encodeURIComponent(search)}`);
+          const d = await r.json();
+          if (!r.ok) throw new Error(d.error||'Search failed');
+          setSearchRes(d||[]);
+        } catch(e) { toast.push(e.message,'error'); }
+        finally { setSearching(false); }
+      };
+
+      if (!ao.connected) return (
+        <div className="fadein" style={{maxWidth:600,margin:'40px auto',textAlign:'center'}}>
+          <div className="card" style={{padding:32}}>
+            <div style={{fontSize:40,marginBottom:12}}>🏦</div>
+            <h2 style={{fontSize:18,fontWeight:700,marginBottom:8}}>Angel One Not Connected</h2>
+            <p style={{color:'var(--muted)',fontSize:14,marginBottom:20}}>
+              Connect your Angel One account from the Profile tab to start trading on NSE/BSE.
+            </p>
+            <button className="btn btn-blue" onClick={()=>window._setTab?.('profile')}>
+              Go to Profile →
+            </button>
+          </div>
+        </div>
+      );
+
+      return (
+        <div className="fadein" style={{display:'grid',gridTemplateColumns:'1fr',gap:16}}>
+
+          {/* Account summary */}
+          {account && (
+            <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(160px,1fr))',gap:12}}>
+              <MetCard label="Net Balance"      value={INR(account.net)}            color="#10b981" />
+              <MetCard label="Available Cash"   value={INR(account.available_cash)} color="#3b82f6" />
+              <MetCard label="Used Margin"      value={INR(account.used_margin)}    color="#f59e0b" />
+              <MetCard label="M2M Unrealised"   value={INR(account.m2m_unrealised)} color={parseFloat(account.m2m_unrealised||0)>=0?'#10b981':'#ef4444'} />
+              <MetCard label="M2M Realised"     value={INR(account.m2m_realised)}   color={parseFloat(account.m2m_realised||0)>=0?'#10b981':'#ef4444'} />
+              <MetCard label="Client"           value={account.client_id}           color="#8b5cf6" />
+            </div>
+          )}
+
+          {/* Sub-nav */}
+          <div style={{display:'flex',gap:8,borderBottom:'1px solid var(--border)',paddingBottom:8}}>
+            {['positions','holdings','orders','order','search'].map(v=>(
+              <button key={v} onClick={()=>setView(v)}
+                style={{padding:'6px 14px',fontSize:13,fontWeight:500,background:'none',border:'none',
+                  color:view===v?'#3b82f6':'var(--muted)',
+                  borderBottom:`2px solid ${view===v?'#3b82f6':'transparent'}`,cursor:'pointer'}}>
+                {v.charAt(0).toUpperCase()+v.slice(1)}
+              </button>
+            ))}
+            <button onClick={()=>load(view==='order'||view==='search'?'positions':view)}
+              style={{marginLeft:'auto',padding:'5px 12px',fontSize:12,background:'var(--bg-input)',
+                border:'1px solid var(--border)',borderRadius:6,cursor:'pointer',color:'var(--text)'}}>
+              🔄 Refresh
+            </button>
+          </div>
+
+          <div className="card">
+            <div style={{padding:16}}>
+              {loading && <div style={{textAlign:'center',padding:20,color:'var(--muted)'}}>Loading…</div>}
+
+              {!loading && view === 'positions' && (
+                <IndianPositionsTable positions={positions} onSquareOff={squareOff} squaringOff={sqOff} />
+              )}
+              {!loading && view === 'holdings' && (
+                holdings == null
+                  ? <div className="empty">Click refresh</div>
+                  : holdings.length === 0
+                    ? <div className="empty">No holdings</div>
+                    : <div style={{overflowX:'auto'}}>
+                        <table>
+                          <thead><tr><th>Symbol</th><th>Exchange</th><th>Qty</th><th>Avg Buy</th><th>LTP</th><th>P&amp;L</th></tr></thead>
+                          <tbody>
+                            {holdings.map((h,i)=>(
+                              <tr key={i}>
+                                <td className="mono" style={{fontWeight:700}}>{h.tradingsymbol}</td>
+                                <td>{h.exchange}</td>
+                                <td className="mono">{h.quantity}</td>
+                                <td className="mono">{INR(h.averageprice)}</td>
+                                <td className="mono">{INR(h.ltp)}</td>
+                                <td className="mono" style={{color:parseFloat(h.profitandloss||0)>=0?'#10b981':'#ef4444',fontWeight:700}}>
+                                  {INR(h.profitandloss)}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+              )}
+              {!loading && view === 'orders' && (
+                <IndianOrdersTable orders={orders} onCancel={cancelOrder} />
+              )}
+              {view === 'order' && (
+                <div>
+                  <h3 style={{fontSize:14,fontWeight:700,marginBottom:14}}>Place Order — Angel One (NSE/BSE)</h3>
+                  <OrderForm
+                    onSubmit={placeOrder}
+                    loading={orderBusy}
+                    exchanges={['NSE','BSE','NFO','MCX']}
+                    products={['INTRADAY','DELIVERY','MARGIN','CARRYFORWARD']}
+                    orderTypes={['MARKET','LIMIT','STOPLOSS_LIMIT','STOPLOSS_MARKET']}
+                  />
+                </div>
+              )}
+              {view === 'search' && (
+                <div>
+                  <h3 style={{fontSize:14,fontWeight:700,marginBottom:12}}>Symbol Search (NSE)</h3>
+                  <div style={{display:'flex',gap:8,marginBottom:14}}>
+                    <input value={search} onChange={e=>setSearch(e.target.value)}
+                      placeholder="e.g. RELIANCE, TCS, INFY…"
+                      onKeyDown={e=>e.key==='Enter'&&doSearch()}
+                      style={{flex:1,background:'var(--bg-input)',border:'1px solid var(--border)',
+                              borderRadius:6,padding:'8px 12px',color:'var(--text)',fontSize:13}} />
+                    <button className="btn btn-blue" disabled={searching} onClick={doSearch}>
+                      {searching?'Searching…':'Search'}
+                    </button>
+                  </div>
+                  {searchRes.length > 0 && (
+                    <table>
+                      <thead><tr><th>Symbol</th><th>Token</th><th>Name</th><th>Exch</th></tr></thead>
+                      <tbody>
+                        {searchRes.map((s,i)=>(
+                          <tr key={i}>
+                            <td className="mono" style={{fontWeight:700}}>{s.tradingsymbol}</td>
+                            <td className="mono" style={{color:'var(--muted)'}}>{s.symboltoken}</td>
+                            <td style={{fontSize:12}}>{s.name}</td>
+                            <td>{s.exch_seg}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    /* ── Zerodha Tab ──────────────────────────────────────────── */
+    const ZerodhaTab = ({ me }) => {
+      const toast       = useToast();
+      const zrd         = me?.zerodha || {};
+      const [view,      setView]      = useState('positions');
+      const [positions, setPositions] = useState(null);
+      const [holdings,  setHoldings]  = useState(null);
+      const [orders,    setOrders]    = useState(null);
+      const [account,   setAccount]   = useState(null);
+      const [loading,   setLoading]   = useState(false);
+      const [sqOff,     setSqOff]     = useState(false);
+      const [orderBusy, setOrderBusy] = useState(false);
+      const [reqToken,  setReqToken]  = useState('');
+      const [tokenBusy, setTokenBusy] = useState(false);
+
+      const load = async (what) => {
+        setLoading(true);
+        try {
+          const r = await fetch(`/api/zerodha/${what}`);
+          const d = await r.json();
+          if (!r.ok) throw new Error(d.error || 'Failed');
+          if (what === 'positions') setPositions((d.day||d||[]));
+          else if (what === 'holdings') setHoldings(d||[]);
+          else if (what === 'orders')   setOrders(d||[]);
+          else if (what === 'account')  setAccount(d);
+        } catch(e) { toast.push(e.message, 'error'); }
+        finally { setLoading(false); }
+      };
+
+      useEffect(() => {
+        if (!zrd.connected || !zrd.has_access_token) return;
+        load('positions');
+        load('account');
+      }, [zrd.connected, zrd.has_access_token]);
+
+      useEffect(() => {
+        if (!zrd.connected || !zrd.has_access_token) return;
+        if (view === 'holdings')  load('holdings');
+        else if (view === 'orders') load('orders');
+        else if (view === 'positions') load('positions');
+      }, [view]);
+
+      const activateToken = async () => {
+        if (!reqToken) { toast.push('Paste the request_token from the redirect URL', 'error'); return; }
+        setTokenBusy(true);
+        try {
+          const r = await fetch('/api/zerodha/session', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({ request_token: reqToken }),
+          });
+          const d = await r.json();
+          if (!r.ok) throw new Error(d.error || 'Session failed');
+          toast.push('Zerodha session established!', 'success');
+          setReqToken('');
+          window.location.reload();
+        } catch(e) { toast.push(e.message, 'error'); }
+        finally { setTokenBusy(false); }
+      };
+
+      const placeOrder = async (params) => {
+        setOrderBusy(true);
+        try {
+          const r = await fetch('/api/zerodha/order', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({...params, product: params.product || 'MIS'}),
+          });
+          const d = await r.json();
+          if (!r.ok) throw new Error(d.error || 'Order failed');
+          toast.push(`Order placed: ${d.order_id}`, 'success');
+          setTimeout(() => load('orders'), 1500);
+        } catch(e) { toast.push(e.message, 'error'); }
+        finally { setOrderBusy(false); }
+      };
+
+      const cancelOrder = async (orderId, variety) => {
+        if (!confirm(`Cancel order ${orderId}?`)) return;
+        try {
+          const r = await fetch(`/api/zerodha/order/${orderId}?variety=${variety||'regular'}`, { method:'DELETE' });
+          const d = await r.json();
+          if (!r.ok) throw new Error(d.error || 'Cancel failed');
+          toast.push('Order cancelled', 'info');
+          load('orders');
+        } catch(e) { toast.push(e.message, 'error'); }
+      };
+
+      const squareOff = async () => {
+        if (!confirm('Square off ALL Zerodha MIS positions?')) return;
+        setSqOff(true);
+        try {
+          const r = await fetch('/api/zerodha/squareoff', { method:'POST' });
+          const d = await r.json();
+          if (!r.ok) throw new Error(d.error || 'Failed');
+          const ok  = (d.results||[]).filter(x=>x.ok).length;
+          const bad = (d.results||[]).filter(x=>!x.ok).length;
+          toast.push(`Square off: ${ok} closed${bad?', '+bad+' failed':''}`, ok?'success':'error');
+          load('positions');
+        } catch(e) { toast.push(e.message, 'error'); }
+        finally { setSqOff(false); }
+      };
+
+      if (!zrd.connected) return (
+        <div className="fadein" style={{maxWidth:600,margin:'40px auto',textAlign:'center'}}>
+          <div className="card" style={{padding:32}}>
+            <div style={{fontSize:40,marginBottom:12}}>📈</div>
+            <h2 style={{fontSize:18,fontWeight:700,marginBottom:8}}>Zerodha Not Connected</h2>
+            <p style={{color:'var(--muted)',fontSize:14,marginBottom:20}}>
+              Connect your Zerodha account from the Profile tab to start trading on NSE/BSE.
+            </p>
+            <button className="btn btn-blue" onClick={()=>window._setTab?.('profile')}>
+              Go to Profile →
+            </button>
+          </div>
+        </div>
+      );
+
+      // Connected but no access token yet — need OAuth step
+      if (zrd.connected && !zrd.has_access_token) return (
+        <div className="fadein" style={{maxWidth:600,margin:'40px auto'}}>
+          <div className="card">
+            <div className="card-hdr"><span className="card-title">🔐 Zerodha — Activate Session</span></div>
+            <div style={{padding:18}}>
+              <p style={{fontSize:13,color:'var(--muted)',marginBottom:14}}>
+                Zerodha requires a daily login. Click the button below to open Kite login, then paste the
+                <code style={{background:'var(--bg-input)',padding:'1px 5px',borderRadius:4,fontSize:12}}>request_token</code>
+                from the redirect URL.
+              </p>
+              <a href={zrd.login_url} target="_blank" rel="noopener"
+                className="btn btn-blue" style={{display:'inline-block',marginBottom:14,textDecoration:'none'}}>
+                🔗 Open Kite Login
+              </a>
+              <br/>
+              <label style={{fontSize:11,color:'var(--muted)',fontWeight:700,letterSpacing:'.06em',textTransform:'uppercase'}}>
+                Paste request_token here
+              </label>
+              <div style={{display:'flex',gap:8,marginTop:6}}>
+                <input value={reqToken} onChange={e=>setReqToken(e.target.value)}
+                  placeholder="abc123xyz…"
+                  style={{flex:1,background:'var(--bg-input)',border:'1px solid var(--border)',
+                          borderRadius:6,padding:'9px 12px',color:'var(--text)',fontSize:13,fontFamily:'JetBrains Mono'}} />
+                <button className="btn btn-green" disabled={tokenBusy||!reqToken} onClick={activateToken}>
+                  {tokenBusy?'Activating…':'Activate'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+
+      return (
+        <div className="fadein" style={{display:'grid',gridTemplateColumns:'1fr',gap:16}}>
+
+          {account && (
+            <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(160px,1fr))',gap:12}}>
+              <MetCard label="Available Cash"    value={INR(account.available_cash)}   color="#10b981" />
+              <MetCard label="Opening Balance"   value={INR(account.opening_balance)}  color="#3b82f6" />
+              <MetCard label="Used Margin"       value={INR(account.used_margin)}      color="#f59e0b" />
+              <MetCard label="Net"               value={INR(account.net)}              color={parseFloat(account.net||0)>=0?'#10b981':'#ef4444'} />
+              <MetCard label="Client"            value={account.client_id}             color="#8b5cf6" />
+            </div>
+          )}
+
+          <div style={{display:'flex',gap:8,borderBottom:'1px solid var(--border)',paddingBottom:8}}>
+            {['positions','holdings','orders','order'].map(v=>(
+              <button key={v} onClick={()=>setView(v)}
+                style={{padding:'6px 14px',fontSize:13,fontWeight:500,background:'none',border:'none',
+                  color:view===v?'#3b82f6':'var(--muted)',
+                  borderBottom:`2px solid ${view===v?'#3b82f6':'transparent'}`,cursor:'pointer'}}>
+                {v.charAt(0).toUpperCase()+v.slice(1)}
+              </button>
+            ))}
+            <button onClick={()=>load(view==='order'?'positions':view)}
+              style={{marginLeft:'auto',padding:'5px 12px',fontSize:12,background:'var(--bg-input)',
+                border:'1px solid var(--border)',borderRadius:6,cursor:'pointer',color:'var(--text)'}}>
+              🔄 Refresh
+            </button>
+          </div>
+
+          <div className="card">
+            <div style={{padding:16}}>
+              {loading && <div style={{textAlign:'center',padding:20,color:'var(--muted)'}}>Loading…</div>}
+
+              {!loading && view === 'positions' && (
+                <IndianPositionsTable positions={positions} onSquareOff={squareOff} squaringOff={sqOff} />
+              )}
+              {!loading && view === 'holdings' && (
+                holdings == null
+                  ? <div className="empty">Click refresh</div>
+                  : holdings.length === 0
+                    ? <div className="empty">No holdings</div>
+                    : <div style={{overflowX:'auto'}}>
+                        <table>
+                          <thead><tr><th>Symbol</th><th>Exchange</th><th>Qty</th><th>Avg Buy</th><th>LTP</th><th>P&amp;L</th></tr></thead>
+                          <tbody>
+                            {holdings.map((h,i)=>(
+                              <tr key={i}>
+                                <td className="mono" style={{fontWeight:700}}>{h.tradingsymbol}</td>
+                                <td>{h.exchange}</td>
+                                <td className="mono">{h.quantity}</td>
+                                <td className="mono">{INR(h.average_price)}</td>
+                                <td className="mono">{INR(h.last_price)}</td>
+                                <td className="mono" style={{color:parseFloat(h.pnl||0)>=0?'#10b981':'#ef4444',fontWeight:700}}>
+                                  {INR(h.pnl)}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+              )}
+              {!loading && view === 'orders' && (
+                <IndianOrdersTable orders={orders} onCancel={cancelOrder} />
+              )}
+              {view === 'order' && (
+                <div>
+                  <h3 style={{fontSize:14,fontWeight:700,marginBottom:14}}>Place Order — Zerodha (NSE/BSE)</h3>
+                  <OrderForm
+                    onSubmit={placeOrder}
+                    loading={orderBusy}
+                    exchanges={['NSE','BSE','NFO','BFO','MCX','CDS']}
+                    products={['MIS','CNC','NRML']}
+                    orderTypes={['MARKET','LIMIT','SL','SL-M']}
+                  />
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      );
+    };
+
     /*  APP                                                       */
     /* ══════════════════════════════════════════════════════════ */
     const App = () => {
@@ -1962,6 +2742,9 @@
         }).catch(() => {});
       }, []);
       useEffect(() => { loadMe(); }, [loadMe]);
+
+      /* Expose setTab globally so broker tabs can redirect to profile */
+      useEffect(() => { window._setTab = setTab; return () => { window._setTab = null; }; }, [setTab]);
 
       /* Apply theme on first paint */
       useEffect(() => {
@@ -2059,14 +2842,19 @@
       const paused = m?.paused;
 
       const TABS = [
-        { id:'overview',  label:'📊 Overview'  },
-        { id:'trades',    label:'📋 Trades'    },
-        { id:'history',   label:'📅 History'   },
-        { id:'analytics', label:'📈 Analytics' },
-        { id:'reports',   label:'📄 Reports'   },
-        { id:'strategy',  label:'⚙️ Strategy'  },
-        { id:'system',    label:'💻 System'    },
-        { id:'profile',   label:'👤 Profile'   }, { id: 'brokers', label: '🏦 Brokers' },];
+        { id:'overview',  label:'📊 Overview'   },
+        { id:'trades',    label:'📋 Trades'     },
+        { id:'history',   label:'📅 History'    },
+        { id:'analytics', label:'📈 Analytics'  },
+        { id:'angelone',  label:'🏦 Angel One'  },
+        { id:'zerodha',   label:'📈 Zerodha'    },
+        { id:'reports',   label:'📄 Reports'    },
+        { id:'strategy',  label:'⚙️ Strategy'   },
+        { id:'system',    label:'💻 System'     },
+        { id:'profile',   label:'👤 Profile'    },
+        { id:'brokers',   label:'🏦 Brokers'    },
+      ];
+
 
       const cycleTheme = () => {
         const order = ['dark', 'light', 'auto'];
@@ -2276,6 +3064,12 @@
 
             {/* ANALYTICS */}
             {tab === 'analytics' && <AnalyticsTab />}
+
+            {/* ANGEL ONE */}
+            {tab === 'angelone' && <AngelOneTab me={me} />}
+
+            {/* ZERODHA */}
+            {tab === 'zerodha' && <ZerodhaTab me={me} />}
 
             {/* REPORTS */}
             {tab === 'reports' && <ReportsTab />}

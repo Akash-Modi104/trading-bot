@@ -288,7 +288,9 @@ def api_me():
         "plan":  u["plan"],
         "theme": u["theme"] or "dark",
         "notifications": notif,
-        "alpaca": auth.get_alpaca_status(u["id"]),
+        "alpaca":    auth.get_alpaca_status(u["id"]),
+        "angelone":  auth.get_angelone_status(u["id"]),
+        "zerodha":   auth.get_zerodha_status(u["id"]),
     })
 
 @app.route("/api/profile", methods=["POST"])
@@ -359,6 +361,685 @@ def api_alpaca_disconnect():
     auth.delete_alpaca_creds(u["id"])
     auth.audit(u["id"], "alpaca_disconnected", _client_ip())
     return jsonify({"ok": True})
+
+# ── Angel One broker endpoints ────────────────────────────────────
+
+def _get_angelone_broker(user_id: int):
+    """Build an AngelOneBroker from stored (decrypted) credentials."""
+    from brokers.angelone import AngelOneBroker
+    creds = auth.get_angelone_creds(user_id)
+    if not creds:
+        return None, "not_connected"
+    broker = AngelOneBroker(
+        api_key=creds["api_key"],
+        client_id=creds["client_id"],
+        password=creds["password"],
+        totp_secret=creds["totp_secret"],
+    )
+    # Restore cached tokens to avoid unnecessary re-login on every call
+    if creds["jwt_token"]:
+        broker.jwt_token     = creds["jwt_token"]
+        broker.refresh_token = creds["refresh_token"]
+        if creds["logged_in_at"]:
+            try:
+                from datetime import datetime as _dt
+                broker.logged_in_at = _dt.fromisoformat(creds["logged_in_at"])
+            except Exception:
+                pass
+    return broker, None
+
+def _persist_angelone_tokens(user_id: int, broker):
+    """Write refreshed tokens back to DB after any call that may have re-authed."""
+    if broker.jwt_token:
+        auth.update_angelone_tokens(
+            user_id,
+            jwt_token=broker.jwt_token,
+            refresh_token=broker.refresh_token or "",
+            logged_in_at=broker.logged_in_at.isoformat() if broker.logged_in_at else "",
+        )
+
+@app.route("/api/angelone/connect", methods=["POST"])
+@_require_auth
+def api_angelone_connect():
+    u = _current_user()
+    body       = request.get_json(force=True, silent=True) or {}
+    api_key    = (body.get("api_key") or "").strip()
+    client_id  = (body.get("client_id") or "").strip().upper()
+    password   = (body.get("password") or "").strip()
+    totp_secret = (body.get("totp_secret") or "").strip().upper()
+
+    if not all([api_key, client_id, password, totp_secret]):
+        return jsonify({"error": "missing_fields",
+                        "message": "api_key, client_id, password and totp_secret are required"}), 400
+
+    ok, info = auth.validate_angelone(api_key, client_id, password, totp_secret)
+    if not ok:
+        return jsonify({"error": "validation_failed",
+                        "details": info.get("error", str(info))}), 400
+
+    jwt_token     = info.get("jwtToken", "")
+    refresh_token = info.get("refreshToken", "")
+    logged_in_at  = datetime.utcnow().isoformat()
+
+    auth.save_angelone_creds(
+        u["id"], api_key, client_id, password, totp_secret,
+        jwt_token=jwt_token, refresh_token=refresh_token,
+        logged_in_at=logged_in_at,
+    )
+    auth.audit(u["id"], "angelone_connected", _client_ip(), {"client_id": client_id})
+    return jsonify({"ok": True, "client_id": client_id,
+                    "message": "Angel One account connected successfully"})
+
+@app.route("/api/angelone/disconnect", methods=["POST"])
+@_require_auth
+def api_angelone_disconnect():
+    u = _current_user()
+    broker, err = _get_angelone_broker(u["id"])
+    if broker:
+        try:
+            broker.logout()
+        except Exception:
+            pass
+    auth.delete_angelone_creds(u["id"])
+    auth.audit(u["id"], "angelone_disconnected", _client_ip())
+    return jsonify({"ok": True})
+
+@app.route("/api/angelone/account")
+@_require_auth
+def api_angelone_account():
+    u = _current_user()
+    broker, err = _get_angelone_broker(u["id"])
+    if err:
+        return jsonify({"error": err}), 400
+    try:
+        summary = broker.account_summary()
+        _persist_angelone_tokens(u["id"], broker)
+        return jsonify(summary)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/angelone/funds")
+@_require_auth
+def api_angelone_funds():
+    u = _current_user()
+    broker, err = _get_angelone_broker(u["id"])
+    if err:
+        return jsonify({"error": err}), 400
+    try:
+        funds = broker.get_funds()
+        _persist_angelone_tokens(u["id"], broker)
+        return jsonify(funds)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/angelone/positions")
+@_require_auth
+def api_angelone_positions():
+    u = _current_user()
+    broker, err = _get_angelone_broker(u["id"])
+    if err:
+        return jsonify({"error": err}), 400
+    try:
+        positions = broker.get_positions()
+        _persist_angelone_tokens(u["id"], broker)
+        return jsonify(positions)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/angelone/holdings")
+@_require_auth
+def api_angelone_holdings():
+    u = _current_user()
+    broker, err = _get_angelone_broker(u["id"])
+    if err:
+        return jsonify({"error": err}), 400
+    try:
+        holdings = broker.get_holdings()
+        _persist_angelone_tokens(u["id"], broker)
+        return jsonify(holdings)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/angelone/orders")
+@_require_auth
+def api_angelone_orders():
+    u = _current_user()
+    broker, err = _get_angelone_broker(u["id"])
+    if err:
+        return jsonify({"error": err}), 400
+    try:
+        orders = broker.get_order_book()
+        _persist_angelone_tokens(u["id"], broker)
+        return jsonify(orders)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/angelone/trades")
+@_require_auth
+def api_angelone_trades():
+    u = _current_user()
+    broker, err = _get_angelone_broker(u["id"])
+    if err:
+        return jsonify({"error": err}), 400
+    try:
+        trades = broker.get_trade_book()
+        _persist_angelone_tokens(u["id"], broker)
+        return jsonify(trades)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/angelone/order", methods=["POST"])
+@_require_auth
+def api_angelone_place_order():
+    """
+    Place a buy or sell order on Angel One.
+
+    Required body fields:
+      tradingsymbol  — e.g. "RELIANCE-EQ"
+      symboltoken    — numeric token (find via /api/angelone/search)
+      transaction_type — "BUY" or "SELL"
+      quantity       — integer
+
+    Optional:
+      price          — limit price (0 = market)
+      order_type     — MARKET | LIMIT | STOPLOSS_LIMIT | STOPLOSS_MARKET  (default MARKET)
+      product_type   — INTRADAY | DELIVERY | MARGIN | CARRYFORWARD        (default INTRADAY)
+      exchange       — NSE | BSE | NFO                                     (default NSE)
+      variety        — NORMAL | STOPLOSS | AMO | ROBO                      (default NORMAL)
+      duration       — DAY | IOC                                            (default DAY)
+      stoploss       — stoploss price / points (for ROBO/bracket orders)
+      squareoff      — target price / points  (for ROBO/bracket orders)
+      trailing_stoploss — trailing stop points (for ROBO orders)
+    """
+    u    = _current_user()
+    body = request.get_json(force=True, silent=True) or {}
+
+    required = ["tradingsymbol", "symboltoken", "transaction_type", "quantity"]
+    for f in required:
+        if not body.get(f):
+            return jsonify({"error": "missing_field", "field": f}), 400
+
+    broker, err = _get_angelone_broker(u["id"])
+    if err:
+        return jsonify({"error": err}), 400
+
+    try:
+        order_id = broker.place_order(
+            tradingsymbol    = body["tradingsymbol"].upper(),
+            symboltoken      = str(body["symboltoken"]),
+            transaction_type = body["transaction_type"].upper(),
+            quantity         = int(body["quantity"]),
+            price            = float(body.get("price", 0)),
+            order_type       = body.get("order_type", "MARKET").upper(),
+            product_type     = body.get("product_type", "INTRADAY").upper(),
+            exchange         = body.get("exchange", "NSE").upper(),
+            variety          = body.get("variety", "NORMAL").upper(),
+            duration         = body.get("duration", "DAY").upper(),
+            squareoff        = float(body.get("squareoff", 0)),
+            stoploss         = float(body.get("stoploss", 0)),
+            trailing_stoploss= float(body.get("trailing_stoploss", 0)),
+        )
+        _persist_angelone_tokens(u["id"], broker)
+        auth.audit(u["id"], "angelone_order_placed", _client_ip(), {
+            "symbol": body["tradingsymbol"],
+            "side":   body["transaction_type"],
+            "qty":    body["quantity"],
+        })
+        return jsonify({"ok": True, "order_id": order_id})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/angelone/order/<order_id>", methods=["DELETE"])
+@_require_auth
+def api_angelone_cancel_order(order_id: str):
+    u       = _current_user()
+    variety = request.args.get("variety", "NORMAL").upper()
+    broker, err = _get_angelone_broker(u["id"])
+    if err:
+        return jsonify({"error": err}), 400
+    try:
+        oid = broker.cancel_order(order_id, variety=variety)
+        _persist_angelone_tokens(u["id"], broker)
+        auth.audit(u["id"], "angelone_order_cancelled", _client_ip(), {"order_id": order_id})
+        return jsonify({"ok": True, "order_id": oid})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/angelone/order", methods=["PUT"])
+@_require_auth
+def api_angelone_modify_order():
+    u    = _current_user()
+    body = request.get_json(force=True, silent=True) or {}
+    for f in ["order_id", "tradingsymbol", "symboltoken", "quantity", "price"]:
+        if body.get(f) is None:
+            return jsonify({"error": "missing_field", "field": f}), 400
+    broker, err = _get_angelone_broker(u["id"])
+    if err:
+        return jsonify({"error": err}), 400
+    try:
+        oid = broker.modify_order(
+            order_id      = body["order_id"],
+            tradingsymbol = body["tradingsymbol"].upper(),
+            symboltoken   = str(body["symboltoken"]),
+            quantity      = int(body["quantity"]),
+            price         = float(body["price"]),
+            order_type    = body.get("order_type", "LIMIT").upper(),
+            product_type  = body.get("product_type", "INTRADAY").upper(),
+            exchange      = body.get("exchange", "NSE").upper(),
+            variety       = body.get("variety", "NORMAL").upper(),
+            duration      = body.get("duration", "DAY").upper(),
+        )
+        _persist_angelone_tokens(u["id"], broker)
+        return jsonify({"ok": True, "order_id": oid})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/angelone/squareoff", methods=["POST"])
+@_require_auth
+def api_angelone_squareoff():
+    """Close all open Angel One intraday positions at market price."""
+    u = _current_user()
+    broker, err = _get_angelone_broker(u["id"])
+    if err:
+        return jsonify({"error": err}), 400
+    try:
+        results = broker.square_off_all_positions()
+        _persist_angelone_tokens(u["id"], broker)
+        auth.audit(u["id"], "angelone_squareoff_all", _client_ip())
+        return jsonify({"ok": True, "results": results})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/angelone/quote")
+@_require_auth
+def api_angelone_quote():
+    """
+    GET /api/angelone/quote?exchange=NSE&symbol=RELIANCE-EQ&token=2885
+    Returns full quote (LTP, bid, ask, OHLC, volume).
+    """
+    u        = _current_user()
+    exchange = request.args.get("exchange", "NSE").upper()
+    symbol   = request.args.get("symbol", "")
+    token    = request.args.get("token", "")
+    if not symbol or not token:
+        return jsonify({"error": "symbol and token params required"}), 400
+    broker, err = _get_angelone_broker(u["id"])
+    if err:
+        return jsonify({"error": err}), 400
+    try:
+        quote = broker.get_quote(exchange, symbol, token)
+        _persist_angelone_tokens(u["id"], broker)
+        return jsonify(quote)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/angelone/search")
+@_require_auth
+def api_angelone_search():
+    """
+    GET /api/angelone/search?exchange=NSE&q=RELIANCE
+    Returns matching symbols with their tokens.
+    """
+    u        = _current_user()
+    exchange = request.args.get("exchange", "NSE").upper()
+    query    = request.args.get("q", "").strip()
+    if not query:
+        return jsonify({"error": "q param required"}), 400
+    broker, err = _get_angelone_broker(u["id"])
+    if err:
+        return jsonify({"error": err}), 400
+    try:
+        results = broker.search_symbol(exchange, query)
+        _persist_angelone_tokens(u["id"], broker)
+        return jsonify(results)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/angelone/candles")
+@_require_auth
+def api_angelone_candles():
+    """
+    GET /api/angelone/candles?exchange=NSE&token=2885&interval=ONE_MINUTE&from=2024-01-01+09:15&to=2024-01-01+15:30
+    """
+    u        = _current_user()
+    exchange = request.args.get("exchange", "NSE").upper()
+    token    = request.args.get("token", "")
+    interval = request.args.get("interval", "FIVE_MINUTE").upper()
+    from_dt  = request.args.get("from", "")
+    to_dt    = request.args.get("to", "")
+    if not token or not from_dt or not to_dt:
+        return jsonify({"error": "token, from and to params required"}), 400
+    broker, err = _get_angelone_broker(u["id"])
+    if err:
+        return jsonify({"error": err}), 400
+    try:
+        candles = broker.get_candles(exchange, token, interval, from_dt, to_dt)
+        _persist_angelone_tokens(u["id"], broker)
+        return jsonify(candles)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# ── Zerodha broker endpoints ──────────────────────────────────────
+
+def _get_zerodha_broker(user_id: int):
+    """Build a ZerodhaBroker from stored credentials."""
+    from brokers.zerodha import ZerodhaBroker
+    creds = auth.get_zerodha_creds(user_id)
+    if not creds:
+        return None, "not_connected"
+    broker = ZerodhaBroker(
+        api_key=creds["api_key"],
+        api_secret=creds["api_secret"],
+        access_token=creds["access_token"],
+    )
+    return broker, None
+
+@app.route("/api/zerodha/connect", methods=["POST"])
+@_require_auth
+def api_zerodha_connect():
+    """
+    Step 1: Store API key + secret, return the Kite login URL.
+    The user must visit that URL, log in, and paste the request_token back
+    via /api/zerodha/session.
+    """
+    u    = _current_user()
+    body = request.get_json(force=True, silent=True) or {}
+    api_key    = (body.get("api_key") or "").strip()
+    api_secret = (body.get("api_secret") or "").strip()
+    if not api_key or not api_secret:
+        return jsonify({"error": "missing_fields",
+                        "message": "api_key and api_secret are required"}), 400
+    auth.save_zerodha_creds(u["id"], api_key, api_secret)
+    auth.audit(u["id"], "zerodha_creds_saved", _client_ip())
+    login_url = f"https://kite.trade/connect/login?api_key={api_key}&v=3"
+    return jsonify({"ok": True, "login_url": login_url,
+                    "message": "Credentials saved. Visit login_url to authenticate."})
+
+@app.route("/api/zerodha/session", methods=["POST"])
+@_require_auth
+def api_zerodha_session():
+    """
+    Step 2: Exchange request_token (from redirect after Kite login) for access_token.
+    Body: { "request_token": "..." }
+    """
+    u    = _current_user()
+    body = request.get_json(force=True, silent=True) or {}
+    req_token = (body.get("request_token") or "").strip()
+    if not req_token:
+        return jsonify({"error": "missing_fields",
+                        "message": "request_token is required"}), 400
+    broker, err = _get_zerodha_broker(u["id"])
+    if err:
+        return jsonify({"error": err}), 400
+    try:
+        session = broker.generate_session(req_token)
+        access_token   = session.get("access_token", "")
+        login_time     = session.get("login_time", "")
+        expiry_ts      = (datetime.utcnow() + __import__("datetime").timedelta(hours=20)).isoformat()
+        auth.update_zerodha_access_token(u["id"], access_token, session_expiry=expiry_ts)
+        auth.audit(u["id"], "zerodha_session_created", _client_ip())
+        return jsonify({"ok": True, "login_time": login_time,
+                        "message": "Zerodha session established"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/zerodha/disconnect", methods=["POST"])
+@_require_auth
+def api_zerodha_disconnect():
+    u = _current_user()
+    broker, _ = _get_zerodha_broker(u["id"])
+    if broker and broker.access_token:
+        try:
+            broker.invalidate_session()
+        except Exception:
+            pass
+    auth.delete_zerodha_creds(u["id"])
+    auth.audit(u["id"], "zerodha_disconnected", _client_ip())
+    return jsonify({"ok": True})
+
+@app.route("/api/zerodha/account")
+@_require_auth
+def api_zerodha_account():
+    u = _current_user()
+    broker, err = _get_zerodha_broker(u["id"])
+    if err:
+        return jsonify({"error": err}), 400
+    try:
+        return jsonify(broker.account_summary())
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/zerodha/funds")
+@_require_auth
+def api_zerodha_funds():
+    u = _current_user()
+    broker, err = _get_zerodha_broker(u["id"])
+    if err:
+        return jsonify({"error": err}), 400
+    try:
+        return jsonify(broker.get_funds())
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/zerodha/positions")
+@_require_auth
+def api_zerodha_positions():
+    u = _current_user()
+    broker, err = _get_zerodha_broker(u["id"])
+    if err:
+        return jsonify({"error": err}), 400
+    try:
+        return jsonify(broker.get_positions())
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/zerodha/holdings")
+@_require_auth
+def api_zerodha_holdings():
+    u = _current_user()
+    broker, err = _get_zerodha_broker(u["id"])
+    if err:
+        return jsonify({"error": err}), 400
+    try:
+        return jsonify(broker.get_holdings())
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/zerodha/orders")
+@_require_auth
+def api_zerodha_orders():
+    u = _current_user()
+    broker, err = _get_zerodha_broker(u["id"])
+    if err:
+        return jsonify({"error": err}), 400
+    try:
+        return jsonify(broker.get_orders())
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/zerodha/trades")
+@_require_auth
+def api_zerodha_trades():
+    u = _current_user()
+    broker, err = _get_zerodha_broker(u["id"])
+    if err:
+        return jsonify({"error": err}), 400
+    try:
+        return jsonify(broker.get_trades())
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/zerodha/order", methods=["POST"])
+@_require_auth
+def api_zerodha_place_order():
+    """
+    Place a buy or sell order via Zerodha Kite.
+
+    Required body fields:
+      tradingsymbol   — e.g. "RELIANCE"
+      transaction_type — "BUY" or "SELL"
+      quantity        — integer
+
+    Optional:
+      price           — limit price (0 = market)
+      trigger_price   — for SL orders
+      order_type      — MARKET | LIMIT | SL | SL-M     (default MARKET)
+      product         — MIS | CNC | NRML                (default MIS)
+      exchange        — NSE | BSE | NFO | MCX           (default NSE)
+      variety         — regular | amo | co | bo         (default regular)
+      validity        — DAY | IOC                        (default DAY)
+      squareoff       — target offset for BO orders
+      stoploss        — stoploss offset for BO/CO orders
+      trailing_stoploss — trailing stop for BO orders
+      tag             — optional order tag (max 20 chars)
+    """
+    u    = _current_user()
+    body = request.get_json(force=True, silent=True) or {}
+    for f in ["tradingsymbol", "transaction_type", "quantity"]:
+        if not body.get(f):
+            return jsonify({"error": "missing_field", "field": f}), 400
+    broker, err = _get_zerodha_broker(u["id"])
+    if err:
+        return jsonify({"error": err}), 400
+    try:
+        order_id = broker.place_order(
+            tradingsymbol    = body["tradingsymbol"].upper(),
+            transaction_type = body["transaction_type"].upper(),
+            quantity         = int(body["quantity"]),
+            price            = float(body.get("price", 0)),
+            trigger_price    = float(body.get("trigger_price", 0)),
+            order_type       = body.get("order_type", "MARKET").upper(),
+            product          = body.get("product", "MIS").upper(),
+            exchange         = body.get("exchange", "NSE").upper(),
+            variety          = body.get("variety", "regular").lower(),
+            validity         = body.get("validity", "DAY").upper(),
+            squareoff        = float(body.get("squareoff", 0)),
+            stoploss         = float(body.get("stoploss", 0)),
+            trailing_stoploss= float(body.get("trailing_stoploss", 0)),
+            tag              = body.get("tag", ""),
+        )
+        auth.audit(u["id"], "zerodha_order_placed", _client_ip(), {
+            "symbol": body["tradingsymbol"],
+            "side":   body["transaction_type"],
+            "qty":    body["quantity"],
+        })
+        return jsonify({"ok": True, "order_id": order_id})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/zerodha/order/<order_id>", methods=["DELETE"])
+@_require_auth
+def api_zerodha_cancel_order(order_id: str):
+    u       = _current_user()
+    variety = request.args.get("variety", "regular").lower()
+    broker, err = _get_zerodha_broker(u["id"])
+    if err:
+        return jsonify({"error": err}), 400
+    try:
+        oid = broker.cancel_order(order_id, variety=variety)
+        auth.audit(u["id"], "zerodha_order_cancelled", _client_ip(), {"order_id": order_id})
+        return jsonify({"ok": True, "order_id": oid})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/zerodha/order", methods=["PUT"])
+@_require_auth
+def api_zerodha_modify_order():
+    u    = _current_user()
+    body = request.get_json(force=True, silent=True) or {}
+    if not body.get("order_id"):
+        return jsonify({"error": "missing_field", "field": "order_id"}), 400
+    broker, err = _get_zerodha_broker(u["id"])
+    if err:
+        return jsonify({"error": err}), 400
+    try:
+        oid = broker.modify_order(
+            order_id       = body["order_id"],
+            quantity       = int(body["quantity"])   if body.get("quantity")    is not None else None,
+            price          = float(body["price"])    if body.get("price")       is not None else None,
+            order_type     = body.get("order_type"),
+            trigger_price  = float(body["trigger_price"]) if body.get("trigger_price") is not None else None,
+            validity       = body.get("validity"),
+            variety        = body.get("variety", "regular").lower(),
+        )
+        return jsonify({"ok": True, "order_id": oid})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/zerodha/squareoff", methods=["POST"])
+@_require_auth
+def api_zerodha_squareoff():
+    """Close all open Zerodha MIS positions at market price."""
+    u = _current_user()
+    broker, err = _get_zerodha_broker(u["id"])
+    if err:
+        return jsonify({"error": err}), 400
+    try:
+        results = broker.square_off_all_positions()
+        auth.audit(u["id"], "zerodha_squareoff_all", _client_ip())
+        return jsonify({"ok": True, "results": results})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/zerodha/quote")
+@_require_auth
+def api_zerodha_quote():
+    """
+    GET /api/zerodha/quote?i=NSE:RELIANCE&i=NSE:TCS
+    Returns full quote dict.
+    """
+    u           = _current_user()
+    instruments = request.args.getlist("i")
+    if not instruments:
+        return jsonify({"error": "at least one i=EXCHANGE:SYMBOL param required"}), 400
+    broker, err = _get_zerodha_broker(u["id"])
+    if err:
+        return jsonify({"error": err}), 400
+    try:
+        return jsonify(broker.get_quote(instruments))
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/zerodha/search")
+@_require_auth
+def api_zerodha_search():
+    """
+    GET /api/zerodha/search?q=RELIANCE&exchange=NSE
+    Returns matching instruments (from master download — may be slow first call).
+    """
+    u        = _current_user()
+    query    = request.args.get("q", "").strip()
+    exchange = request.args.get("exchange", "NSE").upper()
+    if not query:
+        return jsonify({"error": "q param required"}), 400
+    broker, err = _get_zerodha_broker(u["id"])
+    if err:
+        return jsonify({"error": err}), 400
+    try:
+        return jsonify(broker.search_instruments(query, exchange))
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/zerodha/candles")
+@_require_auth
+def api_zerodha_candles():
+    """
+    GET /api/zerodha/candles?token=738561&interval=5minute&from=2024-01-01&to=2024-01-02
+    """
+    u        = _current_user()
+    token    = request.args.get("token", "")
+    interval = request.args.get("interval", "5minute")
+    from_dt  = request.args.get("from", "")
+    to_dt    = request.args.get("to", "")
+    if not token or not from_dt or not to_dt:
+        return jsonify({"error": "token, from and to params required"}), 400
+    broker, err = _get_zerodha_broker(u["id"])
+    if err:
+        return jsonify({"error": err}), 400
+    try:
+        return jsonify(broker.get_candles(token, interval, from_dt, to_dt))
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route("/api/sessions")
 @_require_auth

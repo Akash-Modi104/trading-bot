@@ -35,6 +35,30 @@ CREATE TABLE IF NOT EXISTS user_alpaca_creds (
     FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS user_angelone_creds (
+    user_id          INTEGER PRIMARY KEY,
+    api_key_enc      BLOB,
+    client_id_enc    BLOB,
+    password_enc     BLOB,
+    totp_secret_enc  BLOB,
+    jwt_token_enc    BLOB,
+    refresh_token_enc BLOB,
+    logged_in_at     TEXT,
+    validated_at     TEXT,
+    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS user_zerodha_creds (
+    user_id             INTEGER PRIMARY KEY,
+    api_key_enc         BLOB,
+    api_secret_enc      BLOB,
+    access_token_enc    BLOB,
+    request_token_enc   BLOB,
+    session_expiry      TEXT,
+    validated_at        TEXT,
+    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS user_sessions (
     token       TEXT    PRIMARY KEY,
     user_id     INTEGER NOT NULL,
