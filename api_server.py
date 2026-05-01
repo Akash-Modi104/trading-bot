@@ -819,6 +819,138 @@ def telegram_delete():
     return jsonify({"ok": True})
 
 
+
+
+# ── Bot real-money mode + panic switch (admin only) ───────────────
+import subprocess as _sp
+_ENV_PATH = os.path.join(BASE_DIR, ".env")
+
+def _read_env_kv():
+    out = {}
+    if os.path.exists(_ENV_PATH):
+        for line in open(_ENV_PATH):
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, v = line.split("=", 1)
+                out[k.strip()] = v.strip()
+    return out
+
+def _write_env_kv(updates: dict):
+    cur = _read_env_kv()
+    cur.update({k: v for k, v in updates.items() if v is not None})
+    with open(_ENV_PATH, "w") as f:
+        for k, v in cur.items():
+            f.write(f"{k}={v}\n")
+
+def _require_admin(f):
+    @wraps(f)
+    def deco(*a, **kw):
+        u = _current_user()
+        if not u: return jsonify({"error":"auth_required"}), 401
+        if u.get("role") != "admin":
+            return jsonify({"error":"admin_only"}), 403
+        return f(*a, **kw)
+    return deco
+
+@app.route("/api/admin/bot_mode", methods=["GET"])
+@_require_admin
+def admin_bot_mode_get():
+    env = _read_env_kv()
+    base = env.get("ALPACA_BASE_URL","")
+    is_live = "paper" not in base.lower() and base != ""
+    key = env.get("ALPACA_API_KEY","")
+    return jsonify({
+        "mode": "live" if is_live else "paper",
+        "base_url": base,
+        "key_preview": (key[:6] + "..." + key[-4:]) if len(key) > 10 else "",
+        "warning": "LIVE mode trades real money. Verify the bot is healthy on paper for at least 5 sessions first." if is_live else "",
+    })
+
+@app.route("/api/admin/bot_mode", methods=["POST"])
+@_require_admin
+def admin_bot_mode_set():
+    body = request.get_json(silent=True) or {}
+    target = (body.get("mode") or "").lower()
+    api_key = (body.get("api_key") or "").strip()
+    sec_key = (body.get("secret_key") or "").strip()
+    confirm = (body.get("confirm") or "").strip()
+
+    if target not in ("paper", "live"):
+        return jsonify({"error": "mode must be 'paper' or 'live'"}), 400
+    if not api_key or not sec_key:
+        return jsonify({"error": "api_key and secret_key required"}), 400
+    if target == "live" and confirm != "I UNDERSTAND THE RISKS":
+        return jsonify({"error": "Type 'I UNDERSTAND THE RISKS' exactly to switch to live"}), 400
+
+    # Validate against the target Alpaca endpoint before writing anything
+    base = "https://api.alpaca.markets/v2" if target == "live" else "https://paper-api.alpaca.markets/v2"
+    data_base = "https://data.alpaca.markets/v2"
+    try:
+        import requests as _rq
+        r = _rq.get(base + "/account",
+                    headers={"APCA-API-KEY-ID": api_key, "APCA-API-SECRET-KEY": sec_key},
+                    timeout=10)
+        if r.status_code != 200:
+            return jsonify({"error": "validation_failed",
+                            "details": {"status": r.status_code, "body": r.text[:300]}}), 400
+        acct = r.json()
+    except Exception as e:
+        return jsonify({"error": "validation_failed", "details": str(e)}), 400
+
+    # Write .env atomically
+    try:
+        _write_env_kv({
+            "ALPACA_API_KEY":    api_key,
+            "ALPACA_SECRET_KEY": sec_key,
+            "ALPACA_BASE_URL":   base,
+            "ALPACA_DATA_URL":   data_base,
+        })
+    except Exception as e:
+        return jsonify({"error": "env_write_failed", "details": str(e)}), 500
+
+    # Restart bot to pick up new creds
+    try:
+        _sp.run(["supervisorctl", "restart", "trading-bot"], timeout=15, check=False)
+    except Exception:
+        pass
+
+    auth.audit(_current_user()["id"], "bot_mode_switched", _client_ip(),
+               {"mode": target, "account": acct.get("account_number","")[:8]})
+
+    return jsonify({
+        "ok": True, "mode": target, "base_url": base,
+        "account": {"number": acct.get("account_number"),
+                    "equity": acct.get("equity"),
+                    "buying_power": acct.get("buying_power"),
+                    "status": acct.get("status")},
+        "warning": "Bot restarted. Monitor closely." if target == "live" else None,
+    })
+
+@app.route("/api/admin/panic_flat", methods=["POST"])
+@_require_admin
+def admin_panic_flat():
+    """Cancel all open orders and liquidate all positions on the bot's broker.
+    Use only in emergencies. Logged to audit."""
+    env = _read_env_kv()
+    base = env.get("ALPACA_BASE_URL","").rstrip("/")
+    if not base or not env.get("ALPACA_API_KEY"):
+        return jsonify({"error":"no_creds_configured"}), 400
+    hdr = {"APCA-API-KEY-ID": env["ALPACA_API_KEY"],
+           "APCA-API-SECRET-KEY": env["ALPACA_SECRET_KEY"]}
+    out = {}
+    try:
+        import requests as _rq
+        rc = _rq.delete(base + "/orders", headers=hdr, timeout=15)
+        out["cancel_orders"] = {"status": rc.status_code, "body": rc.text[:500]}
+        rp = _rq.delete(base + "/positions", headers=hdr, timeout=20)
+        out["close_positions"] = {"status": rp.status_code, "body": rp.text[:500]}
+    except Exception as e:
+        return jsonify({"error": "panic_failed", "details": str(e)}), 500
+
+    auth.audit(_current_user()["id"], "panic_flat", _client_ip(), out)
+    return jsonify({"ok": True, "result": out})
+
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5001))
     app.run(host="0.0.0.0", port=port, debug=False, threaded=True)

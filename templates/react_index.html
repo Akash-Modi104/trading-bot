@@ -76,46 +76,86 @@
       .header-stack > * { width: 100%; justify-content: space-between !important; }
     }
 
-    /* ── Phone-first refinements (real fix: targets inline grids) ─── */
-    @media (max-width: 900px) {
-      /* Force ALL multi-col grids to single column on small screens.
-         Most of the layout uses inline gridTemplateColumns, so class-only
-         rules wouldn't catch them. */
-      div[style*="gridTemplateColumns"],
-      div[style*="grid-template-columns"] {
+    /* ── Mobile design pass v3 ──────────────────────────────── */
+    @media (max-width: 1024px) {
+      /* Collapse all multi-col grids on tablet+ */
+      div[style*="gridTemplateColumns"]:not([style*="auto-fill"]),
+      div[style*="grid-template-columns"]:not([style*="auto-fill"]) {
         grid-template-columns: 1fr !important;
       }
-      /* Allow auto-fill grids to remain multi-col on tablet */
-      div[style*="auto-fill"] { grid-template-columns: repeat(auto-fill,minmax(150px,1fr)) !important; }
+    }
+    @media (max-width: 900px) {
+      div[style*="auto-fill"] { grid-template-columns: repeat(auto-fill,minmax(150px,1fr)) !important; gap:8px !important; }
+      iframe { height: 50vh !important; }
     }
     @media (max-width: 768px) {
       html { font-size: 13px; }
-      main { padding: 10px !important; }
-      .card { border-radius: 8px !important; }
-      .card-hdr { padding: 12px 14px !important; }
-      .card-title { font-size: 14px !important; }
-      .btn { padding: 10px 14px !important; font-size: 13px !important; min-height: 38px; }
-      input, select, textarea { font-size: 16px !important; }   /* iOS no-zoom */
-      table { font-size: 11px !important; min-width: 100%; }
-      thead th, tbody td { padding: 8px 6px !important; }
+      body { -webkit-text-size-adjust: 100%; }
+      main { padding: 8px !important; }
+      .card { border-radius: 10px !important; margin: 0 !important; }
+      .card-hdr { padding: 11px 13px !important; gap:8px !important; flex-wrap: wrap !important; }
+      .card-title { font-size: 13px !important; font-weight: 600 !important; }
+      .badge { font-size: 9px !important; padding: 2px 6px !important; }
+      /* Buttons */
+      .btn { padding: 9px 13px !important; font-size: 13px !important; min-height: 36px; border-radius: 7px !important; }
+      .btn[style*="padding:'4px 12px'"] { padding: 6px 10px !important; font-size: 11px !important; }
+      /* Inputs (16px to disable iOS auto-zoom) */
+      input, select, textarea { font-size: 16px !important; padding: 10px 12px !important; border-radius: 8px !important; }
+      input[type=checkbox], input[type=radio] { transform: scale(1.15); margin: 0 4px; }
+      label { line-height: 1.4 !important; }
+      /* Auto-fill grids on phone: 2 cols max */
+      div[style*="auto-fill"] { grid-template-columns: repeat(2,1fr) !important; gap:8px !important; }
+      /* Tables: convert to scrollable block */
+      table { font-size: 12px !important; min-width: 100%; }
+      thead th, tbody td { padding: 8px 6px !important; white-space: nowrap; }
+      .card > div > table, .card > table {
+        display: block !important; overflow-x: auto !important;
+        -webkit-overflow-scrolling: touch; max-width: 100%;
+      }
+      /* Hide low-priority columns on phone-sized tables */
+      table thead th:nth-child(n+5), table tbody td:nth-child(n+5) { display: none !important; }
+      /* Iframes */
+      iframe { height: 50vh !important; }
+      /* Charts - use intrinsic responsive height */
+      canvas { max-height: 250px !important; }
+      /* Modal-ish cards take full width */
+      .fadein { max-width: 100% !important; }
+      /* Hide noisy "hide-on-mobile" class */
       .hide-on-mobile { display: none !important; }
-      /* Wrap tables and chart canvases in a horizontal scroller */
-      .card > div > table, .card > table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
-      iframe { height: 60vh !important; }
-      /* Auto-fill grids stay multi but smaller */
-      div[style*="auto-fill"] { grid-template-columns: repeat(auto-fill,minmax(140px,1fr)) !important; gap:8px !important; }
     }
     @media (max-width: 480px) {
-      header { position: sticky; top: 0; z-index: 50; backdrop-filter: blur(8px); }
-      /* Auto-fill grids collapse to single col on phone */
+      html { font-size: 12.5px; }
+      main { padding: 6px !important; }
+      header { padding: 6px 10px !important; }
+      .card { border-radius: 8px !important; }
+      .card-hdr { padding: 9px 10px !important; }
+      .card-title { font-size: 12.5px !important; }
+      .badge { font-size: 9px !important; }
+      .btn { padding: 8px 11px !important; font-size: 12.5px !important; min-height: 36px; }
+      thead th, tbody td { padding: 6px 5px !important; font-size: 11px !important; }
+      /* Auto-fill: single col on phone */
       div[style*="auto-fill"] { grid-template-columns: 1fr !important; }
-      /* Nav tabs scroll horizontally */
+      /* Hide more low-priority columns in tables */
+      table thead th:nth-child(n+4), table tbody td:nth-child(n+4) { display: none !important; }
+      /* Sticky header with nav tabs */
+      header { position: sticky; top: 0; z-index: 50; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
       header nav, header [role="tablist"], .nav-tabs {
-        overflow-x: auto; -webkit-overflow-scrolling: touch; white-space: nowrap;
+        overflow-x: auto !important; -webkit-overflow-scrolling: touch; white-space: nowrap !important;
+        scrollbar-width: none;
       }
-      header nav button, .nav-tabs button { flex: 0 0 auto !important; }
-      /* Card-header buttons wrap rather than overflow */
-      .card-hdr { flex-wrap: wrap; gap: 6px; }
+      header nav::-webkit-scrollbar, .nav-tabs::-webkit-scrollbar { display: none; }
+      header nav button, .nav-tabs button { flex: 0 0 auto !important; min-width: 80px; }
+      /* Smaller chart heights */
+      canvas { max-height: 200px !important; }
+      iframe { height: 60vh !important; }
+      /* Profile/settings forms */
+      .card[style*="maxWidth:880"] { max-width: 100% !important; }
+    }
+    /* Touch target minimums */
+    @media (hover: none) and (pointer: coarse) {
+      button, a.btn, .btn { min-height: 40px; }
+      input[type=checkbox], input[type=radio] { transform: scale(1.2); }
+      a, button { -webkit-tap-highlight-color: rgba(59,130,246,.25); }
     }
 
     /* Touch target minimums */
@@ -1150,6 +1190,16 @@
             </div>
           </div>
 
+          {/* Bot Mode (admin only) */}
+          {me?.role === 'admin' && (
+          <div className="card" style={{borderColor:'#ef4444'}}>
+            <div className="card-hdr">
+              <span className="card-title">⚙ Bot Mode (admin)</span>
+            </div>
+            <BotModeAdmin />
+          </div>
+          )}
+
           {/* Security */}
           <div className="card">
             <div className="card-hdr"><span className="card-title">🔒 Security</span></div>
@@ -1216,6 +1266,133 @@
             <button className="btn btn-red" onClick={logout}>Sign out</button>
           </div>
 
+        </div>
+      );
+    };
+
+
+    /* ── Bot mode banner (admin only) ─────────────────────── */
+    const BotModeBanner = ({ me }) => {
+      const [info, setInfo] = useState(null);
+      useEffect(() => {
+        if (me?.role !== 'admin') return;
+        const load = () => fetch('/api/admin/bot_mode').then(r => r.ok ? r.json() : null).then(setInfo).catch(() => {});
+        load();
+        const id = setInterval(load, 30000);
+        return () => clearInterval(id);
+      }, [me?.role]);
+      if (!info) return null;
+      const live = info.mode === 'live';
+      return (
+        <div style={{
+          padding:'8px 14px', textAlign:'center',
+          background: live ? '#7f1d1d' : '#1e3a8a',
+          color: '#fff', fontWeight: 700, fontSize: 13,
+          letterSpacing:'.05em', textTransform:'uppercase',
+          borderBottom: live ? '2px solid #ef4444' : '2px solid #3b82f6',
+        }}>
+          {live ? '⚠ LIVE — REAL MONEY' : 'PAPER MODE'}
+          <span style={{fontWeight:400,marginLeft:10,opacity:.8,textTransform:'none'}}>
+            {info.base_url} {info.key_preview && `· key ${info.key_preview}`}
+          </span>
+        </div>
+      );
+    };
+
+
+    /* ── Bot mode admin sub-component ─────────────────────── */
+    const BotModeAdmin = () => {
+      const toast = useToast();
+      const [info, setInfo] = useState(null);
+      const [target, setTarget] = useState('paper');
+      const [k, setK] = useState('');
+      const [s, setS] = useState('');
+      const [confirm, setConfirm] = useState('');
+      const [busy, setBusy] = useState(false);
+      const load = () => fetch('/api/admin/bot_mode').then(r => r.json()).then(d => { setInfo(d); setTarget(d.mode); }).catch(() => {});
+      useEffect(load, []);
+      const apply = async () => {
+        if (target === 'live' && confirm !== 'I UNDERSTAND THE RISKS') {
+          toast.push('Type the confirmation phrase exactly to switch to LIVE', 'error');
+          return;
+        }
+        if (!k || !s) { toast.push('Both keys required', 'error'); return; }
+        setBusy(true);
+        try {
+          const r = await fetch('/api/admin/bot_mode', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({mode: target, api_key: k, secret_key: s, confirm}),
+          });
+          const d = await r.json();
+          if (r.ok) {
+            toast.push(`Bot switched to ${d.mode.toUpperCase()} (${d.account?.number?.slice(0,8) || ''})`, 'success');
+            setK(''); setS(''); setConfirm('');
+            load();
+          } else {
+            toast.push(d.error + (d.details ? `: ${typeof d.details === 'string' ? d.details : JSON.stringify(d.details).slice(0,140)}` : ''), 'error');
+          }
+        } finally { setBusy(false); }
+      };
+      const panic = async () => {
+        if (!confirm0(`Cancel ALL open orders and liquidate ALL positions on ${info?.mode?.toUpperCase()} account?\nThis cannot be undone.`)) return;
+        setBusy(true);
+        try {
+          const r = await fetch('/api/admin/panic_flat', {method:'POST'});
+          const d = await r.json();
+          toast.push(d.ok ? 'Panic flat submitted to broker' : (d.error || 'Failed'), d.ok ? 'success' : 'error');
+        } finally { setBusy(false); }
+      };
+      const confirm0 = (msg) => window.confirm(msg);
+      const live = info?.mode === 'live';
+      return (
+        <div style={{padding:18}}>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:14}}>
+            <div>
+              <div style={{fontSize:11,color:'var(--muted)',fontWeight:700,textTransform:'uppercase'}}>Current mode</div>
+              <div style={{marginTop:6,fontSize:14}}>
+                <Badge color={live?'#ef4444':'#3b82f6'}>{info?.mode?.toUpperCase() || '...'}</Badge>
+              </div>
+            </div>
+            <div>
+              <div style={{fontSize:11,color:'var(--muted)',fontWeight:700,textTransform:'uppercase'}}>Base URL</div>
+              <div style={{marginTop:6,fontFamily:'JetBrains Mono',fontSize:12}}>{info?.base_url || '—'}</div>
+            </div>
+          </div>
+          {info?.warning && (
+            <div style={{padding:'10px 14px',background:'rgba(239,68,68,.1)',border:'1px solid rgba(239,68,68,.3)',borderRadius:7,fontSize:13,color:'#ef4444',marginBottom:14}}>
+              {info.warning}
+            </div>
+          )}
+          <div style={{fontSize:13,fontWeight:600,marginBottom:10}}>Switch mode</div>
+          <div style={{display:'flex',gap:14,marginBottom:12}}>
+            <label style={{display:'flex',gap:6,alignItems:'center',fontSize:13,cursor:'pointer'}}>
+              <input type="radio" checked={target==='paper'} onChange={() => setTarget('paper')} /> Paper
+            </label>
+            <label style={{display:'flex',gap:6,alignItems:'center',fontSize:13,cursor:'pointer'}}>
+              <input type="radio" checked={target==='live'} onChange={() => setTarget('live')} /> Live (real money)
+            </label>
+          </div>
+          <input type="text" placeholder="API key" value={k} onChange={e => setK(e.target.value)}
+            style={{width:'100%',background:'var(--bg-input)',border:'1px solid var(--border)',borderRadius:6,padding:'9px 12px',color:'var(--text)',fontSize:13,fontFamily:'JetBrains Mono',marginBottom:8}} />
+          <input type="password" placeholder="Secret key" value={s} onChange={e => setS(e.target.value)}
+            style={{width:'100%',background:'var(--bg-input)',border:'1px solid var(--border)',borderRadius:6,padding:'9px 12px',color:'var(--text)',fontSize:13,fontFamily:'JetBrains Mono'}} />
+          {target === 'live' && (
+            <>
+              <div style={{marginTop:14,padding:'10px 14px',background:'rgba(239,68,68,.12)',border:'1px solid rgba(239,68,68,.4)',borderRadius:7,fontSize:13,color:'#fca5a5'}}>
+                <b>WARNING.</b> Switching to LIVE will trade real money on every signal.
+                Recommended: 5+ clean paper sessions, dashboard P&amp;L matches Alpaca, EOD close verified.
+              </div>
+              <input type="text" placeholder="Type: I UNDERSTAND THE RISKS"
+                value={confirm} onChange={e => setConfirm(e.target.value)}
+                style={{width:'100%',marginTop:10,background:'var(--bg-input)',border:'1px solid #ef4444',borderRadius:6,padding:'9px 12px',color:'var(--text)',fontSize:13}} />
+            </>
+          )}
+          <div style={{marginTop:18,display:'flex',gap:8,justifyContent:'space-between',flexWrap:'wrap'}}>
+            <button className="btn btn-red" disabled={busy || !info} onClick={panic}>Panic flat (cancel + close all)</button>
+            <button className={`btn ${target==='live'?'btn-red':'btn-green'}`} disabled={busy} onClick={apply}>
+              {busy ? 'Working…' : `Switch to ${target.toUpperCase()} & restart bot`}
+            </button>
+          </div>
         </div>
       );
     };
@@ -1734,7 +1911,7 @@
         <div>
 
           {/* ── Header ─────────────────────────────────────────── */}
-          <header style={{
+          <><BotModeBanner me={me} /><header style={{
             background:'var(--bg-card)', borderBottom:'1px solid var(--border)',
             position:'sticky', top:0, zIndex:100,
           }}>
@@ -1819,7 +1996,7 @@
                 }}>{t.label}</button>
               ))}
             </div>
-          </header>
+          </header></>
 
           {/* ── Page content ───────────────────────────────────── */}
           <main style={{padding:'16px 20px 48px',maxWidth:1640,margin:'0 auto'}}>
