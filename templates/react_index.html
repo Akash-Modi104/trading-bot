@@ -2874,7 +2874,6 @@
         { id:'strategy',  label:'⚙️ Strategy'   },
         { id:'system',    label:'💻 System'     },
         { id:'profile',   label:'👤 Profile'    },
-        { id:'brokers',   label:'🏦 Brokers'    },
       ];
 
 
@@ -3107,7 +3106,6 @@
             )}
 
             {/* PROFILE */}
-            {tab === 'brokers' && <BrokersTab />}
             {tab === 'profile' && <ProfileTab me={me} onMe={loadMe} />}
 
             <div style={{textAlign:'center',marginTop:32,padding:'20px 0',
