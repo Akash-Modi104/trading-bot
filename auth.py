@@ -318,3 +318,98 @@ def list_active_telegram():
         out.append({"token": token, "chat_id": r["chat_id"], "events": events})
     return out
 
+# ── Multi-broker (paper/live Alpaca + Angel One) ──────────────────
+import requests as _bk_requests
+
+def _alpaca_validate(api_key, sec_key, is_paper):
+    base = "https://paper-api.alpaca.markets/v2" if is_paper else "https://api.alpaca.markets/v2"
+    try:
+        r = _bk_requests.get(base + "/account",
+                             headers={"APCA-API-KEY-ID": api_key, "APCA-API-SECRET-KEY": sec_key},
+                             timeout=10)
+        if r.status_code == 200:
+            return True, r.json()
+        return False, {"status": r.status_code, "body": r.text[:200]}
+    except Exception as e:
+        return False, {"error": str(e)}
+
+def save_alpaca_slot(user_id: int, slot: str, api_key: str, secret_key: str):
+    """slot = 'paper' or 'live'. Returns (ok, info)."""
+    if slot not in ("paper", "live"):
+        return False, {"error": "slot must be paper or live"}
+    ok, info = _alpaca_validate(api_key, secret_key, slot == "paper")
+    if not ok:
+        return False, info
+    table = "user_alpaca_paper" if slot == "paper" else "user_alpaca_live"
+    db.execute(f"""
+        INSERT INTO {table}(user_id, api_key_enc, secret_key_enc, account_number, validated_at)
+        VALUES (?, ?, ?, ?, datetime('now'))
+        ON CONFLICT(user_id) DO UPDATE SET
+            api_key_enc=excluded.api_key_enc,
+            secret_key_enc=excluded.secret_key_enc,
+            account_number=excluded.account_number,
+            validated_at=datetime('now')
+    """, (user_id, encrypt(api_key), encrypt(secret_key), info.get("account_number","")))
+    return True, info
+
+def get_alpaca_slot(user_id: int, slot: str):
+    table = "user_alpaca_paper" if slot == "paper" else "user_alpaca_live"
+    r = db.query_one(f"SELECT * FROM {table} WHERE user_id=?", (user_id,))
+    if not r:
+        return None
+    api_key = decrypt(r["api_key_enc"]) if r["api_key_enc"] else ""
+    sec_key = decrypt(r["secret_key_enc"]) if r["secret_key_enc"] else ""
+    return {
+        "configured": bool(api_key),
+        "key_preview": (api_key[:6] + "..." + api_key[-4:]) if len(api_key) > 10 else "",
+        "account_number": r["account_number"],
+        "validated_at": r["validated_at"],
+        "_api_key": api_key, "_secret_key": sec_key,
+    }
+
+def delete_alpaca_slot(user_id: int, slot: str):
+    table = "user_alpaca_paper" if slot == "paper" else "user_alpaca_live"
+    db.execute(f"DELETE FROM {table} WHERE user_id=?", (user_id,))
+
+def save_angelone(user_id: int, api_key: str, client_code: str, pin: str, totp_secret: str):
+    """Validate by attempting an SmartAPI session. Returns (ok, info)."""
+    try:
+        from SmartApi import SmartConnect
+        import pyotp
+        sc = SmartConnect(api_key=api_key.strip())
+        otp = pyotp.TOTP(totp_secret.strip()).now()
+        data = sc.generateSession(client_code.strip(), pin.strip(), otp)
+        if data.get("status") and data.get("data"):
+            tok = data["data"].get("jwtToken")
+            db.execute("""
+                INSERT INTO user_angelone(user_id, api_key_enc, client_code, pin_enc, totp_secret_enc, validated_at, last_session_token)
+                VALUES (?, ?, ?, ?, ?, datetime('now'), ?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                    api_key_enc=excluded.api_key_enc, client_code=excluded.client_code,
+                    pin_enc=excluded.pin_enc, totp_secret_enc=excluded.totp_secret_enc,
+                    validated_at=datetime('now'), last_session_token=excluded.last_session_token
+            """, (user_id, encrypt(api_key), client_code.strip(),
+                  encrypt(pin), encrypt(totp_secret), tok))
+            try:
+                profile = sc.getProfile(tok)
+            except Exception:
+                profile = {}
+            return True, {"client_code": client_code, "profile": profile.get("data", {}) if isinstance(profile, dict) else {}}
+        return False, {"error": data.get("message") or "Auth failed", "details": data}
+    except Exception as e:
+        return False, {"error": "Validation failed", "details": str(e)}
+
+def get_angelone(user_id: int):
+    r = db.query_one("SELECT * FROM user_angelone WHERE user_id=?", (user_id,))
+    if not r: return None
+    api_key = decrypt(r["api_key_enc"]) if r["api_key_enc"] else ""
+    return {
+        "configured": bool(api_key),
+        "key_preview": (api_key[:6] + "..." + api_key[-4:]) if len(api_key) > 10 else "",
+        "client_code": r["client_code"],
+        "validated_at": r["validated_at"],
+    }
+
+def delete_angelone(user_id: int):
+    db.execute("DELETE FROM user_angelone WHERE user_id=?", (user_id,))
+

@@ -951,6 +951,86 @@ def admin_panic_flat():
     return jsonify({"ok": True, "result": out})
 
 
+
+
+# ── Multi-broker dashboard endpoints ──────────────────────────────
+@app.route("/api/brokers", methods=["GET"])
+@_require_auth
+def api_brokers_list():
+    u = _current_user()
+    paper = auth.get_alpaca_slot(u["id"], "paper")
+    live  = auth.get_alpaca_slot(u["id"], "live")
+    angel = auth.get_angelone(u["id"])
+    # Strip secrets before returning
+    if paper: paper = {k:v for k,v in paper.items() if not k.startswith("_")}
+    if live:  live  = {k:v for k,v in live.items()  if not k.startswith("_")}
+    return jsonify({
+        "alpaca_paper": paper or {"configured": False},
+        "alpaca_live":  live  or {"configured": False},
+        "angelone":     angel or {"configured": False},
+    })
+
+@app.route("/api/brokers/alpaca/<slot>", methods=["POST"])
+@_require_auth
+def api_brokers_alpaca_save(slot):
+    if slot not in ("paper", "live"):
+        return jsonify({"error":"bad slot"}), 400
+    u = _current_user()
+    body = request.get_json(silent=True) or {}
+    k = (body.get("api_key") or "").strip()
+    s = (body.get("secret_key") or "").strip()
+    if not k or not s:
+        return jsonify({"error":"both keys required"}), 400
+    ok, info = auth.save_alpaca_slot(u["id"], slot, k, s)
+    if not ok:
+        return jsonify({"error":"validation_failed","details":info}), 400
+    auth.audit(u["id"], f"alpaca_{slot}_saved", _client_ip(),
+               {"acct": (info.get("account_number","") or "")[:8]})
+    return jsonify({"ok": True, "account": {
+        "number": info.get("account_number"),
+        "equity": info.get("equity"),
+        "buying_power": info.get("buying_power"),
+        "status": info.get("status"),
+    }})
+
+@app.route("/api/brokers/alpaca/<slot>", methods=["DELETE"])
+@_require_auth
+def api_brokers_alpaca_delete(slot):
+    if slot not in ("paper","live"):
+        return jsonify({"error":"bad slot"}), 400
+    u = _current_user()
+    auth.delete_alpaca_slot(u["id"], slot)
+    return jsonify({"ok": True})
+
+@app.route("/api/brokers/angelone", methods=["POST"])
+@_require_auth
+def api_brokers_angelone_save():
+    u = _current_user()
+    body = request.get_json(silent=True) or {}
+    api_key      = (body.get("api_key")      or "").strip()
+    client_code  = (body.get("client_code")  or "").strip()
+    pin          = (body.get("pin")          or "").strip()
+    totp_secret  = (body.get("totp_secret")  or "").strip()
+    missing = [k for k,v in {"api_key":api_key,"client_code":client_code,"pin":pin,"totp_secret":totp_secret}.items() if not v]
+    if missing:
+        return jsonify({"error": f"missing: {', '.join(missing)}"}), 400
+    ok, info = auth.save_angelone(u["id"], api_key, client_code, pin, totp_secret)
+    if not ok:
+        return jsonify({"error":"validation_failed","details":info}), 400
+    auth.audit(u["id"], "angelone_saved", _client_ip(), {"client_code": client_code})
+    return jsonify({"ok": True, "info": info})
+
+@app.route("/api/brokers/angelone", methods=["DELETE"])
+@_require_auth
+def api_brokers_angelone_delete():
+    u = _current_user()
+    auth.delete_angelone(u["id"])
+    return jsonify({"ok": True})
+
+# Upgrade /api/admin/bot_mode POST to use SAVED creds when keys are blank
+# (drop-in over the existing handler — not redefining; a follow-up if needed)
+
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5001))
     app.run(host="0.0.0.0", port=port, debug=False, threaded=True)

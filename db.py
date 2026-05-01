@@ -70,6 +70,32 @@ CREATE TABLE IF NOT EXISTS user_telegram (
     validated_at    TEXT,
     FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
 );
+CREATE TABLE IF NOT EXISTS user_alpaca_paper (
+    user_id         INTEGER PRIMARY KEY,
+    api_key_enc     BLOB,
+    secret_key_enc  BLOB,
+    account_number  TEXT,
+    validated_at    TEXT,
+    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS user_alpaca_live (
+    user_id         INTEGER PRIMARY KEY,
+    api_key_enc     BLOB,
+    secret_key_enc  BLOB,
+    account_number  TEXT,
+    validated_at    TEXT,
+    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS user_angelone (
+    user_id         INTEGER PRIMARY KEY,
+    api_key_enc     BLOB,
+    client_code     TEXT,
+    pin_enc         BLOB,
+    totp_secret_enc BLOB,
+    validated_at    TEXT,
+    last_session_token TEXT,
+    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+);
 CREATE INDEX IF NOT EXISTS idx_sessions_user    ON user_sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_expires ON user_sessions(expires_at);
 CREATE INDEX IF NOT EXISTS idx_attempts_ip      ON login_attempts(ip, created_at);

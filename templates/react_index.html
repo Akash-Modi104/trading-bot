@@ -855,6 +855,182 @@
     const useToast = () => React.useContext(ToastCtx);
 
     /* ── Profile tab: name, theme, Alpaca connect, sessions, security ── */
+
+    /* ── Brokers tab ─────────────────────────────────────────── */
+    const BrokersTab = () => {
+      const toast = useToast();
+      const [info, setInfo] = useState(null);
+      const load = () => fetch('/api/brokers').then(r => r.json()).then(setInfo).catch(() => {});
+      useEffect(load, []);
+
+      // Alpaca paper form
+      const [pK, setPK] = useState(''); const [pS, setPS] = useState(''); const [pBusy, setPBusy] = useState(false);
+      const saveAlpacaPaper = async () => {
+        if (!pK || !pS) { toast.push('Both keys required', 'error'); return; }
+        setPBusy(true);
+        try {
+          const r = await fetch('/api/brokers/alpaca/paper', {method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({api_key:pK, secret_key:pS})});
+          const d = await r.json();
+          if (r.ok) { toast.push('Alpaca PAPER saved', 'success'); setPK(''); setPS(''); load(); }
+          else toast.push(d.error || 'Save failed', 'error');
+        } finally { setPBusy(false); }
+      };
+      const delAlpacaPaper = async () => { if (!confirm('Remove Alpaca paper credentials?')) return;
+        await fetch('/api/brokers/alpaca/paper', {method:'DELETE'}); load(); };
+
+      // Alpaca live form
+      const [lK, setLK] = useState(''); const [lS, setLS] = useState(''); const [lBusy, setLBusy] = useState(false);
+      const [lConfirm, setLConfirm] = useState('');
+      const saveAlpacaLive = async () => {
+        if (!lK || !lS) { toast.push('Both keys required', 'error'); return; }
+        if (lConfirm !== 'I UNDERSTAND') { toast.push('Type "I UNDERSTAND" to save live keys', 'error'); return; }
+        setLBusy(true);
+        try {
+          const r = await fetch('/api/brokers/alpaca/live', {method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({api_key:lK, secret_key:lS})});
+          const d = await r.json();
+          if (r.ok) { toast.push('Alpaca LIVE saved (real money)', 'success'); setLK(''); setLS(''); setLConfirm(''); load(); }
+          else toast.push(d.error || 'Save failed', 'error');
+        } finally { setLBusy(false); }
+      };
+      const delAlpacaLive = async () => { if (!confirm('Remove Alpaca live credentials?')) return;
+        await fetch('/api/brokers/alpaca/live', {method:'DELETE'}); load(); };
+
+      // Angel One form
+      const [aK, setAK] = useState(''); const [aC, setAC] = useState(''); const [aP, setAP] = useState('');
+      const [aT, setAT] = useState(''); const [aBusy, setABusy] = useState(false);
+      const saveAngel = async () => {
+        if (!aK || !aC || !aP || !aT) { toast.push('All Angel One fields required', 'error'); return; }
+        setABusy(true);
+        try {
+          const r = await fetch('/api/brokers/angelone', {method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({api_key:aK, client_code:aC, pin:aP, totp_secret:aT})});
+          const d = await r.json();
+          if (r.ok) { toast.push('Angel One connected', 'success'); setAK(''); setAC(''); setAP(''); setAT(''); load(); }
+          else toast.push(d.error + (d.details?.error ? `: ${d.details.error}` : ''), 'error');
+        } finally { setABusy(false); }
+      };
+      const delAngel = async () => { if (!confirm('Remove Angel One credentials?')) return;
+        await fetch('/api/brokers/angelone', {method:'DELETE'}); load(); };
+
+      const inp = {width:'100%',background:'var(--bg-input)',border:'1px solid var(--border)',
+                   borderRadius:6,padding:'9px 12px',color:'var(--text)',fontSize:13,fontFamily:'JetBrains Mono'};
+      const lab = {fontSize:11,color:'var(--muted)',fontWeight:700,letterSpacing:'.06em',
+                   textTransform:'uppercase',marginTop:10,display:'block'};
+
+      const PaperCard = () => {
+        const cfg = info?.alpaca_paper;
+        return (
+          <div className="card">
+            <div className="card-hdr">
+              <span className="card-title">Alpaca · Paper</span>
+              {cfg?.configured ? <Badge color="#3b82f6">CONNECTED</Badge> : <Badge color="#64748b">NOT CONNECTED</Badge>}
+            </div>
+            <div style={{padding:18}}>
+              {cfg?.configured && (
+                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:14}}>
+                  <div><div style={lab}>Account #</div><div className="mono" style={{marginTop:4,fontSize:13}}>{cfg.account_number || '—'}</div></div>
+                  <div><div style={lab}>Key</div><div className="mono" style={{marginTop:4,fontSize:13}}>{cfg.key_preview}</div></div>
+                </div>
+              )}
+              <label style={lab}>API Key ID</label>
+              <input style={inp} value={pK} onChange={e=>setPK(e.target.value)} placeholder="PK..." />
+              <label style={lab}>Secret Key</label>
+              <input style={inp} type="password" value={pS} onChange={e=>setPS(e.target.value)} />
+              <div style={{marginTop:14,display:'flex',gap:8,justifyContent:'flex-end'}}>
+                {cfg?.configured && <button className="btn btn-red" onClick={delAlpacaPaper}>Remove</button>}
+                <button className="btn btn-blue" disabled={pBusy} onClick={saveAlpacaPaper}>{pBusy?'Working…':'Save & Test'}</button>
+              </div>
+            </div>
+          </div>
+        );
+      };
+
+      const LiveCard = () => {
+        const cfg = info?.alpaca_live;
+        return (
+          <div className="card" style={{borderColor:'#7f1d1d'}}>
+            <div className="card-hdr">
+              <span className="card-title" style={{color:'#fca5a5'}}>Alpaca · Live (real money)</span>
+              {cfg?.configured ? <Badge color="#ef4444">CONNECTED · LIVE</Badge> : <Badge color="#64748b">NOT CONNECTED</Badge>}
+            </div>
+            <div style={{padding:18}}>
+              {cfg?.configured && (
+                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:14}}>
+                  <div><div style={lab}>Account #</div><div className="mono" style={{marginTop:4,fontSize:13}}>{cfg.account_number || '—'}</div></div>
+                  <div><div style={lab}>Key</div><div className="mono" style={{marginTop:4,fontSize:13}}>{cfg.key_preview}</div></div>
+                </div>
+              )}
+              <div style={{padding:'10px 14px',background:'rgba(239,68,68,.1)',border:'1px solid rgba(239,68,68,.3)',borderRadius:7,fontSize:12,color:'#fca5a5',marginBottom:8}}>
+                Live keys trade real money. Use only after the bot is verified for ≥5 paper sessions. Switching the bot to live happens in <b>Profile → Bot Mode</b>.
+              </div>
+              <label style={lab}>API Key ID</label>
+              <input style={inp} value={lK} onChange={e=>setLK(e.target.value)} placeholder="AK..." />
+              <label style={lab}>Secret Key</label>
+              <input style={inp} type="password" value={lS} onChange={e=>setLS(e.target.value)} />
+              <label style={lab}>Type "I UNDERSTAND" to save</label>
+              <input style={{...inp,borderColor:'#ef4444'}} value={lConfirm} onChange={e=>setLConfirm(e.target.value)} placeholder="I UNDERSTAND" />
+              <div style={{marginTop:14,display:'flex',gap:8,justifyContent:'flex-end'}}>
+                {cfg?.configured && <button className="btn btn-red" onClick={delAlpacaLive}>Remove</button>}
+                <button className="btn btn-red" disabled={lBusy} onClick={saveAlpacaLive}>{lBusy?'Working…':'Save & Test'}</button>
+              </div>
+            </div>
+          </div>
+        );
+      };
+
+      const AngelCard = () => {
+        const cfg = info?.angelone;
+        return (
+          <div className="card">
+            <div className="card-hdr">
+              <span className="card-title">Angel One · SmartAPI</span>
+              {cfg?.configured ? <Badge color="#10b981">CONNECTED</Badge> : <Badge color="#64748b">NOT CONNECTED</Badge>}
+            </div>
+            <div style={{padding:18}}>
+              {!cfg?.configured && (
+                <div style={{padding:'10px 14px',background:'rgba(59,130,246,.08)',border:'1px solid rgba(59,130,246,.25)',borderRadius:7,fontSize:13,marginBottom:14}}>
+                  <b>Setup:</b><br/>
+                  1. Visit <code>smartapi.angelone.in</code> → My Apps → Create App → copy <b>API Key</b>.<br/>
+                  2. Note your <b>Client Code</b> (e.g. A12345).<br/>
+                  3. Use your <b>MPIN</b> (4-digit) as the PIN field.<br/>
+                  4. From your Angel One TOTP setup, get the <b>TOTP secret</b> (the long base32 string, not the 6-digit code).<br/>
+                  Read-only access first; trading via Angel One ships in a follow-up.
+                </div>
+              )}
+              {cfg?.configured && (
+                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:14}}>
+                  <div><div style={lab}>Client</div><div className="mono" style={{marginTop:4,fontSize:13}}>{cfg.client_code || '—'}</div></div>
+                  <div><div style={lab}>Key</div><div className="mono" style={{marginTop:4,fontSize:13}}>{cfg.key_preview}</div></div>
+                </div>
+              )}
+              <label style={lab}>API Key</label>
+              <input style={inp} value={aK} onChange={e=>setAK(e.target.value)} />
+              <label style={lab}>Client Code</label>
+              <input style={inp} value={aC} onChange={e=>setAC(e.target.value)} placeholder="A12345" />
+              <label style={lab}>MPIN</label>
+              <input style={inp} type="password" value={aP} onChange={e=>setAP(e.target.value)} />
+              <label style={lab}>TOTP Secret (base32)</label>
+              <input style={inp} type="password" value={aT} onChange={e=>setAT(e.target.value)} />
+              <div style={{marginTop:14,display:'flex',gap:8,justifyContent:'flex-end'}}>
+                {cfg?.configured && <button className="btn btn-red" onClick={delAngel}>Remove</button>}
+                <button className="btn btn-green" disabled={aBusy} onClick={saveAngel}>{aBusy?'Validating…':'Save & Test'}</button>
+              </div>
+            </div>
+          </div>
+        );
+      };
+
+      return (
+        <div className="fadein" style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16,maxWidth:1280,margin:'0 auto'}}>
+          <PaperCard />
+          <LiveCard />
+          <div style={{gridColumn:'span 2'}}><AngelCard /></div>
+        </div>
+      );
+    };
+
     const ProfileTab = ({ me, onMe }) => {
       const toast = useToast();
       const [name,  setName]  = useState(me?.name  || '');
@@ -1890,8 +2066,7 @@
         { id:'reports',   label:'📄 Reports'   },
         { id:'strategy',  label:'⚙️ Strategy'  },
         { id:'system',    label:'💻 System'    },
-        { id:'profile',   label:'👤 Profile'   },
-      ];
+        { id:'profile',   label:'👤 Profile'   }, { id: 'brokers', label: '🏦 Brokers' },];
 
       const cycleTheme = () => {
         const order = ['dark', 'light', 'auto'];
@@ -1984,12 +2159,17 @@
               </div>
             </div>
 
-            {/* Nav tabs */}
-            <div style={{display:'flex',padding:'0 16px',borderTop:'1px solid var(--border)',maxWidth:1640,margin:'0 auto'}}>
+            {/* Nav tabs (scrollable on mobile) */}
+            <div className="nav-tabs" style={{
+              display:'flex', padding:'0 16px', borderTop:'1px solid var(--border)',
+              maxWidth:1640, margin:'0 auto',
+              overflowX:'auto', overflowY:'hidden',
+              scrollbarWidth:'none', WebkitOverflowScrolling:'touch',
+            }}>
               {TABS.map(t => (
                 <button key={t.id} onClick={() => setTab(t.id)} style={{
                   padding:'9px 16px', fontSize:13, fontWeight:500,
-                  background:'none', border:'none',
+                  background:'none', border:'none', whiteSpace:'nowrap', flex:'0 0 auto',
                   color: tab === t.id ? '#3b82f6' : 'var(--muted)',
                   borderBottom: `2px solid ${tab === t.id ? '#3b82f6' : 'transparent'}`,
                   cursor:'pointer', transition:'color .15s',
@@ -2111,6 +2291,7 @@
             )}
 
             {/* PROFILE */}
+            {tab === 'brokers' && <BrokersTab />}
             {tab === 'profile' && <ProfileTab me={me} onMe={loadMe} />}
 
             <div style={{textAlign:'center',marginTop:32,padding:'20px 0',
