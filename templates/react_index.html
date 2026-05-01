@@ -76,30 +76,48 @@
       .header-stack > * { width: 100%; justify-content: space-between !important; }
     }
 
-    /* ── Phone-first refinements ─────────────────────────────── */
+    /* ── Phone-first refinements (real fix: targets inline grids) ─── */
+    @media (max-width: 900px) {
+      /* Force ALL multi-col grids to single column on small screens.
+         Most of the layout uses inline gridTemplateColumns, so class-only
+         rules wouldn't catch them. */
+      div[style*="gridTemplateColumns"],
+      div[style*="grid-template-columns"] {
+        grid-template-columns: 1fr !important;
+      }
+      /* Allow auto-fill grids to remain multi-col on tablet */
+      div[style*="auto-fill"] { grid-template-columns: repeat(auto-fill,minmax(150px,1fr)) !important; }
+    }
     @media (max-width: 768px) {
       html { font-size: 13px; }
       main { padding: 10px !important; }
       .card { border-radius: 8px !important; }
       .card-hdr { padding: 12px 14px !important; }
       .card-title { font-size: 14px !important; }
-      .stat-grid { grid-template-columns: repeat(2, 1fr) !important; gap: 8px !important; }
-      .stat-card { padding: 12px !important; }
-      .stat-card .stat-value { font-size: 20px !important; }
-      .responsive-grid-2, .responsive-grid-3 { grid-template-columns: 1fr !important; }
       .btn { padding: 10px 14px !important; font-size: 13px !important; min-height: 38px; }
-      input, select, textarea { font-size: 16px !important; }   /* prevents iOS auto-zoom */
-      table { font-size: 11px !important; }
+      input, select, textarea { font-size: 16px !important; }   /* iOS no-zoom */
+      table { font-size: 11px !important; min-width: 100%; }
       thead th, tbody td { padding: 8px 6px !important; }
       .hide-on-mobile { display: none !important; }
-      .scroll-x { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+      /* Wrap tables and chart canvases in a horizontal scroller */
+      .card > div > table, .card > table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+      iframe { height: 60vh !important; }
+      /* Auto-fill grids stay multi but smaller */
+      div[style*="auto-fill"] { grid-template-columns: repeat(auto-fill,minmax(140px,1fr)) !important; gap:8px !important; }
     }
     @media (max-width: 480px) {
-      .stat-grid { grid-template-columns: 1fr !important; }
       header { position: sticky; top: 0; z-index: 50; backdrop-filter: blur(8px); }
-      .nav-tabs { overflow-x: auto; -webkit-overflow-scrolling: touch; white-space: nowrap; }
-      .nav-tabs button { flex: 0 0 auto !important; }
+      /* Auto-fill grids collapse to single col on phone */
+      div[style*="auto-fill"] { grid-template-columns: 1fr !important; }
+      /* Nav tabs scroll horizontally */
+      header nav, header [role="tablist"], .nav-tabs {
+        overflow-x: auto; -webkit-overflow-scrolling: touch; white-space: nowrap;
+      }
+      header nav button, .nav-tabs button { flex: 0 0 auto !important; }
+      /* Card-header buttons wrap rather than overflow */
+      .card-hdr { flex-wrap: wrap; gap: 6px; }
     }
+
     /* Touch target minimums */
     @media (hover: none) and (pointer: coarse) {
       button, a.btn, .btn { min-height: 40px; }
