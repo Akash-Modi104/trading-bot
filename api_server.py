@@ -23,6 +23,11 @@ SESSION_COOKIE = "algotrader_session"
 # ── Security headers (CSP, HSTS, etc.) ───────────────────────────
 @app.after_request
 def add_security_headers(resp):
+    # Disable HTML caching so UI updates show without hard-refresh
+    if resp.mimetype == "text/html":
+        resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        resp.headers["Pragma"] = "no-cache"
+        resp.headers["Expires"] = "0"
     resp.headers.setdefault("X-Content-Type-Options", "nosniff")
     resp.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
     resp.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
