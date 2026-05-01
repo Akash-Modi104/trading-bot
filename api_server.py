@@ -759,6 +759,66 @@ def _close_all():
     except Exception:
         pass
 
+
+
+# ── Telegram per-user notification endpoints ─────────────────────
+import requests as _tg_requests
+@app.route("/api/telegram/status", methods=["GET"])
+@_require_auth
+def telegram_status():
+    u = _current_user()
+    cfg = auth.get_telegram(u["id"])
+    if not cfg:
+        return jsonify({"configured": False})
+    # Redact token
+    tok = cfg["bot_token"] or ""
+    cfg["bot_token_redacted"] = (tok[:6] + "..." + tok[-4:]) if len(tok) > 10 else ""
+    cfg.pop("bot_token", None)
+    cfg["configured"] = True
+    return jsonify(cfg)
+
+@app.route("/api/telegram/save", methods=["POST"])
+@_require_auth
+def telegram_save():
+    u = _current_user()
+    body = request.get_json(silent=True) or {}
+    token = (body.get("bot_token") or "").strip()
+    chat_id = (body.get("chat_id") or "").strip()
+    enabled = bool(body.get("enabled", True))
+    events = body.get("events") or {"buy":1,"sell":1,"eod":1,"vix":1,"startup":1}
+    if not token or not chat_id:
+        return jsonify({"error": "bot_token and chat_id required"}), 400
+    auth.save_telegram(u["id"], token, chat_id, enabled, events)
+    return jsonify({"ok": True})
+
+@app.route("/api/telegram/test", methods=["POST"])
+@_require_auth
+def telegram_test():
+    u = _current_user()
+    cfg = auth.get_telegram(u["id"])
+    if not cfg or not cfg.get("bot_token") or not cfg.get("chat_id"):
+        return jsonify({"error": "not_configured"}), 400
+    try:
+        r = _tg_requests.post(
+            f"https://api.telegram.org/bot{cfg['bot_token']}/sendMessage",
+            json={"chat_id": cfg["chat_id"],
+                  "text": f"<b>AlgoTrader test</b>\nUser: {u['email']}\nIf you can read this, your alerts are wired up correctly.",
+                  "parse_mode": "HTML"},
+            timeout=8
+        )
+        ok = r.status_code == 200 and r.json().get("ok")
+        return jsonify({"ok": bool(ok), "telegram_response": r.json() if r.status_code == 200 else r.text})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+@app.route("/api/telegram/delete", methods=["POST"])
+@_require_auth
+def telegram_delete():
+    u = _current_user()
+    auth.delete_telegram(u["id"])
+    return jsonify({"ok": True})
+
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5001))
     app.run(host="0.0.0.0", port=port, debug=False, threaded=True)

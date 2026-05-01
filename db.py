@@ -61,6 +61,15 @@ CREATE TABLE IF NOT EXISTS login_attempts (
     created_at  TEXT    DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS user_telegram (
+    user_id         INTEGER PRIMARY KEY,
+    bot_token_enc   BLOB,
+    chat_id         TEXT,
+    enabled         INTEGER DEFAULT 1,
+    events          TEXT    DEFAULT '{"buy":1,"sell":1,"eod":1,"vix":1,"startup":1}',
+    validated_at    TEXT,
+    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+);
 CREATE INDEX IF NOT EXISTS idx_sessions_user    ON user_sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_expires ON user_sessions(expires_at);
 CREATE INDEX IF NOT EXISTS idx_attempts_ip      ON login_attempts(ip, created_at);

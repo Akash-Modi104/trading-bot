@@ -269,3 +269,52 @@ def bootstrap_admin_from_env():
         print(f"[auth] Bootstrapped admin user: {email}")
     except Exception as e:
         print(f"[auth] Bootstrap failed: {e}")
+
+# ── Telegram per-user credentials ─────────────────────────────────
+def save_telegram(user_id: int, bot_token: str, chat_id: str,
+                  enabled: bool = True, events: dict = None):
+    """Encrypt + persist a user's Telegram bot credentials. Upsert."""
+    token_enc = encrypt(bot_token.strip()) if bot_token else None
+    ev = json.dumps(events) if events else '{"buy":1,"sell":1,"eod":1,"vix":1,"startup":1}'
+    db.execute("""
+        INSERT INTO user_telegram(user_id, bot_token_enc, chat_id, enabled, events, validated_at)
+        VALUES (?, ?, ?, ?, ?, datetime('now'))
+        ON CONFLICT(user_id) DO UPDATE SET
+            bot_token_enc=excluded.bot_token_enc,
+            chat_id=excluded.chat_id,
+            enabled=excluded.enabled,
+            events=excluded.events,
+            validated_at=datetime('now')
+    """, (user_id, token_enc, chat_id.strip(), 1 if enabled else 0, ev))
+
+def get_telegram(user_id: int):
+    row = db.query_one("SELECT * FROM user_telegram WHERE user_id=?", (user_id,))
+    if not row:
+        return None
+    return {
+        "user_id": row["user_id"],
+        "bot_token": decrypt(row["bot_token_enc"]) if row["bot_token_enc"] else "",
+        "chat_id": row["chat_id"] or "",
+        "enabled": bool(row["enabled"]),
+        "events": json.loads(row["events"] or "{}"),
+        "validated_at": row["validated_at"],
+    }
+
+def delete_telegram(user_id: int):
+    db.execute("DELETE FROM user_telegram WHERE user_id=?", (user_id,))
+
+def list_active_telegram():
+    """Used by the bot to dispatch alerts to all subscribed users."""
+    rows = db.query_all("SELECT * FROM user_telegram WHERE enabled=1")
+    out = []
+    for r in rows:
+        token = decrypt(r["bot_token_enc"]) if r["bot_token_enc"] else ""
+        if not token or not r["chat_id"]:
+            continue
+        try:
+            events = json.loads(r["events"] or "{}")
+        except Exception:
+            events = {}
+        out.append({"token": token, "chat_id": r["chat_id"], "events": events})
+    return out
+

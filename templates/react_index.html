@@ -76,6 +76,36 @@
       .header-stack > * { width: 100%; justify-content: space-between !important; }
     }
 
+    /* ── Phone-first refinements ─────────────────────────────── */
+    @media (max-width: 768px) {
+      html { font-size: 13px; }
+      main { padding: 10px !important; }
+      .card { border-radius: 8px !important; }
+      .card-hdr { padding: 12px 14px !important; }
+      .card-title { font-size: 14px !important; }
+      .stat-grid { grid-template-columns: repeat(2, 1fr) !important; gap: 8px !important; }
+      .stat-card { padding: 12px !important; }
+      .stat-card .stat-value { font-size: 20px !important; }
+      .responsive-grid-2, .responsive-grid-3 { grid-template-columns: 1fr !important; }
+      .btn { padding: 10px 14px !important; font-size: 13px !important; min-height: 38px; }
+      input, select, textarea { font-size: 16px !important; }   /* prevents iOS auto-zoom */
+      table { font-size: 11px !important; }
+      thead th, tbody td { padding: 8px 6px !important; }
+      .hide-on-mobile { display: none !important; }
+      .scroll-x { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    }
+    @media (max-width: 480px) {
+      .stat-grid { grid-template-columns: 1fr !important; }
+      header { position: sticky; top: 0; z-index: 50; backdrop-filter: blur(8px); }
+      .nav-tabs { overflow-x: auto; -webkit-overflow-scrolling: touch; white-space: nowrap; }
+      .nav-tabs button { flex: 0 0 auto !important; }
+    }
+    /* Touch target minimums */
+    @media (hover: none) and (pointer: coarse) {
+      button, a.btn, .btn { min-height: 40px; }
+      input[type=checkbox], input[type=radio] { transform: scale(1.2); }
+    }
+
     html { font-size: 14px; }
 
     body {
@@ -786,9 +816,70 @@
       const [sessions, setSessions] = useState([]);
       const [audit,    setAudit]    = useState([]);
 
+      // Telegram notifications
+      const [tgConfigured, setTgConfigured] = useState(false);
+      const [tgToken,      setTgToken]      = useState('');
+      const [tgChatId,     setTgChatId]     = useState('');
+      const [tgEnabled,    setTgEnabled]    = useState(true);
+      const [tgEvents,     setTgEvents]     = useState({buy:1,sell:1,eod:1,vix:1,startup:1});
+      const [tgKeyPreview, setTgKeyPreview] = useState('');
+      const [tgBusy,       setTgBusy]       = useState(false);
+
+      const loadTelegram = () => {
+        fetch('/api/telegram/status').then(r => r.json()).then(d => {
+          setTgConfigured(!!d.configured);
+          if (d.configured) {
+            setTgChatId(d.chat_id || '');
+            setTgEnabled(!!d.enabled);
+            setTgEvents(Object.assign({buy:1,sell:1,eod:1,vix:1,startup:1}, d.events || {}));
+            setTgKeyPreview(d.bot_token_redacted || '');
+          }
+        }).catch(() => {});
+      };
+
+      const saveTelegram = async () => {
+        if (!tgToken.trim() || !tgChatId.trim()) {
+          toast.push('Bot token and chat ID are required', 'error');
+          return;
+        }
+        setTgBusy(true);
+        try {
+          const r = await fetch('/api/telegram/save', {
+            method: 'POST', headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({bot_token: tgToken, chat_id: tgChatId, enabled: tgEnabled, events: tgEvents}),
+          });
+          const d = await r.json();
+          if (r.ok) {
+            toast.push('Saved. Sending test message…', 'success');
+            setTgToken('');
+            await fetch('/api/telegram/test', {method:'POST'});
+            loadTelegram();
+          } else {
+            toast.push(d.error || 'Save failed', 'error');
+          }
+        } finally { setTgBusy(false); }
+      };
+
+      const testTelegram = async () => {
+        setTgBusy(true);
+        try {
+          const r = await fetch('/api/telegram/test', {method:'POST'});
+          const d = await r.json();
+          toast.push(d.ok ? 'Test message sent — check Telegram' : (d.error || 'Test failed'), d.ok ? 'success' : 'error');
+        } finally { setTgBusy(false); }
+      };
+
+      const deleteTelegram = async () => {
+        if (!confirm('Remove Telegram credentials and stop notifications?')) return;
+        await fetch('/api/telegram/delete', {method:'POST'});
+        setTgToken(''); setTgChatId(''); setTgConfigured(false); setTgKeyPreview('');
+        toast.push('Telegram removed', 'info');
+      };
+
       useEffect(() => {
         fetch('/api/sessions').then(r => r.json()).then(setSessions).catch(() => {});
         fetch('/api/audit').then(r => r.json()).then(setAudit).catch(() => {});
+        loadTelegram();
       }, []);
 
       const saveProfile = async () => {
@@ -973,6 +1064,71 @@
                   </div>
                 </div>
               )}
+            </div>
+          </div>
+
+          {/* Telegram notifications */}
+          <div className="card">
+            <div className="card-hdr">
+              <span className="card-title">📱 Telegram Notifications</span>
+              {tgConfigured && (
+                <Badge color={tgEnabled ? '#10b981' : '#64748b'}>
+                  {tgEnabled ? 'ACTIVE' : 'DISABLED'}
+                </Badge>
+              )}
+            </div>
+            <div style={{padding:18}}>
+              {!tgConfigured && (
+                <div style={{padding:'10px 14px',background:'rgba(59,130,246,.08)',border:'1px solid rgba(59,130,246,.25)',borderRadius:7,fontSize:13,marginBottom:14}}>
+                  <b>Setup (one time):</b><br/>
+                  1. In Telegram, message <code>@BotFather</code> → <code>/newbot</code> → copy the token.<br/>
+                  2. Send any message to your new bot, then visit <code>https://api.telegram.org/bot&lt;TOKEN&gt;/getUpdates</code> and copy the <code>chat.id</code>.<br/>
+                  3. Paste both below and click <b>Save & Test</b>.
+                </div>
+              )}
+              {tgConfigured && (
+                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:14}}>
+                  <div>
+                    <div style={{fontSize:11,color:'var(--muted)',fontWeight:700,letterSpacing:'.06em',textTransform:'uppercase'}}>Bot token</div>
+                    <div style={{fontFamily:'JetBrains Mono',fontSize:13,marginTop:5}}>{tgKeyPreview || '—'}</div>
+                  </div>
+                  <div>
+                    <div style={{fontSize:11,color:'var(--muted)',fontWeight:700,letterSpacing:'.06em',textTransform:'uppercase'}}>Chat ID</div>
+                    <div style={{fontFamily:'JetBrains Mono',fontSize:13,marginTop:5}}>{tgChatId || '—'}</div>
+                  </div>
+                </div>
+              )}
+              <label style={{fontSize:11,color:'var(--muted)',fontWeight:700,letterSpacing:'.06em',textTransform:'uppercase'}}>{tgConfigured ? 'New bot token (optional, replaces existing)' : 'Bot token'}</label>
+              <input type="password" value={tgToken} onChange={e => setTgToken(e.target.value)}
+                placeholder="123456789:AAFxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                style={{width:'100%',marginTop:5,background:'var(--bg-input)',border:'1px solid var(--border)',borderRadius:6,padding:'9px 12px',color:'var(--text)',fontSize:13,fontFamily:'JetBrains Mono'}} />
+              <label style={{fontSize:11,color:'var(--muted)',fontWeight:700,letterSpacing:'.06em',textTransform:'uppercase',marginTop:12,display:'block'}}>Chat ID</label>
+              <input type="text" value={tgChatId} onChange={e => setTgChatId(e.target.value)}
+                placeholder="123456789"
+                style={{width:'100%',marginTop:5,background:'var(--bg-input)',border:'1px solid var(--border)',borderRadius:6,padding:'9px 12px',color:'var(--text)',fontSize:13,fontFamily:'JetBrains Mono'}} />
+              <div style={{marginTop:14,display:'flex',gap:14,alignItems:'center',flexWrap:'wrap'}}>
+                <label style={{display:'flex',alignItems:'center',gap:6,fontSize:13,cursor:'pointer'}}>
+                  <input type="checkbox" checked={tgEnabled} onChange={e => setTgEnabled(e.target.checked)} />
+                  Notifications enabled
+                </label>
+              </div>
+              <div style={{marginTop:14,fontSize:11,color:'var(--muted)',fontWeight:700,letterSpacing:'.06em',textTransform:'uppercase'}}>Events</div>
+              <div style={{marginTop:6,display:'flex',gap:14,flexWrap:'wrap'}}>
+                {['buy','sell','eod','vix','startup'].map(ev => (
+                  <label key={ev} style={{display:'flex',alignItems:'center',gap:6,fontSize:13,cursor:'pointer'}}>
+                    <input type="checkbox" checked={!!tgEvents[ev]}
+                      onChange={e => setTgEvents({...tgEvents, [ev]: e.target.checked ? 1 : 0})} />
+                    {ev}
+                  </label>
+                ))}
+              </div>
+              <div style={{marginTop:18,display:'flex',gap:8,justifyContent:'flex-end',flexWrap:'wrap'}}>
+                {tgConfigured && <button className="btn btn-red" disabled={tgBusy} onClick={deleteTelegram}>Remove</button>}
+                {tgConfigured && <button className="btn btn-ghost" disabled={tgBusy} onClick={testTelegram}>Send test</button>}
+                <button className="btn btn-green" disabled={tgBusy} onClick={saveTelegram}>
+                  {tgBusy ? 'Working…' : (tgConfigured ? 'Update' : 'Save & Test')}
+                </button>
+              </div>
             </div>
           </div>
 

@@ -800,7 +800,14 @@ def check_exits(alpaca_pos, p):
         # ── News kill-switch (highest priority) ───────────────
         if sym.upper() in bad_news:
             log_event(f"NEWS KILL {sym} | negative headline detected")
-            close_position(sym)
+            cd = local.get("close_attempt_cooldown_until", 0)
+            if time.time() < cd:
+                continue
+            res = close_position(sym)
+            if isinstance(res, dict) and res.get("_error"):
+                log_event(f"  NEWS KILL {sym} REJECTED: {res.get('message')} — cooling down 60s")
+                open_positions[sym]["close_attempt_cooldown_until"] = time.time() + 60
+                continue
             open_positions.pop(sym, None); save_positions()
             alert_sell(sym, qty, curr, pct, "news_kill_switch")
             # Realized P&L in $: (exit-entry)*qty. daily_pnl is dollar-summed and recomputed
@@ -850,8 +857,15 @@ def check_exits(alpaca_pos, p):
                     reason = f"signal_exit ({pct:.2f}%)"
 
         if reason:
+            cd = local.get("close_attempt_cooldown_until", 0)
+            if time.time() < cd:
+                continue
             log_event(f"EXIT {sym} | {reason}")
-            close_position(sym)
+            res = close_position(sym)
+            if isinstance(res, dict) and res.get("_error"):
+                log_event(f"  EXIT {sym} REJECTED: {res.get('message')} — cooling down 60s")
+                open_positions[sym]["close_attempt_cooldown_until"] = time.time() + 60
+                continue
             open_positions.pop(sym, None); save_positions()
             alert_sell(sym, qty, curr, pct, reason)
             # Realized P&L in $: (exit-entry)*qty. daily_pnl is dollar-summed and recomputed
