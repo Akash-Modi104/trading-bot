@@ -2279,32 +2279,43 @@
       const [searchRes, setSearchRes] = useState([]);
       const [searching, setSearching] = useState(false);
 
-      const load = async (what) => {
+      const mountedRef = useRef(true);
+      useEffect(() => {
+        mountedRef.current = true;
+        return () => { mountedRef.current = false; };
+      }, []);
+
+      const load = useCallback(async (what, signal) => {
+        if (!mountedRef.current) return;
         setLoading(true);
         try {
-          const r = await fetch(`/api/angelone/${what}`);
+          const r = await fetch(`/api/angelone/${what}`, { signal });
           const d = await r.json();
+          if (!mountedRef.current) return;
           if (!r.ok) throw new Error(d.error || 'Failed');
           if (what === 'positions') setPositions(d);
           else if (what === 'holdings') setHoldings(d);
           else if (what === 'orders')   setOrders(d);
           else if (what === 'account')  setAccount(d);
-        } catch(e) { toast.push(e.message, 'error'); }
-        finally { setLoading(false); }
-      };
+        } catch(e) {
+          if (e.name === 'AbortError') return;
+          if (mountedRef.current) toast.push(e.message, 'error');
+        } finally {
+          if (mountedRef.current) setLoading(false);
+        }
+      }, []);
 
+      // Single effect: load account once on connect, reload active view on view-change
       useEffect(() => {
         if (!ao.connected) return;
-        load('positions');
-        load('account');
-      }, [ao.connected]);
-
-      useEffect(() => {
-        if (!ao.connected) return;
-        if (view === 'holdings') load('holdings');
-        else if (view === 'orders') load('orders');
-        else if (view === 'positions') load('positions');
-      }, [view]);
+        const ctrl = new AbortController();
+        if (view === 'positions') {
+          load('account', ctrl.signal);
+          load('positions', ctrl.signal);
+        } else if (view === 'holdings') load('holdings', ctrl.signal);
+        else if (view === 'orders')     load('orders', ctrl.signal);
+        return () => ctrl.abort();
+      }, [ao.connected, view, load]);
 
       const placeOrder = async (params) => {
         setOrderBusy(true);
@@ -2504,32 +2515,43 @@
       const [reqToken,  setReqToken]  = useState('');
       const [tokenBusy, setTokenBusy] = useState(false);
 
-      const load = async (what) => {
+      const mountedRef = useRef(true);
+      useEffect(() => {
+        mountedRef.current = true;
+        return () => { mountedRef.current = false; };
+      }, []);
+
+      const load = useCallback(async (what, signal) => {
+        if (!mountedRef.current) return;
         setLoading(true);
         try {
-          const r = await fetch(`/api/zerodha/${what}`);
+          const r = await fetch(`/api/zerodha/${what}`, { signal });
           const d = await r.json();
+          if (!mountedRef.current) return;
           if (!r.ok) throw new Error(d.error || 'Failed');
-          if (what === 'positions') setPositions((d.day||d||[]));
-          else if (what === 'holdings') setHoldings(d||[]);
-          else if (what === 'orders')   setOrders(d||[]);
+          if (what === 'positions') setPositions(Array.isArray(d.day) ? d.day : (Array.isArray(d) ? d : []));
+          else if (what === 'holdings') setHoldings(Array.isArray(d) ? d : []);
+          else if (what === 'orders')   setOrders(Array.isArray(d) ? d : []);
           else if (what === 'account')  setAccount(d);
-        } catch(e) { toast.push(e.message, 'error'); }
-        finally { setLoading(false); }
-      };
+        } catch(e) {
+          if (e.name === 'AbortError') return;
+          if (mountedRef.current) toast.push(e.message, 'error');
+        } finally {
+          if (mountedRef.current) setLoading(false);
+        }
+      }, []);
 
+      // Single effect: load account + active view, abort on unmount or view-change
       useEffect(() => {
         if (!zrd.connected || !zrd.has_access_token) return;
-        load('positions');
-        load('account');
-      }, [zrd.connected, zrd.has_access_token]);
-
-      useEffect(() => {
-        if (!zrd.connected || !zrd.has_access_token) return;
-        if (view === 'holdings')  load('holdings');
-        else if (view === 'orders') load('orders');
-        else if (view === 'positions') load('positions');
-      }, [view]);
+        const ctrl = new AbortController();
+        if (view === 'positions') {
+          load('account', ctrl.signal);
+          load('positions', ctrl.signal);
+        } else if (view === 'holdings') load('holdings', ctrl.signal);
+        else if (view === 'orders')     load('orders', ctrl.signal);
+        return () => ctrl.abort();
+      }, [zrd.connected, zrd.has_access_token, view, load]);
 
       const activateToken = async () => {
         if (!reqToken) { toast.push('Paste the request_token from the redirect URL', 'error'); return; }

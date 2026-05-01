@@ -159,13 +159,13 @@ class AngelOneBroker:
     def get_profile(self) -> dict:
         self.ensure_logged_in()
         data = self._get("/rest/secure/angelbroking/user/v1/getProfile")
-        return data.get("data", {})
+        return data.get("data") or {}
 
     def get_funds(self) -> dict:
         """Returns available cash, used margin, net equity."""
         self.ensure_logged_in()
         data = self._get("/rest/secure/angelbroking/user/v1/getRMS")
-        return data.get("data", {})
+        return data.get("data") or {}
 
     # ── Symbol search ────────────────────────────────────────────
 
@@ -176,7 +176,7 @@ class AngelOneBroker:
             "/rest/secure/angelbroking/order/v1/searchScrip",
             params={"exchange": exchange, "searchscrip": query},
         )
-        return data.get("data", [])
+        return data.get("data") or []
 
     # ── Orders ───────────────────────────────────────────────────
 
@@ -343,7 +343,8 @@ class AngelOneBroker:
         """Long-term CNC holdings (delivery portfolio)."""
         self.ensure_logged_in()
         data = self._get("/rest/secure/angelbroking/portfolio/v1/getAllHolding")
-        return (data.get("data") or {}).get("holdings") or []
+        inner = data.get("data") or {}
+        return inner.get("holdings") or []
 
     def close_position(
         self,
