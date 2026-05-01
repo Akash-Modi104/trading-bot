@@ -1634,82 +1634,149 @@ def admin_panic_flat():
 
 
 
-# ── Multi-broker dashboard endpoints ──────────────────────────────
-@app.route("/api/brokers", methods=["GET"])
-@_require_auth
-def api_brokers_list():
-    u = _current_user()
-    paper = auth.get_alpaca_slot(u["id"], "paper")
-    live  = auth.get_alpaca_slot(u["id"], "live")
-    angel = auth.get_angelone(u["id"])
-    # Strip secrets before returning
-    if paper: paper = {k:v for k,v in paper.items() if not k.startswith("_")}
-    if live:  live  = {k:v for k,v in live.items()  if not k.startswith("_")}
-    return jsonify({
-        "alpaca_paper": paper or {"configured": False},
-        "alpaca_live":  live  or {"configured": False},
-        "angelone":     angel or {"configured": False},
-    })
-
-@app.route("/api/brokers/alpaca/<slot>", methods=["POST"])
-@_require_auth
-def api_brokers_alpaca_save(slot):
-    if slot not in ("paper", "live"):
-        return jsonify({"error":"bad slot"}), 400
-    u = _current_user()
-    body = request.get_json(silent=True) or {}
-    k = (body.get("api_key") or "").strip()
-    s = (body.get("secret_key") or "").strip()
-    if not k or not s:
-        return jsonify({"error":"both keys required"}), 400
-    ok, info = auth.save_alpaca_slot(u["id"], slot, k, s)
-    if not ok:
-        return jsonify({"error":"validation_failed","details":info}), 400
-    auth.audit(u["id"], f"alpaca_{slot}_saved", _client_ip(),
-               {"acct": (info.get("account_number","") or "")[:8]})
-    return jsonify({"ok": True, "account": {
-        "number": info.get("account_number"),
-        "equity": info.get("equity"),
-        "buying_power": info.get("buying_power"),
-        "status": info.get("status"),
-    }})
-
-@app.route("/api/brokers/alpaca/<slot>", methods=["DELETE"])
-@_require_auth
-def api_brokers_alpaca_delete(slot):
-    if slot not in ("paper","live"):
-        return jsonify({"error":"bad slot"}), 400
-    u = _current_user()
-    auth.delete_alpaca_slot(u["id"], slot)
-    return jsonify({"ok": True})
-
-@app.route("/api/brokers/angelone", methods=["POST"])
-@_require_auth
-def api_brokers_angelone_save():
-    u = _current_user()
-    body = request.get_json(silent=True) or {}
-    api_key      = (body.get("api_key")      or "").strip()
-    client_code  = (body.get("client_code")  or "").strip()
-    pin          = (body.get("pin")          or "").strip()
-    totp_secret  = (body.get("totp_secret")  or "").strip()
-    missing = [k for k,v in {"api_key":api_key,"client_code":client_code,"pin":pin,"totp_secret":totp_secret}.items() if not v]
-    if missing:
-        return jsonify({"error": f"missing: {', '.join(missing)}"}), 400
-    ok, info = auth.save_angelone(u["id"], api_key, client_code, pin, totp_secret)
-    if not ok:
-        return jsonify({"error":"validation_failed","details":info}), 400
-    auth.audit(u["id"], "angelone_saved", _client_ip(), {"client_code": client_code})
-    return jsonify({"ok": True, "info": info})
-
-@app.route("/api/brokers/angelone", methods=["DELETE"])
-@_require_auth
-def api_brokers_angelone_delete():
-    u = _current_user()
-    auth.delete_angelone(u["id"])
-    return jsonify({"ok": True})
-
 # Upgrade /api/admin/bot_mode POST to use SAVED creds when keys are blank
 # (drop-in over the existing handler — not redefining; a follow-up if needed)
+
+
+
+
+# ── Aggregate "All Accounts" overview ─────────────────────────────
+@app.route("/api/aggregate/overview", methods=["GET"])
+@_require_auth
+def api_aggregate_overview():
+    """Server-side parallel fetch from all connected brokers.
+    Returns a single payload with positions, recent trades, funds per broker."""
+    u = _current_user()
+    out = {"brokers": {}, "totals": {"positions": 0, "open_pnl_usd": 0.0, "open_pnl_inr": 0.0}}
+
+    # ── Alpaca (uses bot's .env keys = the live trading account) ──
+    try:
+        env_url = os.environ.get("ALPACA_BASE_URL", "").rstrip("/")
+        env_key = os.environ.get("ALPACA_API_KEY", "")
+        env_sec = os.environ.get("ALPACA_SECRET_KEY", "")
+        if env_url and env_key:
+            hdr = {"APCA-API-KEY-ID": env_key, "APCA-API-SECRET-KEY": env_sec}
+            import requests as _rq
+            acct = _rq.get(env_url + "/account", headers=hdr, timeout=8).json()
+            pos  = _rq.get(env_url + "/positions", headers=hdr, timeout=8).json()
+            ords = _rq.get(env_url + "/orders",
+                           headers=hdr, params={"status":"closed","limit":20,"direction":"desc"},
+                           timeout=8).json()
+            mode = "live" if "paper" not in env_url.lower() else "paper"
+            normalized = []
+            for p in (pos if isinstance(pos,list) else []):
+                normalized.append({
+                    "symbol": p.get("symbol"),
+                    "qty": p.get("qty"),
+                    "avg": p.get("avg_entry_price"),
+                    "ltp": p.get("current_price"),
+                    "pnl": p.get("unrealized_pl"),
+                    "currency": "USD",
+                })
+            out["brokers"]["alpaca"] = {
+                "connected": True, "mode": mode,
+                "account": acct.get("account_number"),
+                "equity": acct.get("equity"),
+                "buying_power": acct.get("buying_power"),
+                "currency": acct.get("currency","USD"),
+                "positions": normalized,
+                "recent_orders": [
+                    {"sym": o.get("symbol"), "side": o.get("side"),
+                     "qty": o.get("filled_qty"), "px": o.get("filled_avg_price"),
+                     "status": o.get("status"), "ts": o.get("filled_at")}
+                    for o in (ords if isinstance(ords,list) else [])
+                ][:10],
+            }
+            out["totals"]["positions"] += len(normalized)
+            try: out["totals"]["open_pnl_usd"] += sum(float(p.get("pnl") or 0) for p in normalized)
+            except Exception: pass
+        else:
+            out["brokers"]["alpaca"] = {"connected": False}
+    except Exception as e:
+        out["brokers"]["alpaca"] = {"connected": False, "error": str(e)[:120]}
+
+    # ── Angel One ──
+    try:
+        broker, err = _get_angelone_broker(u["id"])
+        if err:
+            out["brokers"]["angelone"] = {"connected": False, "error": err}
+        else:
+            try:
+                ao_pos = broker.get_positions() or []
+                ao_funds = broker.get_funds() or {}
+                ao_orders = broker.get_order_book() or []
+                _persist_angelone_tokens(u["id"], broker)
+                norm = [{
+                    "symbol": p.get("tradingsymbol"),
+                    "qty": p.get("netqty"),
+                    "avg": p.get("avgnetprice"),
+                    "ltp": p.get("ltp"),
+                    "pnl": p.get("pnl"),
+                    "exchange": p.get("exchange"),
+                    "currency": "INR",
+                } for p in (ao_pos if isinstance(ao_pos,list) else [])]
+                out["brokers"]["angelone"] = {
+                    "connected": True,
+                    "available_cash": (ao_funds or {}).get("availablecash") or (ao_funds or {}).get("net"),
+                    "currency": "INR",
+                    "positions": norm,
+                    "recent_orders": [
+                        {"sym": o.get("tradingsymbol"), "side": o.get("transactiontype"),
+                         "qty": o.get("quantity"), "px": o.get("price"),
+                         "status": o.get("orderstatus"), "ts": o.get("updatetime")}
+                        for o in (ao_orders if isinstance(ao_orders,list) else [])
+                    ][:10],
+                }
+                out["totals"]["positions"] += len(norm)
+                try: out["totals"]["open_pnl_inr"] += sum(float(p.get("pnl") or 0) for p in norm)
+                except Exception: pass
+            except Exception as e:
+                out["brokers"]["angelone"] = {"connected": True, "error": str(e)[:200]}
+    except Exception as e:
+        out["brokers"]["angelone"] = {"connected": False, "error": str(e)[:200]}
+
+    # ── Zerodha ──
+    try:
+        broker, err = _get_zerodha_broker(u["id"])
+        if err:
+            out["brokers"]["zerodha"] = {"connected": False, "error": err}
+        else:
+            try:
+                zr_pos_raw = broker.get_positions() or {}
+                zr_pos = (zr_pos_raw.get("net") if isinstance(zr_pos_raw,dict) else zr_pos_raw) or []
+                zr_funds = broker.get_funds() or {}
+                zr_orders = broker.get_orders() or []
+                norm = [{
+                    "symbol": p.get("tradingsymbol"),
+                    "qty": p.get("quantity"),
+                    "avg": p.get("average_price"),
+                    "ltp": p.get("last_price"),
+                    "pnl": p.get("pnl"),
+                    "exchange": p.get("exchange"),
+                    "currency": "INR",
+                } for p in (zr_pos if isinstance(zr_pos,list) else [])]
+                eq = ((zr_funds or {}).get("equity") or {}).get("available", {}) if isinstance(zr_funds, dict) else {}
+                out["brokers"]["zerodha"] = {
+                    "connected": True,
+                    "available_cash": (eq.get("cash") if isinstance(eq, dict) else None),
+                    "currency": "INR",
+                    "positions": norm,
+                    "recent_orders": [
+                        {"sym": o.get("tradingsymbol"), "side": o.get("transaction_type"),
+                         "qty": o.get("quantity"), "px": o.get("price"),
+                         "status": o.get("status"), "ts": o.get("order_timestamp")}
+                        for o in (zr_orders if isinstance(zr_orders,list) else [])
+                    ][:10],
+                }
+                out["totals"]["positions"] += len(norm)
+                try: out["totals"]["open_pnl_inr"] += sum(float(p.get("pnl") or 0) for p in norm)
+                except Exception: pass
+            except Exception as e:
+                out["brokers"]["zerodha"] = {"connected": True, "error": str(e)[:200]}
+    except Exception as e:
+        out["brokers"]["zerodha"] = {"connected": False, "error": str(e)[:200]}
+
+    return jsonify(out)
 
 
 if __name__ == "__main__":

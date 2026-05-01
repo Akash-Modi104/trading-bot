@@ -1,0 +1,471 @@
+{
+  "started": "2026-04-30T00:11:23.281117-04:00",
+  "regime": "trending",
+  "daily_pnl": 0.01552733240430633,
+  "daily_trades": 7,
+  "trading_paused": false,
+  "pause_reason": "",
+  "positions": [
+    {
+      "sym": "AMD",
+      "qty": "1",
+      "entry": 348.25,
+      "curr": 352.76,
+      "pct": 1.29
+    },
+    {
+      "sym": "NFLX",
+      "qty": "3",
+      "entry": 93.06,
+      "curr": 94.03,
+      "pct": 1.04
+    },
+    {
+      "sym": "QQQ",
+      "qty": "1",
+      "entry": 663.16,
+      "curr": 667.965,
+      "pct": 0.73
+    },
+    {
+      "sym": "TSLA",
+      "qty": "1",
+      "entry": 376.94,
+      "curr": 383.55,
+      "pct": 1.75
+    },
+    {
+      "sym": "UBER",
+      "qty": "4",
+      "entry": 74.0975,
+      "curr": 74.98,
+      "pct": 1.19
+    }
+  ],
+  "watchlist": [
+    "META",
+    "AMD",
+    "SNAP",
+    "GOOGL",
+    "PLTR",
+    "SMCI",
+    "AAPL",
+    "TSLA",
+    "COIN",
+    "AVGO",
+    "NVDA",
+    "MSFT",
+    "AMZN",
+    "SPY",
+    "QQQ",
+    "NFLX",
+    "UBER",
+    "ARM"
+  ],
+  "last_scan": "2026-04-30T15:19:52.051852-04:00",
+  "vix": 17.2,
+  "equity": 100034.09,
+  "buying_power": 396256.2,
+  "log": [
+    {
+      "t": "15:46:03",
+      "m": "EOD report launched. Bot finished."
+    },
+    {
+      "t": "15:46:02",
+      "m": "EOD close: liquidation submitted OK"
+    },
+    {
+      "t": "15:45:59",
+      "m": "EOD \u2014 closing all positions"
+    },
+    {
+      "t": "15:44:59",
+      "m": "Outside window 09:45\u201315:20 ET"
+    },
+    {
+      "t": "15:43:51",
+      "m": "Outside window 09:45\u201315:20 ET"
+    },
+    {
+      "t": "15:42:42",
+      "m": "Outside window 09:45\u201315:20 ET"
+    },
+    {
+      "t": "15:41:36",
+      "m": "Outside window 09:45\u201315:20 ET"
+    },
+    {
+      "t": "15:40:30",
+      "m": "Outside window 09:45\u201315:20 ET"
+    },
+    {
+      "t": "15:39:24",
+      "m": "Outside window 09:45\u201315:20 ET"
+    },
+    {
+      "t": "15:38:17",
+      "m": "Outside window 09:45\u201315:20 ET"
+    },
+    {
+      "t": "15:37:10",
+      "m": "Outside window 09:45\u201315:20 ET"
+    },
+    {
+      "t": "15:36:01",
+      "m": "Outside window 09:45\u201315:20 ET"
+    },
+    {
+      "t": "15:34:56",
+      "m": "Outside window 09:45\u201315:20 ET"
+    },
+    {
+      "t": "15:33:49",
+      "m": "Outside window 09:45\u201315:20 ET"
+    },
+    {
+      "t": "15:32:40",
+      "m": "Outside window 09:45\u201315:20 ET"
+    },
+    {
+      "t": "15:31:33",
+      "m": "Outside window 09:45\u201315:20 ET"
+    },
+    {
+      "t": "15:30:20",
+      "m": "Outside window 09:45\u201315:20 ET"
+    },
+    {
+      "t": "15:29:03",
+      "m": "Outside window 09:45\u201315:20 ET"
+    },
+    {
+      "t": "15:27:59",
+      "m": "Outside window 09:45\u201315:20 ET"
+    },
+    {
+      "t": "15:26:51",
+      "m": "Outside window 09:45\u201315:20 ET"
+    },
+    {
+      "t": "15:25:45",
+      "m": "Outside window 09:45\u201315:20 ET"
+    },
+    {
+      "t": "15:24:28",
+      "m": "Outside window 09:45\u201315:20 ET"
+    },
+    {
+      "t": "15:23:21",
+      "m": "Outside window 09:45\u201315:20 ET"
+    },
+    {
+      "t": "15:22:16",
+      "m": "Outside window 09:45\u201315:20 ET"
+    },
+    {
+      "t": "15:21:09",
+      "m": "Outside window 09:45\u201315:20 ET"
+    },
+    {
+      "t": "15:05:00",
+      "m": "ALPACA ERR DELETE /positions/AMD \u2192 403: insufficient qty available for order (requested: 1, available: 0)"
+    },
+    {
+      "t": "15:05:00",
+      "m": "NEWS KILL AMD | negative headline detected"
+    },
+    {
+      "t": "15:03:51",
+      "m": "ALPACA ERR DELETE /positions/AMD \u2192 403: insufficient qty available for order (requested: 1, available: 0)"
+    },
+    {
+      "t": "15:03:51",
+      "m": "NEWS KILL AMD | negative headline detected"
+    },
+    {
+      "t": "15:02:43",
+      "m": "ALPACA ERR DELETE /positions/AMD \u2192 403: insufficient qty available for order (requested: 1, available: 0)"
+    },
+    {
+      "t": "15:02:42",
+      "m": "NEWS KILL AMD | negative headline detected"
+    },
+    {
+      "t": "15:01:33",
+      "m": "ALPACA ERR DELETE /positions/AMD \u2192 403: insufficient qty available for order (requested: 1, available: 0)"
+    },
+    {
+      "t": "15:01:33",
+      "m": "NEWS KILL AMD | negative headline detected"
+    },
+    {
+      "t": "15:00:24",
+      "m": "ALPACA ERR DELETE /positions/AMD \u2192 403: insufficient qty available for order (requested: 1, available: 0)"
+    },
+    {
+      "t": "15:00:24",
+      "m": "NEWS KILL AMD | negative headline detected"
+    },
+    {
+      "t": "14:59:12",
+      "m": "ALPACA ERR DELETE /positions/AMD \u2192 403: insufficient qty available for order (requested: 1, available: 0)"
+    },
+    {
+      "t": "14:59:12",
+      "m": "NEWS KILL AMD | negative headline detected"
+    },
+    {
+      "t": "14:58:03",
+      "m": "ALPACA ERR DELETE /positions/AMD \u2192 403: insufficient qty available for order (requested: 1, available: 0)"
+    },
+    {
+      "t": "14:58:03",
+      "m": "NEWS KILL AMD | negative headline detected"
+    },
+    {
+      "t": "14:56:55",
+      "m": "ALPACA ERR DELETE /positions/AMD \u2192 403: insufficient qty available for order (requested: 1, available: 0)"
+    },
+    {
+      "t": "14:56:55",
+      "m": "NEWS KILL AMD | negative headline detected"
+    },
+    {
+      "t": "14:55:46",
+      "m": "ALPACA ERR DELETE /positions/AMD \u2192 403: insufficient qty available for order (requested: 1, available: 0)"
+    },
+    {
+      "t": "14:55:46",
+      "m": "NEWS KILL AMD | negative headline detected"
+    },
+    {
+      "t": "14:54:39",
+      "m": "ALPACA ERR DELETE /positions/AMD \u2192 403: insufficient qty available for order (requested: 1, available: 0)"
+    },
+    {
+      "t": "14:54:38",
+      "m": "NEWS KILL AMD | negative headline detected"
+    },
+    {
+      "t": "14:53:27",
+      "m": "ALPACA ERR DELETE /positions/AMD \u2192 403: insufficient qty available for order (requested: 1, available: 0)"
+    },
+    {
+      "t": "14:53:27",
+      "m": "NEWS KILL AMD | negative headline detected"
+    },
+    {
+      "t": "14:52:18",
+      "m": "ALPACA ERR DELETE /positions/AMD \u2192 403: insufficient qty available for order (requested: 1, available: 0)"
+    },
+    {
+      "t": "14:52:18",
+      "m": "NEWS KILL AMD | negative headline detected"
+    },
+    {
+      "t": "14:51:09",
+      "m": "ALPACA ERR DELETE /positions/AMD \u2192 403: insufficient qty available for order (requested: 1, available: 0)"
+    },
+    {
+      "t": "14:51:08",
+      "m": "NEWS KILL AMD | negative headline detected"
+    },
+    {
+      "t": "14:49:57",
+      "m": "ALPACA ERR DELETE /positions/AMD \u2192 403: insufficient qty available for order (requested: 1, available: 0)"
+    },
+    {
+      "t": "14:49:57",
+      "m": "NEWS KILL AMD | negative headline detected"
+    },
+    {
+      "t": "14:48:49",
+      "m": "ALPACA ERR DELETE /positions/AMD \u2192 403: insufficient qty available for order (requested: 1, available: 0)"
+    },
+    {
+      "t": "14:48:48",
+      "m": "NEWS KILL AMD | negative headline detected"
+    },
+    {
+      "t": "13:57:13",
+      "m": "ALPACA ERR DELETE /positions/AMD \u2192 403: insufficient qty available for order (requested: 1, available: 0)"
+    },
+    {
+      "t": "13:57:13",
+      "m": "NEWS KILL AMD | negative headline detected"
+    },
+    {
+      "t": "13:56:02",
+      "m": "ALPACA ERR DELETE /positions/AMD \u2192 403: insufficient qty available for order (requested: 1, available: 0)"
+    },
+    {
+      "t": "13:56:01",
+      "m": "NEWS KILL AMD | negative headline detected"
+    },
+    {
+      "t": "13:54:54",
+      "m": "ALPACA ERR DELETE /positions/AMD \u2192 403: insufficient qty available for order (requested: 1, available: 0)"
+    },
+    {
+      "t": "13:54:54",
+      "m": "NEWS KILL AMD | negative headline detected"
+    },
+    {
+      "t": "13:53:46",
+      "m": "ALPACA ERR DELETE /positions/AMD \u2192 403: insufficient qty available for order (requested: 1, available: 0)"
+    },
+    {
+      "t": "13:53:46",
+      "m": "NEWS KILL AMD | negative headline detected"
+    },
+    {
+      "t": "13:52:38",
+      "m": "ALPACA ERR DELETE /positions/AMD \u2192 403: insufficient qty available for order (requested: 1, available: 0)"
+    },
+    {
+      "t": "13:52:38",
+      "m": "NEWS KILL AMD | negative headline detected"
+    },
+    {
+      "t": "13:51:31",
+      "m": "ALPACA ERR DELETE /positions/AMD \u2192 403: insufficient qty available for order (requested: 1, available: 0)"
+    },
+    {
+      "t": "13:51:30",
+      "m": "NEWS KILL AMD | negative headline detected"
+    },
+    {
+      "t": "13:50:22",
+      "m": "ALPACA ERR DELETE /positions/AMD \u2192 403: insufficient qty available for order (requested: 1, available: 0)"
+    },
+    {
+      "t": "13:50:22",
+      "m": "NEWS KILL AMD | negative headline detected"
+    },
+    {
+      "t": "13:49:17",
+      "m": "ALPACA ERR DELETE /positions/AMD \u2192 403: insufficient qty available for order (requested: 1, available: 0)"
+    },
+    {
+      "t": "13:49:17",
+      "m": "NEWS KILL AMD | negative headline detected"
+    },
+    {
+      "t": "13:48:12",
+      "m": "ALPACA ERR DELETE /positions/AMD \u2192 403: insufficient qty available for order (requested: 1, available: 0)"
+    },
+    {
+      "t": "13:48:12",
+      "m": "NEWS KILL AMD | negative headline detected"
+    },
+    {
+      "t": "13:47:03",
+      "m": "ALPACA ERR DELETE /positions/AMD \u2192 403: insufficient qty available for order (requested: 1, available: 0)"
+    },
+    {
+      "t": "13:47:03",
+      "m": "NEWS KILL AMD | negative headline detected"
+    },
+    {
+      "t": "13:45:53",
+      "m": "ALPACA ERR DELETE /positions/AMD \u2192 403: insufficient qty available for order (requested: 1, available: 0)"
+    },
+    {
+      "t": "13:45:52",
+      "m": "NEWS KILL AMD | negative headline detected"
+    },
+    {
+      "t": "13:44:44",
+      "m": "ALPACA ERR DELETE /positions/AMD \u2192 403: insufficient qty available for order (requested: 1, available: 0)"
+    },
+    {
+      "t": "13:44:43",
+      "m": "NEWS KILL AMD | negative headline detected"
+    },
+    {
+      "t": "13:43:38",
+      "m": "ALPACA ERR DELETE /positions/AMD \u2192 403: insufficient qty available for order (requested: 1, available: 0)"
+    },
+    {
+      "t": "13:43:37",
+      "m": "NEWS KILL AMD | negative headline detected"
+    },
+    {
+      "t": "13:42:30",
+      "m": "ALPACA ERR DELETE /positions/AMD \u2192 403: insufficient qty available for order (requested: 1, available: 0)"
+    },
+    {
+      "t": "13:42:30",
+      "m": "NEWS KILL AMD | negative headline detected"
+    },
+    {
+      "t": "13:41:24",
+      "m": "ALPACA ERR DELETE /positions/AMD \u2192 403: insufficient qty available for order (requested: 1, available: 0)"
+    },
+    {
+      "t": "13:41:24",
+      "m": "NEWS KILL AMD | negative headline detected"
+    },
+    {
+      "t": "13:40:09",
+      "m": "ALPACA ERR DELETE /positions/AMD \u2192 403: insufficient qty available for order (requested: 1, available: 0)"
+    },
+    {
+      "t": "13:40:09",
+      "m": "NEWS KILL AMD | negative headline detected"
+    },
+    {
+      "t": "13:16:02",
+      "m": "BUY 4x UBER @ ~$74.09 (limit $74.2) | stop=$73.90 tp=$76.31 ATR=0.13 score=53 sector=industrial"
+    },
+    {
+      "t": "13:16:01",
+      "m": "META skipped \u2014 sector 'tech' already held"
+    },
+    {
+      "t": "13:16:01",
+      "m": "ARM    score= 30  ['ema', 'rsi', 'vwap']"
+    },
+    {
+      "t": "13:15:56",
+      "m": "UBER   score= 53  ['ema', 'rsi', 'vwap', 'rvol']"
+    },
+    {
+      "t": "13:15:52",
+      "m": "AMZN   score= 35  ['ema', 'rsi', 'vwap', 'macd']"
+    },
+    {
+      "t": "13:15:49",
+      "m": "MSFT   score= 27  ['ema', 'vwap', 'rvol', 'macd', 'bb']"
+    },
+    {
+      "t": "13:15:40",
+      "m": "NVDA   score= 22  ['ema', 'rsi', 'vwap', 'macd']"
+    },
+    {
+      "t": "13:15:36",
+      "m": "AVGO   score= 41  ['ema', 'rsi', 'vwap', 'ai']"
+    },
+    {
+      "t": "13:15:32",
+      "m": "COIN   score=  0  ['skip']"
+    },
+    {
+      "t": "13:15:29",
+      "m": "AAPL   score= 41  ['ema', 'rsi', 'vwap', 'ai']"
+    },
+    {
+      "t": "13:15:24",
+      "m": "SMCI skipped \u2014 negative news"
+    },
+    {
+      "t": "13:15:24",
+      "m": "PLTR   score= 13  ['ema', 'vwap', 'rvol', 'ai']"
+    },
+    {
+      "t": "13:15:20",
+      "m": "GOOGL  score=  0  ['skip']"
+    }
+  ]
+}

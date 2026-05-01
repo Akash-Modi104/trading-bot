@@ -1,6 +1,5 @@
 {
-  "date": "2026-04-26",
+  "date": "2026-05-01",
   "tickers": [],
-  "reasons": {},
-  "_note": "Populated by premarket-scanner and intraday-market-scanner-trader. Bot reads this file every cycle to auto-close positions and skip new entries on listed tickers."
+  "reasons": {}
 }
