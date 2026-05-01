@@ -304,6 +304,23 @@
   <script type="text/babel">
     const { useState, useEffect, useRef, useCallback } = React;
 
+    /* ── Error boundary (prevents blank page on render crashes) ── */
+    class ErrorBoundary extends React.Component {
+      constructor(props) { super(props); this.state = { err: null }; }
+      static getDerivedStateFromError(e) { return { err: e }; }
+      render() {
+        if (this.state.err) return (
+          <div style={{padding:32,textAlign:'center',color:'#ef4444'}}>
+            <div style={{fontSize:32,marginBottom:12}}>⚠️</div>
+            <div style={{fontWeight:700,marginBottom:8}}>Something went wrong</div>
+            <div style={{fontSize:13,color:'var(--muted)',marginBottom:16,fontFamily:'JetBrains Mono'}}>{String(this.state.err?.message || this.state.err)}</div>
+            <button className="btn btn-blue" onClick={()=>this.setState({err:null})}>Retry</button>
+          </div>
+        );
+        return this.props.children;
+      }
+    }
+
     /* ── Format helpers ──────────────────────────────────────── */
     const f$ = n =>
       n == null ? '—' : (n < 0 ? '-' : '') + '$' +
@@ -2082,19 +2099,19 @@
     };
 
     const IndianPositionsTable = ({ positions, onSquareOff, squaringOff }) => {
-      if (!positions || positions.length === 0)
+      const rows = Array.isArray(positions) ? positions.filter(p => parseInt(p.netqty ?? p.quantity ?? 0) !== 0) : [];
+      if (!positions || rows.length === 0)
         return <div className="empty">No open positions</div>;
       return (
         <div style={{overflowX:'auto'}}>
           <table>
             <thead><tr><th>Symbol</th><th>Exchange</th><th>Qty</th><th>Avg Buy</th><th>LTP</th><th>P&amp;L</th><th>Product</th></tr></thead>
             <tbody>
-              {positions.map((p,i)=>{
+              {rows.map((p,i)=>{
                 const qty    = parseInt(p.netqty ?? p.quantity ?? 0);
                 const pnl    = parseFloat(p.unrealisedpnl ?? p.pnl ?? p.unrealised ?? 0);
                 const avgBuy = parseFloat(p.averageprice ?? p.average_price ?? 0);
                 const ltp    = parseFloat(p.ltp ?? 0);
-                if (qty === 0) return null;
                 return (
                   <tr key={i}>
                     <td className="mono" style={{fontWeight:700}}>{p.tradingsymbol ?? p.trading_symbol}</td>
@@ -2121,7 +2138,7 @@
     };
 
     const IndianOrdersTable = ({ orders, onCancel }) => {
-      if (!orders || orders.length === 0) return <div className="empty">No orders</div>;
+      if (!Array.isArray(orders) || orders.length === 0) return <div className="empty">No orders</div>;
       return (
         <div style={{overflowX:'auto'}}>
           <table>
@@ -2163,15 +2180,18 @@
       const [data, setData] = useState(null);
       const [err, setErr] = useState(null);
       const [loading, setLoading] = useState(true);
-      const load = () => {
+      const mountedRef = useRef(true);
+      useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
+      const load = useCallback(() => {
+        if (!mountedRef.current) return;
         setLoading(true);
         fetch('/api/aggregate/overview')
           .then(r => r.ok ? r.json() : r.json().then(e => Promise.reject(e)))
-          .then(d => { setData(d); setErr(null); })
-          .catch(e => setErr(e?.error || 'Failed to load'))
-          .finally(() => setLoading(false));
-      };
-      useEffect(() => { load(); const id = setInterval(load, 30000); return () => clearInterval(id); }, []);
+          .then(d => { if (mountedRef.current) { setData(d); setErr(null); } })
+          .catch(e => { if (mountedRef.current) setErr(e?.error || String(e?.message || 'Failed to load')); })
+          .finally(() => { if (mountedRef.current) setLoading(false); });
+      }, []);
+      useEffect(() => { load(); const id = setInterval(load, 30000); return () => clearInterval(id); }, [load]);
 
       if (loading && !data) return <div className="empty" style={{padding:40}}>Loading aggregate view…</div>;
       if (err && !data) return <div className="empty" style={{padding:40}}><div style={{color:'#ef4444',marginBottom:12}}>Error: {err}</div><button className="btn btn-blue" onClick={load}>↻ Retry</button></div>;
@@ -2359,14 +2379,15 @@
           const r = await fetch(`/api/angelone/${what}`, { signal });
           const d = await r.json();
           if (!mountedRef.current) return;
-          if (!r.ok) throw new Error(d.error || 'Failed');
-          if (what === 'positions') setPositions(d);
-          else if (what === 'holdings') setHoldings(d);
-          else if (what === 'orders')   setOrders(d);
-          else if (what === 'account')  setAccount(d);
+          if (!r.ok) throw new Error(d?.error || d?.message || 'Failed');
+          if (d?.status === false) throw new Error(d?.message || 'API error');
+          if (what === 'positions') setPositions(Array.isArray(d) ? d : []);
+          else if (what === 'holdings') setHoldings(Array.isArray(d) ? d : []);
+          else if (what === 'orders')   setOrders(Array.isArray(d) ? d : []);
+          else if (what === 'account')  setAccount(d && typeof d === 'object' && !Array.isArray(d) ? d : null);
         } catch(e) {
           if (e.name === 'AbortError') return;
-          if (mountedRef.current) toast.push(e.message, 'error');
+          if (mountedRef.current) toast.push(String(e?.message || e), 'error');
         } finally {
           if (mountedRef.current) setLoading(false);
         }
@@ -2595,14 +2616,14 @@
           const r = await fetch(`/api/zerodha/${what}`, { signal });
           const d = await r.json();
           if (!mountedRef.current) return;
-          if (!r.ok) throw new Error(d.error || 'Failed');
-          if (what === 'positions') setPositions(Array.isArray(d.day) ? d.day : (Array.isArray(d) ? d : []));
+          if (!r.ok) throw new Error(d?.error || d?.message || 'Failed');
+          if (what === 'positions') setPositions(Array.isArray(d?.day) ? d.day : (Array.isArray(d) ? d : []));
           else if (what === 'holdings') setHoldings(Array.isArray(d) ? d : []);
           else if (what === 'orders')   setOrders(Array.isArray(d) ? d : []);
-          else if (what === 'account')  setAccount(d);
+          else if (what === 'account')  setAccount(d && typeof d === 'object' && !Array.isArray(d) ? d : null);
         } catch(e) {
           if (e.name === 'AbortError') return;
-          if (mountedRef.current) toast.push(e.message, 'error');
+          if (mountedRef.current) toast.push(String(e?.message || e), 'error');
         } finally {
           if (mountedRef.current) setLoading(false);
         }
@@ -3155,10 +3176,10 @@
             {tab === 'analytics' && <AnalyticsTab />}
 
             {/* ANGEL ONE */}
-            {tab === 'angelone' && <AngelOneTab me={me} />}
+            {tab === 'angelone' && <ErrorBoundary key="ao"><AngelOneTab me={me} /></ErrorBoundary>}
 
             {/* ZERODHA */}
-            {tab === 'zerodha' && <ZerodhaTab me={me} />}
+            {tab === 'zerodha' && <ErrorBoundary key="zrd"><ZerodhaTab me={me} /></ErrorBoundary>}
 
             {/* REPORTS */}
             {tab === 'reports' && <ReportsTab />}
