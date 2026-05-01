@@ -4,8 +4,27 @@ __pycache__/
 *.xlsx
 *.csv
 *.log
+*.bak.*
 .env
+
+# Runtime state — never commit
+bot_state.json
+positions_state.json
+trade_log.json
+trade_log.json.bak.*
+scan_stats.json
+equity_history.json
+strategy_history.json
 strategy_params.json
+strategy_params.json.bak.*
+claude_picks.json
+negative_news.json
 portfolio.json
+archive.json
+users.db
+.webui_secret_key
+.aider*
+
+# Generated artifacts
 reports/
 archive/
