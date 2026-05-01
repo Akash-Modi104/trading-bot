@@ -267,7 +267,46 @@ def wait_for_fill(order_id, timeout=10, requested_qty=None, min_fill_pct=0.5):
     return 0, None
 
 def close_position(sym): return api("DELETE", f"/positions/{sym}")
-def close_all():         return api("DELETE", "/positions")
+def close_all():
+    # Robust EOD flatten:
+    # 1) cancel all working orders (bracket children block liquidation)
+    # 2) DELETE /positions returns 207 multi-status — inspect body for per-symbol errors
+    # 3) verify positions actually went to zero; per-symbol retry if not
+    cr = api("DELETE", "/orders")
+    if isinstance(cr, dict) and cr.get("_error"):
+        log_event(f"close_all: cancel-orders failed: {cr.get('message')}")
+    elif isinstance(cr, list):
+        rejected = [x for x in cr if isinstance(x, dict) and x.get('status', 200) >= 400]
+        if rejected:
+            log_event(f"close_all: {len(rejected)}/{len(cr)} order cancels rejected")
+    time.sleep(2)
+    res = api("DELETE", "/positions")
+    # 207 returns a list of {symbol, status, body}; inspect for per-symbol failures
+    if isinstance(res, list):
+        ok = sum(1 for x in res if isinstance(x, dict) and x.get('status', 0) < 400)
+        bad = [x for x in res if isinstance(x, dict) and x.get('status', 0) >= 400]
+        log_event(f"close_all: DELETE /positions ok={ok} failed={len(bad)} (total {len(res)})")
+        for b in bad:
+            log_event(f"  close_all FAIL {b.get('symbol','?')}: {b.get('body',{}).get('message','?')}")
+    elif isinstance(res, dict) and res.get("_error"):
+        log_event(f"close_all: DELETE /positions failed: {res.get('message')}")
+    # Verify + per-symbol retry up to 3 passes
+    for attempt in range(3):
+        time.sleep(2)
+        remaining = get_positions()
+        if not remaining:
+            log_event(f"close_all: verified flat after pass {attempt}")
+            return res
+        log_event(f"close_all: pass {attempt} — {len(remaining)} still open: " +
+                  ", ".join("{}({})".format(p['symbol'], p['qty']) for p in remaining))
+        for p in remaining:
+            r2 = close_position(p['symbol'])
+            if isinstance(r2, dict) and r2.get("_error"):
+                log_event(f"  per-symbol close fail {p['symbol']}: {r2.get('message')}")
+    rem = get_positions()
+    if rem:
+        log_event(f"close_all: GAVE UP — still holding {[p['symbol'] for p in rem]}")
+    return res
 
 def get_bars(sym, tf="5Min", limit=80):
     d = data_get(f"/stocks/{sym}/bars", {"timeframe": tf, "limit": limit, "feed": "iex"})
@@ -866,7 +905,11 @@ def run():
         # ── EOD close ──────────────────────────────────────
         if eod_time(p):
             log_event("EOD — closing all positions")
-            close_all()
+            _eod_res = close_all()
+            if isinstance(_eod_res, dict) and _eod_res.get("_error"):
+                log_event(f"EOD close FAILED: {_eod_res.get('message')}")
+            else:
+                log_event("EOD close: liquidation submitted OK")
             daily_pnl = calc_daily_pnl(start_eq)
             trades    = _state["daily_trades"]
             alert_eod(float(get_account().get("equity", start_eq)),
