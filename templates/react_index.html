@@ -123,6 +123,15 @@
       /* Hide noisy "hide-on-mobile" class */
       .hide-on-mobile { display: none !important; }
     }
+    /* Item 30: Toast position on mobile */
+    @media (max-width: 768px) {
+      .toast-container, [data-toast-container] {
+        bottom: 16px !important; top: auto !important;
+        right: 8px !important; left: 8px !important;
+        max-width: calc(100vw - 16px);
+      }
+    }
+
     @media (max-width: 480px) {
       html { font-size: 12.5px; }
       main { padding: 6px !important; }
@@ -1411,7 +1420,7 @@
           {me?.role === 'admin' && (
           <div className="card" style={{borderColor:'#ef4444'}}>
             <div className="card-hdr">
-              <span className="card-title">⚙ Bot Mode (admin)</span>
+              <span className="card-title">⚙ Bot Mode  ·  ADMIN ONLY</span>
             </div>
             <BotModeAdmin />
           </div>
@@ -2165,7 +2174,7 @@
       useEffect(() => { load(); const id = setInterval(load, 30000); return () => clearInterval(id); }, []);
 
       if (loading && !data) return <div className="empty" style={{padding:40}}>Loading aggregate view…</div>;
-      if (err && !data) return <div className="empty" style={{padding:40,color:'#ef4444'}}>Error: {err}</div>;
+      if (err && !data) return <div className="empty" style={{padding:40}}><div style={{color:'#ef4444',marginBottom:12}}>Error: {err}</div><button className="btn btn-blue" onClick={load}>↻ Retry</button></div>;
       const b = data?.brokers || {};
       const totals = data?.totals || {};
 
@@ -2308,7 +2317,7 @@
               </div>
               <div style={{padding:12,background:'var(--bg-input)',borderRadius:8}}>
                 <div style={{fontSize:10,color:'var(--muted)',textTransform:'uppercase',fontWeight:700}}>Open P&L (INR)</div>
-                <div className="mono" style={{fontSize:22,fontWeight:700,marginTop:4,color:pnlClr(totals.open_pnl_inr)}}>{fmtCcy(totals.open_pnl_inr, 'INR')}</div>
+                <div className="mono" style={{fontSize:22,fontWeight:700,marginTop:4,color:pnlClr(totals.open_pnl_inr)}}>{fmtCcy(totals.open_pnl_inr, 'INR')}</div>{data?.fx?.inr_usd && Number(totals.open_pnl_inr) !== 0 && <div style={{fontSize:11,color:'var(--muted)',marginTop:2}}>≈ {fmtCcy(Number(totals.open_pnl_inr) * data.fx.inr_usd, 'USD')} @ {data.fx.usd_inr.toFixed(1)}</div>}
               </div>
             </div>
           </div>

@@ -6,12 +6,37 @@ import json, os, subprocess, time, threading, secrets
 from datetime import datetime
 import pytz
 
+
+from concurrent.futures import ThreadPoolExecutor as _AggPool
 import db
 import auth
 
+
+# ── Login rate limiting (in-memory token bucket per IP) ───────
+import collections, threading
+_LOGIN_BUCKET = collections.defaultdict(lambda: {"count":0, "ts":0})
+_LOGIN_LOCK = threading.Lock()
+_LOGIN_MAX = 8        # attempts
+_LOGIN_WINDOW = 60    # seconds
+
+def _login_allowed(ip):
+    """Returns (allowed, retry_after). 8 attempts per 60s per IP."""
+    with _LOGIN_LOCK:
+        b = _LOGIN_BUCKET[ip]
+        now = time.time()
+        if now - b["ts"] > _LOGIN_WINDOW:
+            b["count"] = 0; b["ts"] = now
+        if b["count"] >= _LOGIN_MAX:
+            return False, int(_LOGIN_WINDOW - (now - b["ts"]))
+        b["count"] += 1
+        return True, 0
+
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY") or secrets.token_hex(32)
-CORS(app, supports_credentials=True)
+CORS(app, supports_credentials=True, origins=[
+    "http://localhost:5001","http://127.0.0.1:5001",
+    "http://187.127.73.203:5001","https://187.127.73.203:5001"
+])
 
 # Initialize DB and bootstrap legacy admin from .env if needed
 db.init()
@@ -204,6 +229,9 @@ def register_page():
 
 @app.route("/api/login", methods=["POST"])
 def api_login():
+    ok, retry = _login_allowed(_client_ip())
+    if not ok:
+        return jsonify({"error":"rate_limited","retry_after":retry}), 429
     body = request.get_json(force=True, silent=True) or {}
     email = (body.get("email") or "").strip().lower()
     pw    = body.get("password") or ""
@@ -1109,7 +1137,6 @@ def api_stream():
     )
 
 @app.route("/api/health")
-@_require_auth
 def api_health():
     # Real supervisor service names on this server
     svc_names = {
@@ -1649,138 +1676,131 @@ def admin_panic_flat():
 @app.route("/api/aggregate/overview", methods=["GET"])
 @_require_auth
 def api_aggregate_overview():
-    """Server-side parallel fetch from all connected brokers.
-    Returns a single payload with positions, recent trades, funds per broker."""
+    """Server-side parallel fetch from all connected brokers (threaded)."""
     u = _current_user()
     out = {"brokers": {}, "totals": {"positions": 0, "open_pnl_usd": 0.0, "open_pnl_inr": 0.0}}
 
-    # ── Alpaca (uses bot's .env keys = the live trading account) ──
-    try:
-        env_url = os.environ.get("ALPACA_BASE_URL", "").rstrip("/")
-        env_key = os.environ.get("ALPACA_API_KEY", "")
-        env_sec = os.environ.get("ALPACA_SECRET_KEY", "")
-        if env_url and env_key:
+    def _fetch_alpaca():
+        try:
+            env_url = os.environ.get("ALPACA_BASE_URL", "").rstrip("/")
+            env_key = os.environ.get("ALPACA_API_KEY", "")
+            env_sec = os.environ.get("ALPACA_SECRET_KEY", "")
+            if not env_url or not env_key:
+                return ("alpaca", {"connected": False})
             hdr = {"APCA-API-KEY-ID": env_key, "APCA-API-SECRET-KEY": env_sec}
             import requests as _rq
             acct = _rq.get(env_url + "/account", headers=hdr, timeout=8).json()
             pos  = _rq.get(env_url + "/positions", headers=hdr, timeout=8).json()
-            ords = _rq.get(env_url + "/orders",
-                           headers=hdr, params={"status":"closed","limit":20,"direction":"desc"},
+            ords = _rq.get(env_url + "/orders", headers=hdr,
+                           params={"status":"closed","limit":20,"direction":"desc"},
                            timeout=8).json()
             mode = "live" if "paper" not in env_url.lower() else "paper"
-            normalized = []
-            for p in (pos if isinstance(pos,list) else []):
-                normalized.append({
-                    "symbol": p.get("symbol"),
-                    "qty": p.get("qty"),
-                    "avg": p.get("avg_entry_price"),
-                    "ltp": p.get("current_price"),
-                    "pnl": p.get("unrealized_pl"),
-                    "currency": "USD",
-                })
-            out["brokers"]["alpaca"] = {
+            normalized = [{
+                "symbol": p.get("symbol"), "qty": p.get("qty"),
+                "avg": p.get("avg_entry_price"), "ltp": p.get("current_price"),
+                "pnl": p.get("unrealized_pl"), "currency": "USD",
+            } for p in (pos if isinstance(pos,list) else [])]
+            return ("alpaca", {
                 "connected": True, "mode": mode,
                 "account": acct.get("account_number"),
-                "equity": acct.get("equity"),
-                "buying_power": acct.get("buying_power"),
+                "equity": acct.get("equity"), "buying_power": acct.get("buying_power"),
                 "currency": acct.get("currency","USD"),
                 "positions": normalized,
-                "recent_orders": [
-                    {"sym": o.get("symbol"), "side": o.get("side"),
-                     "qty": o.get("filled_qty"), "px": o.get("filled_avg_price"),
-                     "status": o.get("status"), "ts": o.get("filled_at")}
-                    for o in (ords if isinstance(ords,list) else [])
-                ][:10],
-            }
-            out["totals"]["positions"] += len(normalized)
-            try: out["totals"]["open_pnl_usd"] += sum(float(p.get("pnl") or 0) for p in normalized)
-            except Exception: pass
-        else:
-            out["brokers"]["alpaca"] = {"connected": False}
-    except Exception as e:
-        out["brokers"]["alpaca"] = {"connected": False, "error": str(e)[:120]}
+                "recent_orders": [{"sym": o.get("symbol"), "side": o.get("side"),
+                                   "qty": o.get("filled_qty"), "px": o.get("filled_avg_price"),
+                                   "status": o.get("status"), "ts": o.get("filled_at")}
+                                  for o in (ords if isinstance(ords,list) else [])][:10],
+            })
+        except Exception as e:
+            return ("alpaca", {"connected": False, "error": str(e)[:120]})
 
-    # ── Angel One ──
-    try:
-        broker, err = _get_angelone_broker(u["id"])
-        if err:
-            out["brokers"]["angelone"] = {"connected": False, "error": err}
-        else:
-            try:
-                ao_pos = broker.get_positions() or []
-                ao_funds = broker.get_funds() or {}
-                ao_orders = broker.get_order_book() or []
-                _persist_angelone_tokens(u["id"], broker)
-                norm = [{
-                    "symbol": p.get("tradingsymbol"),
-                    "qty": p.get("netqty"),
-                    "avg": p.get("avgnetprice"),
-                    "ltp": p.get("ltp"),
-                    "pnl": p.get("pnl"),
-                    "exchange": p.get("exchange"),
-                    "currency": "INR",
-                } for p in (ao_pos if isinstance(ao_pos,list) else [])]
-                out["brokers"]["angelone"] = {
-                    "connected": True,
-                    "available_cash": (ao_funds or {}).get("availablecash") or (ao_funds or {}).get("net"),
-                    "currency": "INR",
-                    "positions": norm,
-                    "recent_orders": [
-                        {"sym": o.get("tradingsymbol"), "side": o.get("transactiontype"),
-                         "qty": o.get("quantity"), "px": o.get("price"),
-                         "status": o.get("orderstatus"), "ts": o.get("updatetime")}
-                        for o in (ao_orders if isinstance(ao_orders,list) else [])
-                    ][:10],
-                }
-                out["totals"]["positions"] += len(norm)
-                try: out["totals"]["open_pnl_inr"] += sum(float(p.get("pnl") or 0) for p in norm)
-                except Exception: pass
-            except Exception as e:
-                out["brokers"]["angelone"] = {"connected": True, "error": str(e)[:200]}
-    except Exception as e:
-        out["brokers"]["angelone"] = {"connected": False, "error": str(e)[:200]}
+    def _fetch_angelone():
+        try:
+            broker, err = _get_angelone_broker(u["id"])
+            if err: return ("angelone", {"connected": False, "error": err})
+            ao_pos = broker.get_positions() or []
+            ao_funds = broker.get_funds() or {}
+            ao_orders = broker.get_order_book() or []
+            _persist_angelone_tokens(u["id"], broker)
+            norm = [{"symbol": p.get("tradingsymbol"), "qty": p.get("netqty"),
+                     "avg": p.get("avgnetprice"), "ltp": p.get("ltp"), "pnl": p.get("pnl"),
+                     "exchange": p.get("exchange"), "currency": "INR"}
+                    for p in (ao_pos if isinstance(ao_pos,list) else [])]
+            return ("angelone", {
+                "connected": True,
+                "available_cash": (ao_funds or {}).get("availablecash") or (ao_funds or {}).get("net"),
+                "currency": "INR", "positions": norm,
+                "recent_orders": [{"sym": o.get("tradingsymbol"), "side": o.get("transactiontype"),
+                                   "qty": o.get("quantity"), "px": o.get("price"),
+                                   "status": o.get("orderstatus"), "ts": o.get("updatetime")}
+                                  for o in (ao_orders if isinstance(ao_orders,list) else [])][:10],
+            })
+        except Exception as e:
+            return ("angelone", {"connected": False, "error": str(e)[:200]})
 
-    # ── Zerodha ──
-    try:
-        broker, err = _get_zerodha_broker(u["id"])
-        if err:
-            out["brokers"]["zerodha"] = {"connected": False, "error": err}
-        else:
-            try:
-                zr_pos_raw = broker.get_positions() or {}
-                zr_pos = (zr_pos_raw.get("net") if isinstance(zr_pos_raw,dict) else zr_pos_raw) or []
-                zr_funds = broker.get_funds() or {}
-                zr_orders = broker.get_orders() or []
-                norm = [{
-                    "symbol": p.get("tradingsymbol"),
-                    "qty": p.get("quantity"),
-                    "avg": p.get("average_price"),
-                    "ltp": p.get("last_price"),
-                    "pnl": p.get("pnl"),
-                    "exchange": p.get("exchange"),
-                    "currency": "INR",
-                } for p in (zr_pos if isinstance(zr_pos,list) else [])]
-                eq = ((zr_funds or {}).get("equity") or {}).get("available", {}) if isinstance(zr_funds, dict) else {}
-                out["brokers"]["zerodha"] = {
-                    "connected": True,
-                    "available_cash": (eq.get("cash") if isinstance(eq, dict) else None),
-                    "currency": "INR",
-                    "positions": norm,
-                    "recent_orders": [
-                        {"sym": o.get("tradingsymbol"), "side": o.get("transaction_type"),
-                         "qty": o.get("quantity"), "px": o.get("price"),
-                         "status": o.get("status"), "ts": o.get("order_timestamp")}
-                        for o in (zr_orders if isinstance(zr_orders,list) else [])
-                    ][:10],
-                }
-                out["totals"]["positions"] += len(norm)
-                try: out["totals"]["open_pnl_inr"] += sum(float(p.get("pnl") or 0) for p in norm)
-                except Exception: pass
-            except Exception as e:
-                out["brokers"]["zerodha"] = {"connected": True, "error": str(e)[:200]}
-    except Exception as e:
-        out["brokers"]["zerodha"] = {"connected": False, "error": str(e)[:200]}
+    def _fetch_zerodha():
+        try:
+            broker, err = _get_zerodha_broker(u["id"])
+            if err: return ("zerodha", {"connected": False, "error": err})
+            zr_pos_raw = broker.get_positions() or {}
+            zr_pos = (zr_pos_raw.get("net") if isinstance(zr_pos_raw,dict) else zr_pos_raw) or []
+            zr_funds = broker.get_funds() or {}
+            zr_orders = broker.get_orders() or []
+            norm = [{"symbol": p.get("tradingsymbol"), "qty": p.get("quantity"),
+                     "avg": p.get("average_price"), "ltp": p.get("last_price"), "pnl": p.get("pnl"),
+                     "exchange": p.get("exchange"), "currency": "INR"}
+                    for p in (zr_pos if isinstance(zr_pos,list) else [])]
+            eq = ((zr_funds or {}).get("equity") or {}).get("available", {}) if isinstance(zr_funds, dict) else {}
+            return ("zerodha", {
+                "connected": True,
+                "available_cash": (eq.get("cash") if isinstance(eq, dict) else None),
+                "currency": "INR", "positions": norm,
+                "recent_orders": [{"sym": o.get("tradingsymbol"), "side": o.get("transaction_type"),
+                                   "qty": o.get("quantity"), "px": o.get("price"),
+                                   "status": o.get("status"), "ts": o.get("order_timestamp")}
+                                  for o in (zr_orders if isinstance(zr_orders,list) else [])][:10],
+            })
+        except Exception as e:
+            return ("zerodha", {"connected": False, "error": str(e)[:200]})
 
+    with _AggPool(max_workers=3) as pool:
+        for name, info in pool.map(lambda f: f(), [_fetch_alpaca, _fetch_angelone, _fetch_zerodha]):
+            out["brokers"][name] = info
+            if info.get("connected") and not info.get("error"):
+                pos_list = info.get("positions") or []
+                out["totals"]["positions"] += len(pos_list)
+                ccy = info.get("currency", "USD")
+                key = "open_pnl_inr" if ccy == "INR" else "open_pnl_usd"
+                try:
+                    out["totals"][key] += sum(float(p.get("pnl") or 0) for p in pos_list)
+                except Exception:
+                    pass
+
+    # Item 14: FX conversion (USD ↔ INR) using a fixed approx rate (frontend can override)
+    out["fx"] = {"usd_inr": 83.5, "inr_usd": 1/83.5, "source": "static"}
+
+    return jsonify(out)
+
+
+@app.route("/api/audit_full", methods=["GET"])
+@_require_auth
+def api_audit_full():
+    """Return last 100 audit events for the current user (admin sees all)."""
+    u = _current_user()
+    limit = min(int(request.args.get("limit", 100)), 500)
+    if u.get("role") == "admin":
+        rows = db.query_all("SELECT * FROM audit_log ORDER BY id DESC LIMIT ?", (limit,))
+    else:
+        rows = db.query_all("SELECT * FROM audit_log WHERE user_id=? ORDER BY id DESC LIMIT ?",
+                            (u["id"], limit))
+    out = []
+    for r in rows:
+        try: meta = json.loads(r["meta"]) if r["meta"] else {}
+        except Exception: meta = {}
+        out.append({
+            "id": r["id"], "user_id": r["user_id"], "event": r["event"],
+            "ip": r["ip"], "meta": meta, "at": r["created_at"],
+        })
     return jsonify(out)
 
 

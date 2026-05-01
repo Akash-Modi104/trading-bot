@@ -327,7 +327,7 @@ def append_log(entry):
     log = load_log()
     log.append(entry)
     with open(LOG_FILE, "w") as f:
-        json.dump(log[-500:], f, indent=2)
+        json.dump(log[-5000:], f, indent=2)
 
 def load_picks():
     if not os.path.exists(PICKS_FILE): return []

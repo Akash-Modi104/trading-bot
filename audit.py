@@ -98,6 +98,8 @@ endpoints = [
     ("/api/zerodha/funds", "GET", 401),
     ("/api/telegram/status", "GET", 401),
     ("/api/admin/bot_mode", "GET", 401),
+    ("/api/aggregate/overview", "GET", 401),
+    ("/api/audit_full", "GET", 401),
 ]
 for path, method, expected in endpoints:
     try:
