@@ -30,6 +30,15 @@ except ImportError:
                     _k, _v = _line.split("=", 1)
                     os.environ.setdefault(_k.strip(), _v.strip())
 
+# ── Broker selection ─────────────────────────────────────────
+# This file is the US/Alpaca bot. For Indian markets use indian_bot.py.
+_BROKER = os.environ.get("BROKER", "alpaca").lower()
+if _BROKER not in ("alpaca", ""):
+    raise SystemExit(
+        f"[intraday_bot_v2] BROKER={_BROKER!r} is not supported here. "
+        "Use indian_bot.py for Indian market brokers (angelone, zerodha)."
+    )
+
 # ── Paths ─────────────────────────────────────────────────────
 BASE_DIR   = os.path.dirname(os.path.abspath(__file__))
 CONFIG     = os.path.join(BASE_DIR, "alpaca_config.json")

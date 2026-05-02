@@ -1395,7 +1395,7 @@ def api_analytics():
 @app.route("/api/export.csv")
 @_require_auth
 def api_export_csv():
-    """Download all trades as CSV (for tax/audit)."""
+    """Download all Alpaca trades as CSV (for tax/audit)."""
     import csv, io
     log = read_json(LOG_F, [])
     buf = io.StringIO()
@@ -1411,6 +1411,159 @@ def api_export_csv():
     return Response(buf.getvalue(), mimetype="text/csv",
                     headers={"Content-Disposition":
                              "attachment; filename=trades.csv"})
+
+
+@app.route("/api/trades/combined")
+@_require_auth
+def api_trades_combined():
+    """
+    Merge trade logs from all brokers:
+      - trade_log.json (Alpaca bot)
+      - indian_trade_log.json (Indian bot)
+      - Angel One trade book (live, last 50)
+      - Zerodha trade book (live, last 50)
+
+    Query params:
+      ?range=day|week|month|all  (default day)
+      ?broker=alpaca|angelone|zerodha|indian|all  (default all)
+    """
+    from datetime import timedelta
+    u   = _current_user()
+    rng = request.args.get("range", "day")
+    broker_filter = request.args.get("broker", "all").lower()
+
+    today  = datetime.now(ET).date()
+    spans  = {"day": 0, "week": 6, "month": 29, "all": 9999}
+    d_from = today - timedelta(days=spans.get(rng, 0))
+    d_to   = today
+
+    def _in_range(ts_str):
+        try:
+            d = datetime.strptime(str(ts_str)[:10], "%Y-%m-%d").date()
+            return d_from <= d <= d_to
+        except Exception:
+            return True  # include if unparseable
+
+    entries = []
+
+    # ── Alpaca bot log ────────────────────────────────────────────
+    if broker_filter in ("all", "alpaca"):
+        for t in read_json(LOG_F, []):
+            if _in_range(t.get("time", "")):
+                t.setdefault("broker", "alpaca")
+                t.setdefault("currency", "USD")
+                entries.append(t)
+
+    # ── Indian bot log ─────────────────────────────────────────────
+    indian_log_f = os.path.join(BASE_DIR, "indian_trade_log.json")
+    if broker_filter in ("all", "indian", "angelone", "zerodha"):
+        for t in read_json(indian_log_f, []):
+            if _in_range(t.get("time", "")):
+                t.setdefault("broker", "indian")
+                t.setdefault("currency", "INR")
+                entries.append(t)
+
+    # ── Angel One live trade book ─────────────────────────────────
+    if broker_filter in ("all", "angelone"):
+        try:
+            broker, err = _get_angelone_broker(u["id"])
+            if not err:
+                ao_trades = broker.get_trade_book() or []
+                _persist_angelone_tokens(u["id"], broker)
+                for t in (ao_trades if isinstance(ao_trades, list) else []):
+                    ts = t.get("updatetime") or t.get("ordertime") or ""
+                    entries.append({
+                        "time":    ts,
+                        "sym":     t.get("tradingsymbol", ""),
+                        "action":  "buy" if (t.get("transactiontype","") or "").upper() == "BUY" else "sell",
+                        "qty":     t.get("fillshares") or t.get("quantity"),
+                        "price":   t.get("tradeprice") or t.get("averageprice"),
+                        "broker":  "angelone",
+                        "currency": "INR",
+                        "order_id": t.get("orderid"),
+                        "exchange": t.get("exchange"),
+                    })
+        except Exception:
+            pass
+
+    # ── Zerodha live trade book ───────────────────────────────────
+    if broker_filter in ("all", "zerodha"):
+        try:
+            broker, err = _get_zerodha_broker(u["id"])
+            if not err:
+                zr_trades = broker.get_trades() or []
+                for t in (zr_trades if isinstance(zr_trades, list) else []):
+                    ts = t.get("fill_timestamp") or t.get("order_timestamp") or ""
+                    entries.append({
+                        "time":    ts,
+                        "sym":     t.get("tradingsymbol", ""),
+                        "action":  "buy" if (t.get("transaction_type","") or "").upper() == "BUY" else "sell",
+                        "qty":     t.get("filled_quantity") or t.get("quantity"),
+                        "price":   t.get("average_price"),
+                        "broker":  "zerodha",
+                        "currency": "INR",
+                        "order_id": t.get("order_id"),
+                        "exchange": t.get("exchange"),
+                    })
+        except Exception:
+            pass
+
+    # Sort newest first
+    def _ts_key(e):
+        return str(e.get("time", ""))
+    entries.sort(key=_ts_key, reverse=True)
+
+    sells  = [e for e in entries if e.get("action") == "sell"]
+    total_pnl_usd = round(sum(float(e.get("pnl_abs") or 0) for e in sells
+                              if e.get("currency","USD") == "USD"), 2)
+    total_pnl_inr = round(sum(float(e.get("pnl_abs") or 0) for e in sells
+                              if e.get("currency") == "INR"), 2)
+
+    return jsonify({
+        "range":   rng,
+        "broker":  broker_filter,
+        "total":   len(entries),
+        "trades":  entries[:500],
+        "summary": {
+            "realized_pnl_usd": total_pnl_usd,
+            "realized_pnl_inr": total_pnl_inr,
+            "total_trades":     len(entries),
+            "closed_trades":    len(sells),
+        },
+    })
+
+
+@app.route("/api/export/combined.csv")
+@_require_auth
+def api_export_combined_csv():
+    """Download combined trades from all brokers as CSV."""
+    import csv, io
+    # Re-use the combined endpoint logic inline
+    from datetime import timedelta
+    u   = _current_user()
+    today  = datetime.now(ET).date()
+    d_from = today - timedelta(days=9999)
+    d_to   = today
+    entries = []
+    for t in read_json(LOG_F, []):
+        t.setdefault("broker", "alpaca"); t.setdefault("currency", "USD"); entries.append(t)
+    indian_log_f = os.path.join(BASE_DIR, "indian_trade_log.json")
+    for t in read_json(indian_log_f, []):
+        t.setdefault("broker", "indian"); t.setdefault("currency", "INR"); entries.append(t)
+    entries.sort(key=lambda e: str(e.get("time", "")), reverse=True)
+    buf = io.StringIO()
+    w   = csv.writer(buf)
+    w.writerow(["time","symbol","action","qty","price","entry_price",
+                "pct","pnl_abs","broker","currency","reason","score"])
+    for t in entries:
+        w.writerow([t.get("time"), t.get("sym"), t.get("action"),
+                    t.get("qty"), t.get("price"), t.get("entry_price"),
+                    t.get("pct"), t.get("pnl_abs"), t.get("broker"), t.get("currency"),
+                    t.get("reason") or ",".join((t.get("reasons") or {}).keys()),
+                    t.get("score")])
+    return Response(buf.getvalue(), mimetype="text/csv",
+                    headers={"Content-Disposition":
+                             "attachment; filename=combined_trades.csv"})
 
 @app.route("/disclaimer")
 def disclaimer():
@@ -1642,25 +1795,48 @@ def admin_bot_mode_set():
 @app.route("/api/admin/panic_flat", methods=["POST"])
 @_require_admin
 def admin_panic_flat():
-    """Cancel all open orders and liquidate all positions on the bot's broker.
+    """Cancel all open orders and liquidate all positions across ALL connected brokers.
     Use only in emergencies. Logged to audit."""
+    u   = _current_user()
     env = _read_env_kv()
-    base = env.get("ALPACA_BASE_URL","").rstrip("/")
-    if not base or not env.get("ALPACA_API_KEY"):
-        return jsonify({"error":"no_creds_configured"}), 400
-    hdr = {"APCA-API-KEY-ID": env["ALPACA_API_KEY"],
-           "APCA-API-SECRET-KEY": env["ALPACA_SECRET_KEY"]}
     out = {}
-    try:
-        import requests as _rq
-        rc = _rq.delete(base + "/orders", headers=hdr, timeout=15)
-        out["cancel_orders"] = {"status": rc.status_code, "body": rc.text[:500]}
-        rp = _rq.delete(base + "/positions", headers=hdr, timeout=20)
-        out["close_positions"] = {"status": rp.status_code, "body": rp.text[:500]}
-    except Exception as e:
-        return jsonify({"error": "panic_failed", "details": str(e)}), 500
+    import requests as _rq
 
-    auth.audit(_current_user()["id"], "panic_flat", _client_ip(), out)
+    # ── Alpaca ─────────────────────────────────────────────────
+    base = env.get("ALPACA_BASE_URL", "").rstrip("/")
+    if base and env.get("ALPACA_API_KEY"):
+        hdr = {"APCA-API-KEY-ID": env["ALPACA_API_KEY"],
+               "APCA-API-SECRET-KEY": env["ALPACA_SECRET_KEY"]}
+        try:
+            rc = _rq.delete(base + "/orders",    headers=hdr, timeout=15)
+            rp = _rq.delete(base + "/positions", headers=hdr, timeout=20)
+            out["alpaca"] = {
+                "cancel_orders":   {"status": rc.status_code, "body": rc.text[:300]},
+                "close_positions": {"status": rp.status_code, "body": rp.text[:300]},
+            }
+        except Exception as e:
+            out["alpaca"] = {"error": str(e)[:200]}
+
+    # ── Angel One ──────────────────────────────────────────────
+    try:
+        broker, err = _get_angelone_broker(u["id"])
+        if not err:
+            results = broker.square_off_all_positions()
+            _persist_angelone_tokens(u["id"], broker)
+            out["angelone"] = {"results": results}
+    except Exception as e:
+        out["angelone"] = {"error": str(e)[:200]}
+
+    # ── Zerodha ────────────────────────────────────────────────
+    try:
+        broker, err = _get_zerodha_broker(u["id"])
+        if not err:
+            results = broker.square_off_all_positions()
+            out["zerodha"] = {"results": results}
+    except Exception as e:
+        out["zerodha"] = {"error": str(e)[:200]}
+
+    auth.audit(u["id"], "panic_flat", _client_ip(), out)
     return jsonify({"ok": True, "result": out})
 
 
