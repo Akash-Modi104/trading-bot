@@ -12,14 +12,20 @@ Equity intraday orders use producttype="INTRADAY".
 """
 
 import json
+import logging
 import os
 import time
 import socket
 import requests
 import pyotp
 from datetime import datetime, timedelta
+from typing import Optional
+
+from .base import BaseBroker
 
 BASE_URL = "https://apiconnect.angelbroking.com"
+
+log = logging.getLogger(__name__)
 
 # Public/private IP used in headers — fallback to localhost if detection fails
 def _get_local_ip():
@@ -39,7 +45,7 @@ class AngelOneError(Exception):
     pass
 
 
-class AngelOneBroker:
+class AngelOneBroker(BaseBroker):
     """
     Stateful client for Angel One SmartAPI.
 
@@ -167,6 +173,136 @@ class AngelOneBroker:
         data = self._get("/rest/secure/angelbroking/user/v1/getRMS")
         return data.get("data") or {}
 
+    # ── BaseBroker interface adapters ─────────────────────────────
+
+    @property
+    def name(self) -> str:
+        return "Angel One"
+
+    @property
+    def currency(self) -> str:
+        return "INR"
+
+    @property
+    def timezone(self) -> str:
+        return "Asia/Kolkata"
+
+    def get_account(self) -> dict:
+        """Return account dict with equity and buying_power (BaseBroker contract)."""
+        summary = self.account_summary()
+        try:
+            equity = float(summary.get("net") or 0)
+        except (TypeError, ValueError):
+            equity = 0.0
+        try:
+            buying_power = float(summary.get("available_cash") or 0)
+        except (TypeError, ValueError):
+            buying_power = 0.0
+        return {
+            "equity":       equity,
+            "buying_power": buying_power,
+            "raw":          summary,
+        }
+
+    def get_latest_price(self, symbol: str) -> Optional[float]:
+        """Get LTP by searching for the symbol token first.
+        symbol should be the NSE trading symbol, e.g. 'RELIANCE-EQ'."""
+        try:
+            results = self.search_symbol("NSE", symbol)
+            if not results:
+                return None
+            token = str(results[0].get("symboltoken", ""))
+            if not token:
+                return None
+            return self.get_ltp("NSE", symbol, token) or None
+        except AngelOneError as e:
+            log.warning("get_latest_price(%s) failed: %s", symbol, e)
+            return None
+
+    def close_all_positions(self) -> dict:
+        """Square off all intraday positions (BaseBroker contract)."""
+        results = self.square_off_all_positions()
+        failed = [r for r in results if not r.get("ok")]
+        if failed:
+            return {"_error": True, "message": f"{len(failed)} position(s) failed to close",
+                    "results": results}
+        return {"status": "flat", "results": results}
+
+    def place_order(  # type: ignore[override]
+        self,
+        symbol: str,
+        qty: int,
+        side: str,
+        order_type: str = "market",
+        limit_price: Optional[float] = None,
+        stop_price: Optional[float] = None,
+        take_profit_price: Optional[float] = None,
+        symboltoken: str = "",
+        exchange: str = "NSE",
+        product_type: str = "INTRADAY",
+    ) -> dict:
+        """BaseBroker-compatible place_order. Resolves symboltoken via search if not provided."""
+        if not symboltoken:
+            try:
+                results = self.search_symbol(exchange, symbol)
+                symboltoken = str(results[0].get("symboltoken", "")) if results else ""
+            except AngelOneError as e:
+                return {"_error": True, "message": f"symbol lookup failed: {e}"}
+        if not symboltoken:
+            return {"_error": True, "message": f"Could not resolve token for {symbol}"}
+        ao_order_type = "LIMIT" if limit_price else "MARKET"
+        price = limit_price or 0.0
+        try:
+            order_id = self._place_native_order(
+                tradingsymbol=symbol,
+                symboltoken=symboltoken,
+                transaction_type=side.upper(),
+                quantity=qty,
+                price=price,
+                order_type=ao_order_type,
+                product_type=product_type,
+                exchange=exchange,
+            )
+            return {"id": order_id, "status": "submitted"}
+        except AngelOneError as e:
+            return {"_error": True, "message": str(e)}
+
+    def get_bars(self, symbol: str, timeframe: str = "5Min", limit: int = 80) -> list:
+        """Fetch OHLCV bars normalised to BaseBroker spec {t,o,h,l,c,v}.
+        Searches for symbol token automatically.
+        timeframe maps: 5Min→FIVE_MINUTE, 1Min→ONE_MINUTE, 15Min→FIFTEEN_MINUTE, 1D→ONE_DAY."""
+        _tf_map = {
+            "1Min": "ONE_MINUTE", "3Min": "THREE_MINUTE", "5Min": "FIVE_MINUTE",
+            "10Min": "TEN_MINUTE", "15Min": "FIFTEEN_MINUTE", "30Min": "THIRTY_MINUTE",
+            "1H": "ONE_HOUR", "1D": "ONE_DAY",
+        }
+        interval = _tf_map.get(timeframe, "FIVE_MINUTE")
+        try:
+            results = self.search_symbol("NSE", symbol)
+            if not results:
+                return []
+            token = str(results[0].get("symboltoken", ""))
+            if not token:
+                return []
+            now = datetime.now()
+            from_dt = now - timedelta(minutes=limit * 5 + 60)
+            candles = self.get_candles(
+                exchange="NSE",
+                symboltoken=token,
+                interval=interval,
+                from_date=from_dt.strftime("%Y-%m-%d %H:%M"),
+                to_date=now.strftime("%Y-%m-%d %H:%M"),
+            )
+            bars = []
+            for c in candles[-limit:]:
+                # Angel One returns [timestamp, open, high, low, close, volume]
+                if len(c) >= 6:
+                    bars.append({"t": c[0], "o": c[1], "h": c[2], "l": c[3], "c": c[4], "v": c[5]})
+            return bars
+        except AngelOneError as e:
+            log.warning("get_bars(%s) failed: %s", symbol, e)
+            return []
+
     # ── Symbol search ────────────────────────────────────────────
 
     def search_symbol(self, exchange: str, query: str) -> list:
@@ -180,7 +316,7 @@ class AngelOneBroker:
 
     # ── Orders ───────────────────────────────────────────────────
 
-    def place_order(
+    def _place_native_order(
         self,
         tradingsymbol: str,
         symboltoken: str,
@@ -270,7 +406,7 @@ class AngelOneBroker:
         BO (Bracket Order): entry + automatic stop loss + target.
         stoploss_points and target_points are in absolute price units (e.g. 5.0 means ₹5).
         """
-        return self.place_order(
+        return self._place_native_order(
             tradingsymbol=tradingsymbol,
             symboltoken=symboltoken,
             transaction_type=transaction_type,
@@ -298,7 +434,7 @@ class AngelOneBroker:
         duration: str = "DAY",
     ) -> str:
         """CO (Cover Order): entry + compulsory stop loss at exchange level."""
-        return self.place_order(
+        return self._place_native_order(
             tradingsymbol=tradingsymbol,
             symboltoken=symboltoken,
             transaction_type=transaction_type,
@@ -346,7 +482,7 @@ class AngelOneBroker:
         inner = data.get("data") or {}
         return inner.get("holdings") or []
 
-    def close_position(
+    def close_position_native(
         self,
         tradingsymbol: str,
         symboltoken: str,
@@ -355,8 +491,8 @@ class AngelOneBroker:
         exchange: str = "NSE",
         product_type: str = "INTRADAY",
     ) -> str:
-        """Market-sell (or buy) to flatten a position."""
-        return self.place_order(
+        """Market-sell (or buy) to flatten a position by token (native API)."""
+        return self._place_native_order(
             tradingsymbol=tradingsymbol,
             symboltoken=symboltoken,
             transaction_type=transaction_type,
@@ -366,6 +502,30 @@ class AngelOneBroker:
             product_type=product_type,
             exchange=exchange,
         )
+
+    def close_position(self, symbol: str) -> dict:  # type: ignore[override]
+        """BaseBroker-compatible: close a position by symbol name.
+        Looks up open positions to find token and qty, then market-sells."""
+        try:
+            positions = self.get_positions()
+            for p in positions:
+                if p.get("tradingsymbol") == symbol:
+                    net_qty = int(p.get("netqty", 0))
+                    if net_qty == 0:
+                        return {"status": "no_position"}
+                    side = "SELL" if net_qty > 0 else "BUY"
+                    oid = self.close_position_native(
+                        tradingsymbol=symbol,
+                        symboltoken=p.get("symboltoken", ""),
+                        quantity=abs(net_qty),
+                        transaction_type=side,
+                        exchange=p.get("exchange", "NSE"),
+                        product_type=p.get("producttype", "INTRADAY"),
+                    )
+                    return {"id": oid, "status": "submitted"}
+            return {"_error": True, "message": f"No open position found for {symbol}"}
+        except AngelOneError as e:
+            return {"_error": True, "message": str(e)}
 
     def square_off_all_positions(self) -> list:
         """Close every open intraday position at market price."""
@@ -377,7 +537,7 @@ class AngelOneBroker:
                 continue
             side = "SELL" if net_qty > 0 else "BUY"
             try:
-                oid = self.close_position(
+                oid = self.close_position_native(
                     tradingsymbol=p.get("tradingsymbol", ""),
                     symboltoken=p.get("symboltoken", ""),
                     quantity=abs(net_qty),

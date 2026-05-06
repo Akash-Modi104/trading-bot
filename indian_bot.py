@@ -112,8 +112,8 @@ def save_state():
     try:
         with open(STATE_FILE, "w") as f:
             json.dump(_state, f, indent=2, default=str)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"  [WARN] save_state failed: {e}")
 
 
 def log_event(msg: str):
@@ -149,8 +149,8 @@ def save_positions():
     try:
         with open(POSITIONS_F, "w") as f:
             json.dump(open_positions, f, indent=2, default=str)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"  [WARN] save_positions failed: {e}")
 
 
 def load_positions_from_disk() -> dict:
@@ -326,8 +326,8 @@ def nifty_bull(broker) -> bool:
             if not ef:
                 return True
             return closes[-1] >= ef * 0.998
-    except Exception:
-        pass
+    except Exception as e:
+        log_event(f"nifty_bull fetch failed: {e}")
     return True  # fail open
 
 
@@ -468,7 +468,7 @@ def check_exits_indian(broker, p_list: list):
             try:
                 if isinstance(broker, AngelOneBroker):
                     token = SYMBOL_TOKENS.get(sym, "")
-                    broker.close_position(
+                    broker.close_position_native(
                         tradingsymbol=sym,
                         symboltoken=token,
                         quantity=qty,
@@ -503,7 +503,7 @@ def execute_buy(broker, symbol: str, qty: int, price: float, stop: float, tp: fl
     try:
         if isinstance(broker, AngelOneBroker):
             token = SYMBOL_TOKENS.get(symbol, "")
-            order_id = broker.place_order(
+            order_id = broker._place_native_order(
                 tradingsymbol=symbol,
                 symboltoken=token,
                 transaction_type="BUY",

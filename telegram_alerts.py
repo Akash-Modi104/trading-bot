@@ -37,8 +37,8 @@ def _post(token, chat_id, message):
             json={"chat_id": chat_id, "text": message, "parse_mode": "HTML"},
             timeout=5
         )
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"  [WARN] Telegram send failed: {e}")
 
 def send(message: str, event: str = "info"):
     """Send to all enabled users (DB) plus legacy single-bot if configured.
@@ -54,8 +54,8 @@ def send(message: str, event: str = "info"):
                     continue
                 _post(u["token"], u["chat_id"], message)
                 sent += 1
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"  [WARN] Telegram multi-user fan-out failed: {e}")
     # Legacy single-bot fallback
     if os.environ.get("TELEGRAM_ENABLED", "false").lower() == "true":
         token = os.environ.get("TELEGRAM_BOT_TOKEN", "")

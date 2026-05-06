@@ -151,8 +151,8 @@ def save_state():
     try:
         with open(STATE_FILE, "w") as f:
             json.dump(_state, f, indent=2, default=str)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"  [WARN] save_state failed: {e}")
 
 def log_event(msg):
     ts = now_et().strftime("%H:%M:%S")
@@ -449,14 +449,14 @@ def get_vix():
         meta = d.get("chart", {}).get("result", [{}])[0].get("meta", {})
         v = meta.get("regularMarketPrice")
         if v: return float(v)
-    except Exception:
-        pass
-    # Fallback
+    except Exception as e:
+        log_event(f"VIX Yahoo fetch failed: {e}")
+    # Fallback to VIXY ETF proxy
     try:
         bars = get_bars("VIXY", "5Min", 5)
         if bars: return bars[-1]["c"]
-    except Exception:
-        pass
+    except Exception as e:
+        log_event(f"VIX VIXY fallback failed: {e}")
     return None
 
 # ── PDT (Pattern Day Trader) protection ─────────────────────────
@@ -516,8 +516,8 @@ def append_equity_snapshot(equity):
     try:
         with open(EQUITY_HIST_F, "w") as f:
             json.dump(h, f, indent=2)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"  [WARN] append_equity_snapshot failed: {e}")
 
 def rolling_drawdown_pct(equity, lookback_days=7):
     """Returns drawdown % from peak equity over last N days."""
@@ -564,8 +564,8 @@ def save_positions():
     try:
         with open(POSITIONS_F, "w") as f:
             json.dump(open_positions, f, indent=2, default=str)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"  [WARN] save_positions failed: {e}")
 
 def load_positions_from_disk():
     if not os.path.exists(POSITIONS_F): return {}
@@ -593,8 +593,8 @@ def has_earnings_today(sym):
                 for a in (r.json() or []):
                     s = a.get("target_symbol") or a.get("symbol")
                     if s: _earnings_cache["syms"].add(s.upper())
-        except Exception:
-            pass
+        except Exception as e:
+            log_event(f"Earnings fetch failed: {e}")
     return sym.upper() in _earnings_cache["syms"]
 
 def spy_trend(p):
@@ -733,8 +733,8 @@ def load_negative_news():
         today = now_et().strftime("%Y-%m-%d")
         if d.get("date") == today:
             return set(t.upper() for t in d.get("tickers", []))
-    except Exception:
-        pass
+    except Exception as e:
+        log_event(f"negative_news load failed: {e}")
     return set()
 
 # ── Trailing stop ─────────────────────────────────────────────
