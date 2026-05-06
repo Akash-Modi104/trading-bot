@@ -221,9 +221,62 @@
       flex-shrink: 0;
     }
     .topbar-left { display: flex; align-items: center; gap: 12px; min-width: 0; }
-    .topbar-right { display: flex; align-items: center; gap: 14px; flex-shrink: 0; }
+    .topbar-right { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
     .topbar-stat { display: flex; flex-direction: column; }
     .topbar-stat .lbl { font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-3); }
+
+    /* ── Account Switcher ─────────────────────────────────── */
+    .acct-btn {
+      display: flex; align-items: center; gap: 8px;
+      background: var(--bg-2); border: 1px solid var(--line);
+      border-radius: var(--r); padding: 5px 10px 5px 5px;
+      cursor: pointer; transition: all .15s; min-width: 150px; color: var(--ink);
+    }
+    .acct-btn:hover { background: var(--bg-3); border-color: var(--accent); }
+    .acct-avatar {
+      width: 28px; height: 28px; border-radius: 6px; flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 700; font-size: 11px; color: #fff; letter-spacing: .02em;
+    }
+    .acct-wrap { position: relative; }
+    .acct-drop {
+      position: absolute; top: calc(100% + 8px); right: 0; width: 290px;
+      background: var(--bg-1); border: 1px solid var(--line);
+      border-radius: var(--r-lg); box-shadow: 0 12px 40px oklch(0 0 0 / 0.5);
+      z-index: 200; overflow: hidden;
+    }
+    .acct-drop-head {
+      padding: 11px 16px; font-size: 10px; font-weight: 700;
+      letter-spacing: .12em; text-transform: uppercase;
+      color: var(--ink-4); border-bottom: 1px solid var(--line-soft);
+    }
+    .acct-item {
+      display: flex; align-items: center; gap: 10px;
+      padding: 10px 14px; cursor: pointer; transition: background .1s;
+    }
+    .acct-item:hover { background: var(--bg-2); }
+    .acct-item.active { background: var(--bg-3); }
+    .acct-info { flex: 1; min-width: 0; }
+    .acct-name { font-size: 13px; font-weight: 600; display:flex; align-items:center; gap:6px; }
+    .acct-sub { font-size: 11px; color: var(--ink-3); margin-top: 2px; font-family: var(--font-mono); }
+    .acct-check { color: var(--up); font-size: 14px; font-weight: 700; }
+    .acct-divider { height: 1px; background: var(--line-soft); margin: 4px 0; }
+    .acct-action {
+      display: flex; align-items: center; gap: 10px;
+      padding: 10px 16px; cursor: pointer; font-size: 13px;
+      transition: background .1s; color: var(--ink-3);
+    }
+    .acct-action:hover { background: var(--bg-2); color: var(--ink); }
+    .acct-action.danger { color: var(--down); }
+    .acct-action.danger:hover { background: var(--down-soft); }
+    .mode-badge {
+      display: inline-flex; align-items: center; padding: 1px 6px;
+      border-radius: 3px; font-size: 9px; font-weight: 800;
+      letter-spacing: .06em; text-transform: uppercase;
+    }
+    .mode-badge.paper { background: var(--accent-soft); color: var(--accent); }
+    .mode-badge.live  { background: var(--down-soft);   color: var(--down);   }
+    .mode-badge.sim   { background: var(--warn-soft);   color: var(--warn);   }
     .topbar-stat .val { font-family: var(--font-mono); font-weight: 600; font-size: 15px; color: var(--ink); }
     .topbar-divider { width: 1px; height: 28px; background: var(--line-soft); }
 
@@ -2787,8 +2840,128 @@
       );
     };
 
-    /* ── Broker history tab (non-Alpaca) ────────────────────── */
+    /* ── Account Switcher dropdown ──────────────────────────── */
     const BROKER_LABELS = {alpaca:'Alpaca', angelone:'Angel One', zerodha:'Zerodha', indian:'Indian Bot'};
+    const BROKER_COLORS = {alpaca:'#5BA8FF', angelone:'#f97316', zerodha:'#6366f1', indian:'#10b981'};
+
+    const ModeBadge = ({mode}) => (
+      <span className={`mode-badge ${(mode||'live').toLowerCase()}`}>
+        {(mode||'LIVE').toUpperCase()}
+      </span>
+    );
+
+    const BrokerSwitcher = ({ broker, setBroker, me, aggData, onLogout }) => {
+      const [open, setOpen] = React.useState(false);
+      const wrapRef = React.useRef(null);
+      useEffect(() => {
+        if (!open) return;
+        const h = e => { if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false); };
+        document.addEventListener('mousedown', h);
+        return () => document.removeEventListener('mousedown', h);
+      }, [open]);
+
+      const fmtShort = (v, ccy) => {
+        if (v == null) return '';
+        const n = Number(v); if (isNaN(n)) return '';
+        const sym = ccy === 'INR' ? '₹' : '$';
+        if (Math.abs(n) >= 100000) return sym + (n/100000).toFixed(1) + 'L';
+        if (Math.abs(n) >= 1000)   return sym + (n/1000).toFixed(1) + 'k';
+        return sym + n.toFixed(0);
+      };
+
+      const BROKERS = [
+        { k:'alpaca',   label:'Alpaca',     color:'#5BA8FF',
+          connected: !!me?.alpaca?.connected,
+          initials: (me?.alpaca?.account_number||'AP').slice(0,2).toUpperCase(),
+          mode: me?.alpaca?.is_paper ? 'PAPER' : 'LIVE',
+          preview: me?.alpaca?.account_number ? '••' + me.alpaca.account_number.slice(-2) : me?.alpaca?.key_preview || '',
+          equity: aggData?.brokers?.alpaca?.equity, ccy:'USD',
+        },
+        { k:'angelone', label:'Angel One',  color:'#f97316',
+          connected: !!me?.angelone?.connected,
+          initials: (me?.angelone?.client_id||'AO').slice(0,2).toUpperCase(),
+          mode:'LIVE',
+          preview: me?.angelone?.client_id ? '••' + (me.angelone.client_id||'').slice(-2) : '',
+          equity: aggData?.brokers?.angelone?.available_cash, ccy:'INR',
+        },
+        { k:'zerodha',  label:'Zerodha',    color:'#6366f1',
+          connected: !!(me?.zerodha?.connected && me?.zerodha?.has_access_token),
+          initials:'ZL', mode:'LIVE',
+          preview: me?.zerodha?.has_access_token ? '••active' : 'needs login',
+          equity: aggData?.brokers?.zerodha?.available_cash, ccy:'INR',
+        },
+        { k:'indian',   label:'Indian Bot', color:'#10b981',
+          connected: !!(me?.zerodha?.connected),
+          initials:'IB', mode:'LIVE',
+          preview:'NSE · MIS', equity:null, ccy:'INR',
+        },
+      ];
+
+      const connected = BROKERS.filter(b => b.connected);
+      const curr = BROKERS.find(b => b.k === broker) || connected[0] || BROKERS[0];
+
+      return (
+        <div className="acct-wrap" ref={wrapRef}>
+          <button className="acct-btn" onClick={() => setOpen(o => !o)}>
+            <div className="acct-avatar" style={{background:curr.color}}>{curr.initials}</div>
+            <div style={{textAlign:'left',flex:1,minWidth:0}}>
+              <div style={{fontSize:13,fontWeight:600,lineHeight:1.2,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>
+                {curr.label}
+              </div>
+              <div style={{fontSize:10,color:'var(--ink-3)',fontFamily:'var(--font-mono)',display:'flex',alignItems:'center',gap:4,marginTop:1}}>
+                {curr.preview} · <ModeBadge mode={curr.mode} />
+              </div>
+            </div>
+            <span style={{color:'var(--ink-4)',fontSize:10,flexShrink:0}}>{open?'▲':'▼'}</span>
+          </button>
+
+          {open && (
+            <div className="acct-drop">
+              <div className="acct-drop-head">Trading Account</div>
+
+              {connected.length === 0 && (
+                <div style={{padding:16,fontSize:13,color:'var(--ink-3)',textAlign:'center'}}>
+                  No brokers connected yet
+                </div>
+              )}
+
+              {connected.map(b => (
+                <div key={b.k} className={`acct-item${broker===b.k?' active':''}`}
+                  onClick={() => { setBroker(b.k); setOpen(false); }}>
+                  <div className="acct-avatar" style={{background:b.color,width:34,height:34,borderRadius:8,fontSize:12}}>
+                    {b.initials}
+                  </div>
+                  <div className="acct-info">
+                    <div className="acct-name">
+                      {b.label} <ModeBadge mode={b.mode} />
+                    </div>
+                    <div className="acct-sub">
+                      {b.preview}
+                      {b.equity != null && <span style={{color:'var(--ink-2)',marginLeft:6}}>· {fmtShort(b.equity, b.ccy)}</span>}
+                    </div>
+                  </div>
+                  {broker === b.k && <span className="acct-check">✓</span>}
+                </div>
+              ))}
+
+              <div className="acct-divider" />
+              <div className="acct-action" onClick={() => { setOpen(false); window._setTab?.('profile'); }}>
+                <span style={{fontSize:15}}>＋</span> Connect new broker
+              </div>
+              <div className="acct-action" onClick={() => { setOpen(false); window._setTab?.('profile'); }}>
+                <span style={{fontSize:15}}>⚙</span> Account settings
+              </div>
+              <div className="acct-divider" />
+              <div className="acct-action danger" onClick={() => { setOpen(false); onLogout?.(); }}>
+                <span style={{fontSize:15}}>→</span> Sign out
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    };
+
+    /* ── Broker history tab (non-Alpaca) ────────────────────── */
     const BrokerHistoryTab = ({ broker }) => (
       <div className="fadein">
         <div className="card" style={{padding:'14px 18px',marginBottom:16,background:'var(--accent-soft)',border:'1px solid var(--accent)'}}>
@@ -2825,18 +2998,17 @@
     );
 
     /* ── Broker-aware overview (non-Alpaca) ─────────────────── */
-    const BrokerAggregateOverview = ({ broker }) => {
-      const [agg, setAgg] = useState(null);
-      const [loading, setLoading] = useState(true);
+    const BrokerAggregateOverview = ({ broker, aggData: aggProp }) => {
+      const [agg, setAgg] = useState(aggProp || null);
+      const [loading, setLoading] = useState(!aggProp);
       const load = useCallback(() => {
         fetch('/api/aggregate/overview')
           .then(r => r.json())
           .then(d => { setAgg(d); setLoading(false); })
           .catch(() => setLoading(false));
       }, []);
-      useEffect(() => { load(); const id = setInterval(load, 30000); return () => clearInterval(id); }, [load]);
-
-      const BROKER_LABELS = {alpaca:'Alpaca', angelone:'Angel One', zerodha:'Zerodha', indian:'Indian Bot'};
+      useEffect(() => { if (!aggProp) { load(); const id = setInterval(load, 30000); return () => clearInterval(id); } }, [aggProp, load]);
+      useEffect(() => { if (aggProp) { setAgg(aggProp); setLoading(false); } }, [aggProp]);
 
       if (broker === 'indian') return (
         <div className="fadein">
@@ -3782,8 +3954,22 @@
       const [clock,     setClock]     = useState('');
       const [me,        setMe]        = useState(null);
       const [broker,    setBroker]    = useState(() => localStorage.getItem('sel_broker') || 'alpaca');
+      const [aggData,   setAggData]   = useState(null);
       const lastTradeIds = useRef(new Set());
       useEffect(() => { localStorage.setItem('sel_broker', broker); }, [broker]);
+
+      /* Aggregate data — all broker balances/positions (30s refresh) */
+      useEffect(() => {
+        const load = () => fetch('/api/aggregate/overview').then(r => r.json()).then(setAggData).catch(() => {});
+        load();
+        const id = setInterval(load, 30000);
+        return () => clearInterval(id);
+      }, []);
+
+      const handleLogout = async () => {
+        await fetch('/api/logout', { method: 'POST' });
+        window.location.href = '/login';
+      };
 
       /* Load current user (and apply server-side theme preference) */
       const loadMe = useCallback(() => {
@@ -3940,6 +4126,36 @@
       const { metrics: m, stats, picks, trades, positions, activity_log, curve, params } = data;
       const paused = m?.paused;
 
+      /* Broker-aware topbar stats */
+      const _bInfo = aggData?.brokers?.[broker] || {};
+      const _bPos  = _bInfo.positions || [];
+      const topbarEquity = broker === 'alpaca'
+        ? m?.equity
+        : (_bInfo.equity ?? _bInfo.available_cash);
+      const topbarPnl = broker === 'alpaca'
+        ? m?.daily_pnl
+        : _bPos.reduce((s,p) => s + (Number(p.pnl)||0), 0);
+      const topbarPnlPct = broker === 'alpaca' ? m?.daily_pnl_pct : null;
+      const topbarCcy = broker === 'alpaca' ? 'USD' : 'INR';
+      const fTopbar = v => {
+        if (v == null) return '—';
+        const n = Number(v); if (isNaN(n)) return '—';
+        if (topbarCcy === 'INR') {
+          const s = n < 0 ? '-₹' : '₹';
+          return s + Math.abs(n).toLocaleString('en-IN', {maximumFractionDigits:0});
+        }
+        return f$(n);
+      };
+      const fTopbarPnl = v => {
+        if (v == null) return '—';
+        const n = Number(v); if (isNaN(n)) return '—';
+        if (topbarCcy === 'INR') {
+          const s = n >= 0 ? '+₹' : '-₹';
+          return s + Math.abs(n).toLocaleString('en-IN', {maximumFractionDigits:0});
+        }
+        return (n >= 0 ? '+' : '') + f$(n);
+      };
+
       const TABS = [
         { id:'overview',  label:'📊 Overview'   },
         { id:'trades',    label:'📋 Trades'     },
@@ -4079,66 +4295,43 @@
               </div>
             </div>
 
-            {/* ── Broker selector (centre) ── */}
-            <div className="hide-on-mobile" style={{display:'flex',alignItems:'center',gap:4,position:'absolute',left:'50%',transform:'translateX(-50%)'}}>
-              {[
-                {k:'alpaca',   label:'Alpaca',     dot:'var(--accent)'},
-                {k:'angelone', label:'Angel One',  dot:'#f97316'},
-                {k:'zerodha',  label:'Zerodha',    dot:'#6366f1'},
-                {k:'indian',   label:'Indian Bot', dot:'var(--up)'},
-              ].map(b => (
-                <button key={b.k}
-                  onClick={() => setBroker(b.k)}
-                  style={{
-                    display:'flex',alignItems:'center',gap:5,padding:'5px 12px',fontSize:12,fontWeight:600,
-                    cursor:'pointer',borderRadius:'var(--r-sm)',border:'none',transition:'all .15s',
-                    background: broker===b.k ? 'var(--bg-3)' : 'transparent',
-                    color: broker===b.k ? 'var(--ink)' : 'var(--ink-3)',
-                    outline: broker===b.k ? '1px solid var(--line)' : 'none',
-                  }}>
-                  <span style={{width:6,height:6,borderRadius:'50%',background:b.dot,flexShrink:0,
-                                boxShadow:broker===b.k?`0 0 6px ${b.dot}`:'none'}} />
-                  {b.label}
-                </button>
-              ))}
-            </div>
-
             <div className="topbar-right">
-              {/* Equity */}
+              {/* Equity — broker-aware */}
               <div className="topbar-stat always">
                 <span className="lbl">Equity</span>
-                <span className="val">{f$(m?.equity)}</span>
+                <span className="val">{fTopbar(topbarEquity)}</span>
               </div>
               <div className="topbar-divider hide-on-mobile" />
-              {/* Day P&L */}
+              {/* Day P&L — broker-aware */}
               <div className="topbar-stat always">
                 <span className="lbl">Day P&L</span>
-                <span className="val" style={{color:clr(m?.daily_pnl)}}>
-                  {f$(m?.daily_pnl)}
-                  <span style={{fontSize:11,opacity:.75,marginLeft:4,fontWeight:400}}>({fpct(m?.daily_pnl_pct)})</span>
+                <span className="val" style={{color:clr(topbarPnl)}}>
+                  {fTopbarPnl(topbarPnl)}
+                  {topbarPnlPct != null && (
+                    <span style={{fontSize:11,opacity:.75,marginLeft:4,fontWeight:400}}>({fpct(topbarPnlPct)})</span>
+                  )}
                 </span>
               </div>
               <div className="topbar-divider" />
-              {/* Pause button */}
-              <button className={`btn btn-sm ${paused ? 'warn' : 'ghost'}`} style={{fontSize:12}}
-                onClick={() => sendAction(paused ? 'start' : 'stop')}>
-                {paused ? '▶ Resume' : '⏸ Pause'}
-              </button>
+              {/* Pause — only for Alpaca bot */}
+              {broker === 'alpaca' && (
+                <button className={`btn btn-sm ${paused ? 'warn' : 'ghost'}`} style={{fontSize:12}}
+                  onClick={() => sendAction(paused ? 'start' : 'stop')}>
+                  {paused ? '▶ Resume' : '⏸ Pause'}
+                </button>
+              )}
               {/* Theme toggle */}
               <button onClick={cycleTheme} title="Toggle theme"
                 style={{background:'var(--bg-2)',border:'1px solid var(--line)',borderRadius:'var(--r)',
                         padding:'6px 10px',cursor:'pointer',fontSize:15,color:'var(--ink)',lineHeight:1}}>
                 {themeIcon}
               </button>
-              {/* Avatar */}
-              {me && (
-                <button onClick={() => setTab('profile')} title={me.email}
-                  style={{background:'var(--accent)',color:'oklch(0.16 0.012 250)',border:'none',
-                          borderRadius:'50%',width:32,height:32,cursor:'pointer',
-                          fontWeight:700,fontSize:13,flexShrink:0}}>
-                  {(me.name || me.email || '?')[0].toUpperCase()}
-                </button>
-              )}
+              {/* Account Switcher */}
+              <BrokerSwitcher
+                broker={broker} setBroker={setBroker}
+                me={me} aggData={aggData}
+                onLogout={handleLogout}
+              />
             </div>
           </header>
 
@@ -4180,7 +4373,7 @@
             {/* OVERVIEW */}
             {tab === 'all' && <AllAccountsTab />}
             {tab === 'overview' && broker !== 'alpaca' && (
-              <ErrorBoundary key={`overview-${broker}`}><BrokerAggregateOverview broker={broker} /></ErrorBoundary>
+              <ErrorBoundary key={`overview-${broker}`}><BrokerAggregateOverview broker={broker} aggData={aggData} /></ErrorBoundary>
             )}
             {tab === 'overview' && broker === 'alpaca' && (
               <div className="fadein">
