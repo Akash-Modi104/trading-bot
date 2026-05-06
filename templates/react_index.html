@@ -899,12 +899,12 @@
     );
 
     /* ── Combined trades tab ─────────────────────────────────── */
-    const CombinedTradesTab = () => {
+    const CombinedTradesTab = ({ defaultBroker } = {}) => {
       const [data, setData] = useState(null);
       const [err,  setErr]  = useState(null);
       const [loading, setLoading] = useState(true);
       const [range, setRange] = useState('day');
-      const [broker, setBroker] = useState('all');
+      const [broker, setBroker] = useState(defaultBroker || 'all');
       const mountedRef = useRef(true);
       useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
       const load = useCallback(() => {
@@ -2787,6 +2787,171 @@
       );
     };
 
+    /* ── Broker history tab (non-Alpaca) ────────────────────── */
+    const BROKER_LABELS = {alpaca:'Alpaca', angelone:'Angel One', zerodha:'Zerodha', indian:'Indian Bot'};
+    const BrokerHistoryTab = ({ broker }) => (
+      <div className="fadein">
+        <div className="card" style={{padding:'14px 18px',marginBottom:16,background:'var(--accent-soft)',border:'1px solid var(--accent)'}}>
+          <div style={{fontSize:13,color:'var(--accent)',fontWeight:600}}>
+            📅 Showing trade history for {BROKER_LABELS[broker]}
+          </div>
+          <div style={{fontSize:12,color:'var(--ink-3)',marginTop:4}}>
+            Deep historical analytics (Sharpe, MDD, equity curve) require Alpaca bot data. Switch to Alpaca to access full analytics.
+          </div>
+        </div>
+        <CombinedTradesTab defaultBroker={broker} />
+      </div>
+    );
+
+    /* ── Broker analytics tab (non-Alpaca) ───────────────────── */
+    const BrokerAnalyticsTab = ({ broker }) => (
+      <div className="fadein">
+        <div className="card" style={{maxWidth:640,margin:'0 auto'}}>
+          <div className="card-hdr"><span className="card-title">📈 Analytics — {BROKER_LABELS[broker]}</span></div>
+          <div style={{padding:32,textAlign:'center'}}>
+            <div style={{fontSize:36,marginBottom:12}}>📊</div>
+            <div style={{fontSize:15,fontWeight:600,marginBottom:8}}>Analytics computed from Alpaca bot logs</div>
+            <div style={{fontSize:13,color:'var(--ink-3)',maxWidth:420,margin:'0 auto',lineHeight:1.6}}>
+              Sharpe ratio, Sortino, Max Drawdown and signal attribution are derived from the Alpaca bot's trade log.
+              For {BROKER_LABELS[broker]} trade history, use the <b>History</b> or <b>Combined</b> tabs.
+            </div>
+            <div style={{marginTop:20,display:'flex',gap:10,justifyContent:'center',flexWrap:'wrap'}}>
+              <button className="btn primary" onClick={() => window._setTab?.('history')}>📅 View History</button>
+              <button className="btn ghost" onClick={() => window._setTab?.('combined')}>🌐 Combined Trades</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+
+    /* ── Broker-aware overview (non-Alpaca) ─────────────────── */
+    const BrokerAggregateOverview = ({ broker }) => {
+      const [agg, setAgg] = useState(null);
+      const [loading, setLoading] = useState(true);
+      const load = useCallback(() => {
+        fetch('/api/aggregate/overview')
+          .then(r => r.json())
+          .then(d => { setAgg(d); setLoading(false); })
+          .catch(() => setLoading(false));
+      }, []);
+      useEffect(() => { load(); const id = setInterval(load, 30000); return () => clearInterval(id); }, [load]);
+
+      const BROKER_LABELS = {alpaca:'Alpaca', angelone:'Angel One', zerodha:'Zerodha', indian:'Indian Bot'};
+
+      if (broker === 'indian') return (
+        <div className="fadein">
+          <div className="kpis" style={{marginBottom:16}}>
+            <div className="kpi"><div className="lbl">Broker</div><div className="val" style={{fontSize:20}}>Indian Bot</div><div className="sub">Zerodha · NSE Intraday</div></div>
+          </div>
+          <CombinedTradesTab defaultBroker="indian" />
+        </div>
+      );
+
+      const info = agg?.brokers?.[broker] || {};
+      const ccy = info.currency || (broker==='alpaca' ? 'USD' : 'INR');
+      const fmt = v => {
+        if (v == null || v === '') return '—';
+        const n = Number(v); if (isNaN(n)) return '—';
+        const sym = ccy === 'INR' ? '₹' : '$';
+        return (n < 0 ? '-' + sym : sym) + Math.abs(n).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
+      };
+      const clr2 = v => Number(v) > 0 ? 'var(--up)' : Number(v) < 0 ? 'var(--down)' : 'var(--ink-3)';
+
+      if (loading && !agg) return <div className="empty" style={{padding:40}}>Loading {BROKER_LABELS[broker]} data…</div>;
+
+      if (!info.connected) return (
+        <div className="fadein">
+          <div className="card" style={{maxWidth:560,margin:'40px auto'}}>
+            <div className="card-hdr"><span className="card-title">{BROKER_LABELS[broker]} — Not Connected</span></div>
+            <div style={{padding:24,textAlign:'center'}}>
+              <div style={{fontSize:14,color:'var(--ink-3)',marginBottom:16}}>Connect your {BROKER_LABELS[broker]} account in Profile.</div>
+              <button className="btn primary" onClick={() => window._setTab?.('profile')}>Go to Profile</button>
+            </div>
+          </div>
+        </div>
+      );
+
+      const positions = info.positions || [];
+      const openPnl   = positions.reduce((s,p) => s + (Number(p.pnl)||0), 0);
+
+      return (
+        <div className="fadein">
+          {info.error && (
+            <div style={{background:'var(--down-soft)',color:'var(--down)',border:'1px solid var(--down)',borderRadius:'var(--r)',padding:'10px 14px',marginBottom:16,fontSize:13}}>
+              {info.error}
+            </div>
+          )}
+          <div className="kpis" style={{marginBottom:16}}>
+            {(info.equity != null) && <div className="kpi"><div className="lbl">Equity</div><div className="val">{fmt(info.equity)}</div></div>}
+            {(info.buying_power != null) && <div className="kpi"><div className="lbl">Buying Power</div><div className="val">{fmt(info.buying_power)}</div></div>}
+            {(info.available_cash != null) && <div className="kpi"><div className="lbl">Available Cash</div><div className="val">{fmt(info.available_cash)}</div></div>}
+            <div className="kpi">
+              <div className="lbl">Open Positions</div>
+              <div className="val">{positions.length}</div>
+            </div>
+            {positions.length > 0 && <div className="kpi">
+              <div className="lbl">Open P&amp;L</div>
+              <div className="val" style={{color:clr2(openPnl)}}>{fmt(openPnl)}</div>
+            </div>}
+          </div>
+
+          {positions.length > 0 && (
+            <div className="card" style={{marginBottom:16}}>
+              <div className="card-hdr">
+                <span className="card-title">Positions</span>
+                <button className="btn ghost" style={{padding:'3px 9px',fontSize:11}} onClick={load}>↻</button>
+              </div>
+              <div style={{overflow:'auto'}}>
+                <table>
+                  <thead><tr><th>Symbol</th><th>Exchange</th><th>Qty</th><th>Avg</th><th>LTP</th><th>P&amp;L</th></tr></thead>
+                  <tbody>
+                    {positions.map((p,i) => (
+                      <tr key={i}>
+                        <td className="mono" style={{fontWeight:600}}>{p.symbol}</td>
+                        <td style={{fontSize:11,color:'var(--ink-3)'}}>{p.exchange||'—'}</td>
+                        <td className="mono">{p.qty}</td>
+                        <td className="mono">{fmt(p.avg)}</td>
+                        <td className="mono">{fmt(p.ltp)}</td>
+                        <td className="mono" style={{color:clr2(p.pnl)}}>{fmt(p.pnl)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {(info.recent_orders||[]).length > 0 && (
+            <div className="card" style={{marginBottom:16}}>
+              <div className="card-hdr"><span className="card-title">Recent Orders</span></div>
+              <div style={{overflow:'auto'}}>
+                <table>
+                  <thead><tr><th>Symbol</th><th>Side</th><th>Qty</th><th>Price</th><th>Status</th><th>Time</th></tr></thead>
+                  <tbody>
+                    {(info.recent_orders).map((o,i) => (
+                      <tr key={i}>
+                        <td className="mono" style={{fontWeight:600}}>{o.sym}</td>
+                        <td><span className={`pill ${(o.side||'').toLowerCase()==='buy'?'up':'down'}`}>{(o.side||'').toUpperCase()}</span></td>
+                        <td className="mono">{o.qty}</td>
+                        <td className="mono">{fmt(o.px)}</td>
+                        <td><span className="pill">{o.status}</span></td>
+                        <td className="mono" style={{fontSize:11,color:'var(--ink-3)'}}>{o.ts?.slice(0,16).replace('T',' ')}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          <div className="card">
+            <div className="card-hdr"><span className="card-title">Today's Trades</span></div>
+            <div style={{padding:'4px 0'}}><CombinedTradesTab defaultBroker={broker} /></div>
+          </div>
+        </div>
+      );
+    };
+
     /* ── Alpaca broker tab ───────────────────────────────────── */
     const AlpacaTab = ({ me }) => {
       const [info, setInfo] = useState(null);
@@ -3616,7 +3781,9 @@
       const [connected, setConnected] = useState(false);
       const [clock,     setClock]     = useState('');
       const [me,        setMe]        = useState(null);
+      const [broker,    setBroker]    = useState(() => localStorage.getItem('sel_broker') || 'alpaca');
       const lastTradeIds = useRef(new Set());
+      useEffect(() => { localStorage.setItem('sel_broker', broker); }, [broker]);
 
       /* Load current user (and apply server-side theme preference) */
       const loadMe = useCallback(() => {
@@ -3912,6 +4079,30 @@
               </div>
             </div>
 
+            {/* ── Broker selector (centre) ── */}
+            <div className="hide-on-mobile" style={{display:'flex',alignItems:'center',gap:4,position:'absolute',left:'50%',transform:'translateX(-50%)'}}>
+              {[
+                {k:'alpaca',   label:'Alpaca',     dot:'var(--accent)'},
+                {k:'angelone', label:'Angel One',  dot:'#f97316'},
+                {k:'zerodha',  label:'Zerodha',    dot:'#6366f1'},
+                {k:'indian',   label:'Indian Bot', dot:'var(--up)'},
+              ].map(b => (
+                <button key={b.k}
+                  onClick={() => setBroker(b.k)}
+                  style={{
+                    display:'flex',alignItems:'center',gap:5,padding:'5px 12px',fontSize:12,fontWeight:600,
+                    cursor:'pointer',borderRadius:'var(--r-sm)',border:'none',transition:'all .15s',
+                    background: broker===b.k ? 'var(--bg-3)' : 'transparent',
+                    color: broker===b.k ? 'var(--ink)' : 'var(--ink-3)',
+                    outline: broker===b.k ? '1px solid var(--line)' : 'none',
+                  }}>
+                  <span style={{width:6,height:6,borderRadius:'50%',background:b.dot,flexShrink:0,
+                                boxShadow:broker===b.k?`0 0 6px ${b.dot}`:'none'}} />
+                  {b.label}
+                </button>
+              ))}
+            </div>
+
             <div className="topbar-right">
               {/* Equity */}
               <div className="topbar-stat always">
@@ -3988,7 +4179,10 @@
 
             {/* OVERVIEW */}
             {tab === 'all' && <AllAccountsTab />}
-            {tab === 'overview' && (
+            {tab === 'overview' && broker !== 'alpaca' && (
+              <ErrorBoundary key={`overview-${broker}`}><BrokerAggregateOverview broker={broker} /></ErrorBoundary>
+            )}
+            {tab === 'overview' && broker === 'alpaca' && (
               <div className="fadein">
 
                 {/* Paused banner */}
@@ -4089,18 +4283,27 @@
             )}
 
             {/* TRADES */}
-            {tab === 'trades' && (
+            {tab === 'trades' && broker === 'alpaca' && (
               <div className="fadein"><Trades rows={trades??[]} full exportUrl="/api/export.csv" /></div>
+            )}
+            {tab === 'trades' && broker !== 'alpaca' && (
+              <ErrorBoundary key={`trades-${broker}`}><CombinedTradesTab defaultBroker={broker} /></ErrorBoundary>
             )}
 
             {/* COMBINED TRADES */}
             {tab === 'combined' && <ErrorBoundary key="combined"><CombinedTradesTab /></ErrorBoundary>}
 
             {/* HISTORY */}
-            {tab === 'history' && <HistoryTab />}
+            {tab === 'history' && broker === 'alpaca' && <HistoryTab />}
+            {tab === 'history' && broker !== 'alpaca' && (
+              <ErrorBoundary key={`history-${broker}`}><BrokerHistoryTab broker={broker} /></ErrorBoundary>
+            )}
 
             {/* ANALYTICS */}
-            {tab === 'analytics' && <AnalyticsTab />}
+            {tab === 'analytics' && broker === 'alpaca' && <AnalyticsTab />}
+            {tab === 'analytics' && broker !== 'alpaca' && (
+              <ErrorBoundary key={`analytics-${broker}`}><BrokerAnalyticsTab broker={broker} /></ErrorBoundary>
+            )}
 
             {/* ANGEL ONE */}
             {/* ALPACA */}
