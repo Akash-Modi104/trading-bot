@@ -22,225 +22,384 @@
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-    :root, html[data-theme="dark"] {
-      --bg:          #060d18;
-      --bg-card:     #0b1629;
-      --bg-hover:    #0f1e35;
-      --bg-input:    #0d1e38;
-      --border:      #162440;
-      --border-lt:   #1e3356;
+    /* ── Design tokens ──────────────────────────────────────── */
+    :root {
+      --bg-0: oklch(0.16 0.012 250);
+      --bg-1: oklch(0.20 0.014 250);
+      --bg-2: oklch(0.235 0.016 250);
+      --bg-3: oklch(0.27 0.018 250);
+      --line: oklch(0.30 0.018 250);
+      --line-soft: oklch(0.24 0.014 250);
+      --ink: oklch(0.96 0.005 250);
+      --ink-2: oklch(0.78 0.012 250);
+      --ink-3: oklch(0.58 0.014 250);
+      --ink-4: oklch(0.42 0.016 250);
+      --up: oklch(0.74 0.16 152);
+      --up-soft: oklch(0.30 0.06 152);
+      --down: oklch(0.68 0.20 25);
+      --down-soft: oklch(0.30 0.08 25);
+      --warn: oklch(0.82 0.14 80);
+      --warn-soft: oklch(0.32 0.06 80);
+      --accent: oklch(0.72 0.16 235);
+      --accent-soft: oklch(0.30 0.07 235);
+      --r-sm: 6px; --r: 10px; --r-lg: 14px;
+      --font-ui: 'Inter', system-ui, sans-serif;
+      --font-mono: 'JetBrains Mono', ui-monospace, monospace;
 
-      --blue:        #3b82f6;
-      --blue-bg:     rgba(59,130,246,.12);
-      --green:       #10b981;
-      --green-bg:    rgba(16,185,129,.12);
-      --red:         #ef4444;
-      --red-bg:      rgba(239,68,68,.12);
-      --yellow:      #f59e0b;
-      --yellow-bg:   rgba(245,158,11,.12);
-      --purple:      #8b5cf6;
-      --purple-bg:   rgba(139,92,246,.12);
-
-      --text:        #e2e8f0;
-      --muted:       #64748b;
-      --dim:         #334155;
+      /* Legacy aliases — kept for compat with inline styles that use old var names */
+      --bg:          oklch(0.16 0.012 250);
+      --bg-card:     oklch(0.20 0.014 250);
+      --bg-hover:    oklch(0.235 0.016 250);
+      --bg-input:    oklch(0.235 0.016 250);
+      --border:      oklch(0.30 0.018 250);
+      --border-lt:   oklch(0.30 0.018 250);
+      --text:        oklch(0.96 0.005 250);
+      --muted:       oklch(0.58 0.014 250);
+      --dim:         oklch(0.42 0.016 250);
+      --blue:        var(--accent);
+      --blue-bg:     var(--accent-soft);
+      --green:       var(--up);
+      --green-bg:    var(--up-soft);
+      --red:         var(--down);
+      --red-bg:      var(--down-soft);
+      --yellow:      var(--warn);
+      --yellow-bg:   var(--warn-soft);
+      --purple:      oklch(0.68 0.18 290);
+      --purple-bg:   oklch(0.28 0.07 290);
     }
 
     html[data-theme="light"] {
-      --bg:          #f5f7fa;
-      --bg-card:     #ffffff;
-      --bg-hover:    #f1f5f9;
-      --bg-input:    #f8fafc;
-      --border:      #e2e8f0;
-      --border-lt:   #cbd5e1;
+      --bg-0: oklch(0.97 0.004 250);
+      --bg-1: oklch(1.0  0.0   250);
+      --bg-2: oklch(0.95 0.006 250);
+      --bg-3: oklch(0.92 0.008 250);
+      --line: oklch(0.88 0.008 250);
+      --line-soft: oklch(0.91 0.006 250);
+      --ink: oklch(0.15 0.010 250);
+      --ink-2: oklch(0.30 0.012 250);
+      --ink-3: oklch(0.50 0.012 250);
+      --ink-4: oklch(0.65 0.010 250);
+      --bg:          oklch(0.97 0.004 250);
+      --bg-card:     oklch(1.0  0.0   250);
+      --bg-hover:    oklch(0.95 0.006 250);
+      --bg-input:    oklch(0.95 0.006 250);
+      --border:      oklch(0.88 0.008 250);
+      --border-lt:   oklch(0.82 0.010 250);
+      --text:        oklch(0.15 0.010 250);
+      --muted:       oklch(0.50 0.012 250);
+      --dim:         oklch(0.65 0.010 250);
+    }
+    html[data-theme="light"] thead th { background: oklch(0.95 0.006 250 / 0.95); }
+    html[data-theme="light"] .sidebar { background: oklch(0.98 0.003 250) !important; }
+    html[data-theme="light"] .topbar { background: oklch(0.98 0.003 250 / 0.85) !important; }
 
-      --text:        #0f172a;
-      --muted:       #64748b;
-      --dim:         #94a3b8;
-    }
-    html[data-theme="light"] thead th { background: rgba(245,247,250,.95); }
-    html[data-theme="light"] ::-webkit-scrollbar-thumb { background: #cbd5e1; }
-
-    /* ── Mobile responsive ──────────────────────────────────── */
-    @media (max-width: 900px) {
-      header > div:first-child { padding: 8px 12px !important; }
-      .responsive-grid-2 { grid-template-columns: 1fr !important; }
-      .hide-on-mobile { display: none !important; }
-      table { font-size: 11px; }
-      thead th, tbody td { padding: 7px 8px !important; }
-      .card-hdr { flex-wrap: wrap; }
-      main { padding: 12px !important; }
-    }
-    @media (max-width: 640px) {
-      .header-stack { flex-direction: column !important; align-items: flex-start !important; }
-      .header-stack > * { width: 100%; justify-content: space-between !important; }
-    }
-
-    /* ── Mobile design pass v3 ──────────────────────────────── */
-    @media (max-width: 1024px) {
-      /* Collapse all multi-col grids on tablet+ */
-      div[style*="gridTemplateColumns"]:not([style*="auto-fill"]),
-      div[style*="grid-template-columns"]:not([style*="auto-fill"]) {
-        grid-template-columns: 1fr !important;
-      }
-    }
-    @media (max-width: 900px) {
-      div[style*="auto-fill"] { grid-template-columns: repeat(auto-fill,minmax(150px,1fr)) !important; gap:8px !important; }
-      iframe { height: 50vh !important; }
-    }
-    @media (max-width: 768px) {
-      html { font-size: 13px; }
-      body { -webkit-text-size-adjust: 100%; }
-      main { padding: 8px !important; }
-      .card { border-radius: 10px !important; margin: 0 !important; }
-      .card-hdr { padding: 11px 13px !important; gap:8px !important; flex-wrap: wrap !important; }
-      .card-title { font-size: 13px !important; font-weight: 600 !important; }
-      .badge { font-size: 9px !important; padding: 2px 6px !important; }
-      /* Buttons */
-      .btn { padding: 9px 13px !important; font-size: 13px !important; min-height: 36px; border-radius: 7px !important; }
-      .btn[style*="padding:'4px 12px'"] { padding: 6px 10px !important; font-size: 11px !important; }
-      /* Inputs (16px to disable iOS auto-zoom) */
-      input, select, textarea { font-size: 16px !important; padding: 10px 12px !important; border-radius: 8px !important; }
-      input[type=checkbox], input[type=radio] { transform: scale(1.15); margin: 0 4px; }
-      label { line-height: 1.4 !important; }
-      /* Auto-fill grids on phone: 2 cols max */
-      div[style*="auto-fill"] { grid-template-columns: repeat(2,1fr) !important; gap:8px !important; }
-      /* Tables: convert to scrollable block */
-      table { font-size: 12px !important; min-width: 100%; }
-      thead th, tbody td { padding: 8px 6px !important; white-space: nowrap; }
-      .card > div > table, .card > table {
-        display: block !important; overflow-x: auto !important;
-        -webkit-overflow-scrolling: touch; max-width: 100%;
-      }
-      /* Hide low-priority columns on phone-sized tables */
-      table thead th:nth-child(n+5), table tbody td:nth-child(n+5) { display: none !important; }
-      /* Iframes */
-      iframe { height: 50vh !important; }
-      /* Charts - use intrinsic responsive height */
-      canvas { max-height: 250px !important; }
-      /* Modal-ish cards take full width */
-      .fadein { max-width: 100% !important; }
-      /* Hide noisy "hide-on-mobile" class */
-      .hide-on-mobile { display: none !important; }
-    }
-    /* Item 30: Toast position on mobile */
-    @media (max-width: 768px) {
-      .toast-container, [data-toast-container] {
-        bottom: 16px !important; top: auto !important;
-        right: 8px !important; left: 8px !important;
-        max-width: calc(100vw - 16px);
-      }
-    }
-
-    @media (max-width: 480px) {
-      html { font-size: 12.5px; }
-      main { padding: 6px !important; }
-      header { padding: 6px 10px !important; }
-      .card { border-radius: 8px !important; }
-      .card-hdr { padding: 9px 10px !important; }
-      .card-title { font-size: 12.5px !important; }
-      .badge { font-size: 9px !important; }
-      .btn { padding: 8px 11px !important; font-size: 12.5px !important; min-height: 36px; }
-      thead th, tbody td { padding: 6px 5px !important; font-size: 11px !important; }
-      /* Auto-fill: single col on phone */
-      div[style*="auto-fill"] { grid-template-columns: 1fr !important; }
-      /* Hide more low-priority columns in tables */
-      table thead th:nth-child(n+4), table tbody td:nth-child(n+4) { display: none !important; }
-      /* Sticky header with nav tabs */
-      header { position: sticky; top: 0; z-index: 50; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
-      header nav, header [role="tablist"], .nav-tabs {
-        overflow-x: auto !important; -webkit-overflow-scrolling: touch; white-space: nowrap !important;
-        scrollbar-width: none;
-      }
-      header nav::-webkit-scrollbar, .nav-tabs::-webkit-scrollbar { display: none; }
-      header nav button, .nav-tabs button { flex: 0 0 auto !important; min-width: 80px; }
-      /* Smaller chart heights */
-      canvas { max-height: 200px !important; }
-      iframe { height: 60vh !important; }
-      /* Profile/settings forms */
-      .card[style*="maxWidth:880"] { max-width: 100% !important; }
-    }
-    /* Touch target minimums */
-    @media (hover: none) and (pointer: coarse) {
-      button, a.btn, .btn { min-height: 40px; }
-      input[type=checkbox], input[type=radio] { transform: scale(1.2); }
-      a, button { -webkit-tap-highlight-color: rgba(59,130,246,.25); }
-    }
-
-    /* Touch target minimums */
-    @media (hover: none) and (pointer: coarse) {
-      button, a.btn, .btn { min-height: 40px; }
-      input[type=checkbox], input[type=radio] { transform: scale(1.2); }
-    }
-
-    html { font-size: 14px; }
-
-    body {
-      background: var(--bg);
-      color: var(--text);
-      font-family: 'Inter', system-ui, sans-serif;
-      line-height: 1.5;
+    /* ── Shell layout ───────────────────────────────────────── */
+    .shell {
+      display: grid;
+      grid-template-columns: 220px 1fr;
       min-height: 100vh;
     }
+    .shell-body {
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+      overflow: hidden;
+    }
 
-    ::-webkit-scrollbar { width: 5px; height: 5px; }
-    ::-webkit-scrollbar-track { background: transparent; }
-    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
-    ::-webkit-scrollbar-thumb:hover { background: var(--border-lt); }
-
-    .mono { font-family: 'JetBrains Mono', monospace; }
-
-    table { width: 100%; border-collapse: collapse; font-size: 13px; }
-    thead th {
-      padding: 9px 14px;
-      text-align: left;
-      color: var(--muted);
-      font-size: 10px;
-      font-weight: 700;
-      letter-spacing: .08em;
-      text-transform: uppercase;
-      background: rgba(6,13,24,.9);
-      border-bottom: 1px solid var(--border);
+    /* ── Sidebar ────────────────────────────────────────────── */
+    .sidebar {
+      border-right: 1px solid var(--line-soft);
+      background: oklch(0.18 0.012 250);
+      padding: 18px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
       position: sticky;
       top: 0;
-      z-index: 1;
-      white-space: nowrap;
+      height: 100vh;
+      overflow-y: auto;
     }
-    tbody td {
-      padding: 10px 14px;
-      border-bottom: 1px solid rgba(22,36,64,.7);
-      vertical-align: middle;
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 4px 10px 22px;
     }
-    tbody tr:hover td { background: var(--bg-hover); }
-    tbody tr:last-child td { border-bottom: none; }
+    .brand-mark {
+      width: 30px;
+      height: 30px;
+      border-radius: 8px;
+      background: linear-gradient(135deg, var(--accent), var(--up));
+      display: grid;
+      place-items: center;
+      font-family: var(--font-mono);
+      font-weight: 700;
+      font-size: 14px;
+      color: oklch(0.16 0.012 250);
+      flex-shrink: 0;
+    }
+    .brand-name {
+      font-weight: 700;
+      font-size: 14px;
+      letter-spacing: -0.01em;
+      color: var(--ink);
+    }
+    .brand-sub {
+      font-size: 10px;
+      color: var(--ink-4);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    .nav-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 9px 12px;
+      border-radius: var(--r);
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--ink-2);
+      transition: background .12s, color .12s;
+      width: 100%;
+      text-align: left;
+      background: none;
+      border: none;
+      cursor: pointer;
+    }
+    .nav-item:hover { background: var(--bg-2); color: var(--ink); }
+    .nav-item.active { background: var(--bg-2); color: var(--ink); }
+    .nav-rail {
+      width: 3px;
+      height: 16px;
+      border-radius: 2px;
+      background: transparent;
+      margin-left: -12px;
+      margin-right: 7px;
+      flex-shrink: 0;
+    }
+    .nav-item.active .nav-rail { background: var(--accent); }
+    .nav-section {
+      margin-top: 14px;
+      padding: 10px 12px 6px;
+      font-size: 10px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--ink-4);
+      font-weight: 600;
+    }
+    .sidebar-status {
+      margin-top: auto;
+      padding-top: 16px;
+      border-top: 1px solid var(--line-soft);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding-left: 10px;
+    }
+    .sidebar-status-row {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 11px;
+      color: var(--ink-3);
+    }
 
+    /* ── Top bar ────────────────────────────────────────────── */
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 30;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 12px 24px;
+      background: oklch(0.18 0.012 250 / 0.85);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      border-bottom: 1px solid var(--line-soft);
+      flex-shrink: 0;
+    }
+    .topbar-left { display: flex; align-items: center; gap: 12px; min-width: 0; }
+    .topbar-right { display: flex; align-items: center; gap: 14px; flex-shrink: 0; }
+    .topbar-stat { display: flex; flex-direction: column; }
+    .topbar-stat .lbl { font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-3); }
+    .topbar-stat .val { font-family: var(--font-mono); font-weight: 600; font-size: 15px; color: var(--ink); }
+    .topbar-divider { width: 1px; height: 28px; background: var(--line-soft); }
+
+    /* ── Search box ─────────────────────────────────────────── */
+    .topbar-search {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--bg-2);
+      border: 1px solid var(--line);
+      border-radius: var(--r);
+      padding: 6px 12px;
+      min-width: 180px;
+      color: var(--ink-3);
+      font-size: 13px;
+    }
+
+    /* ── Main content ───────────────────────────────────────── */
+    .content {
+      padding: 20px 24px 80px;
+      max-width: 1480px;
+      width: 100%;
+      margin: 0 auto;
+      flex: 1;
+    }
+
+    /* ── KPI cards ──────────────────────────────────────────── */
+    .kpis {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 14px;
+      margin-bottom: 16px;
+    }
+    .kpi {
+      background: var(--bg-1);
+      border: 1px solid var(--line-soft);
+      border-radius: var(--r-lg);
+      padding: 14px 16px 12px;
+      position: relative;
+      overflow: hidden;
+      transition: border-color .15s, transform .15s;
+      cursor: default;
+    }
+    .kpi:hover { border-color: var(--line); transform: translateY(-2px); }
+    .kpi .lbl { font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-3); font-weight: 600; }
+    .kpi .val { font-family: var(--font-mono); font-weight: 600; font-size: 26px; letter-spacing: -0.01em; margin-top: 6px; }
+    .kpi .sub { font-size: 12px; color: var(--ink-3); margin-top: 4px; display: flex; align-items: center; gap: 6px; }
+    .kpi .spark-wrap { position: absolute; right: 10px; top: 12px; width: 80px; height: 30px; opacity: 0.9; }
+
+    /* ── Layout rows ────────────────────────────────────────── */
+    .row-2 { display: grid; grid-template-columns: 1.4fr 1fr; gap: 16px; margin-bottom: 16px; }
+    .row-2-eq { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+
+    /* ── Chart header ───────────────────────────────────────── */
+    .chart-h { display: flex; align-items: baseline; justify-content: space-between; padding: 14px 18px 6px; }
+    .chart-h .big { font-family: var(--font-mono); font-weight: 600; font-size: 28px; letter-spacing: -0.01em; }
+
+    /* ── Range toggle ───────────────────────────────────────── */
+    .range-toggle { display: inline-flex; gap: 2px; background: var(--bg-2); padding: 3px; border-radius: var(--r); border: 1px solid var(--line-soft); }
+    .range-toggle button { padding: 4px 10px; font-size: 11px; font-weight: 600; letter-spacing: 0.06em; color: var(--ink-3); border-radius: var(--r-sm); background: none; border: none; cursor: pointer; }
+    .range-toggle button.active { background: var(--bg-0); color: var(--ink); }
+
+    /* ── Activity log ───────────────────────────────────────── */
+    .log { display: flex; flex-direction: column; font-family: var(--font-mono); font-size: 12px; max-height: 280px; overflow-y: auto; }
+    .log-row { display: grid; grid-template-columns: 64px 70px 1fr; gap: 10px; padding: 8px 16px; border-bottom: 1px solid var(--line-soft); }
+    .log-tag { font-weight: 700; font-size: 11px; letter-spacing: 0.05em; }
+    .log-tag.buy { color: var(--up); }
+    .log-tag.sell { color: var(--down); }
+    .log-tag.scan { color: var(--accent); }
+    .log-tag.warn { color: var(--warn); }
+    .log-tag.info { color: var(--ink-3); }
+
+    /* ── Position rows ──────────────────────────────────────── */
+    .pos-row { display: grid; grid-template-columns: 1fr auto; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--line-soft); align-items: center; }
+    .tick-glyph {
+      width: 32px; height: 32px; border-radius: 8px;
+      background: var(--bg-2); border: 1px solid var(--line-soft);
+      display: grid; place-items: center;
+      font-family: var(--font-mono); font-weight: 700; font-size: 11px; color: var(--ink-2);
+      flex-shrink: 0;
+    }
+
+    /* ── Utility classes ────────────────────────────────────── */
+    .eyebrow { font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-3); font-weight: 600; }
+    .pill {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 3px 8px; border-radius: 999px;
+      font-size: 11px; font-weight: 600; letter-spacing: 0.04em;
+      background: var(--bg-2); color: var(--ink-2); border: 1px solid var(--line-soft);
+    }
+    .pill.up { background: var(--up-soft); color: var(--up); border-color: transparent; }
+    .pill.down { background: var(--down-soft); color: var(--down); border-color: transparent; }
+    .pill.warn { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
+    .pill.accent { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
+    .dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+    .dot.up { background: var(--up); box-shadow: 0 0 8px var(--up); }
+    .dot.down { background: var(--down); box-shadow: 0 0 8px var(--down); }
+
+    /* ── Progress bars ──────────────────────────────────────── */
+    .progress { position: relative; height: 6px; border-radius: 999px; background: var(--bg-2); overflow: hidden; }
+    .progress > span { position: absolute; left: 0; top: 0; bottom: 0; background: var(--accent); border-radius: 999px; transition: width .4s ease; }
+    .progress.up > span { background: var(--up); }
+    .progress.down > span { background: var(--down); }
+    .conf-bar { width: 60px; height: 5px; background: var(--bg-2); border-radius: 999px; overflow: hidden; }
+    .conf-bar > span { display: block; height: 100%; background: var(--accent); border-radius: 999px; }
+
+    /* ── Form elements ──────────────────────────────────────── */
+    .input, .select {
+      height: 36px; padding: 0 12px;
+      background: var(--bg-2); border: 1px solid var(--line);
+      border-radius: var(--r); color: var(--ink);
+      font-family: var(--font-mono); font-size: 13px;
+      outline: none; transition: border-color .15s;
+    }
+    .input:focus, .select:focus { border-color: var(--accent); }
+    .toggle {
+      width: 38px; height: 22px; background: var(--bg-3); border-radius: 999px;
+      position: relative; cursor: pointer; border: 1px solid var(--line); transition: background .15s;
+    }
+    .toggle::after {
+      content: ''; position: absolute; top: 2px; left: 2px;
+      width: 16px; height: 16px; border-radius: 50%;
+      background: var(--ink-2); transition: transform .18s, background .15s;
+    }
+    .toggle.on { background: var(--accent-soft); border-color: transparent; }
+    .toggle.on::after { transform: translateX(16px); background: var(--accent); }
+
+    /* ── Mobile bottom bar ──────────────────────────────────── */
+    .mobile-bar {
+      display: none;
+      position: fixed; bottom: 0; left: 0; right: 0; z-index: 40;
+      background: oklch(0.18 0.012 250 / 0.96);
+      backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+      border-top: 1px solid var(--line-soft);
+      padding: 8px 4px env(safe-area-inset-bottom, 8px);
+    }
+    .mobile-bar-inner { display: flex; justify-content: space-around; }
+    .mobile-bar-btn {
+      display: flex; flex-direction: column; align-items: center; gap: 3px;
+      padding: 6px 12px; border-radius: var(--r); background: none; border: none;
+      cursor: pointer; color: var(--ink-3); font-size: 10px; font-weight: 500;
+      transition: color .12s;
+    }
+    .mobile-bar-btn.active { color: var(--accent); }
+    .mobile-bar-btn svg, .mobile-bar-btn .mb-icon { font-size: 18px; }
+
+    /* ── Card ───────────────────────────────────────────────── */
     .card {
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: 12px;
+      background: var(--bg-1);
+      border: 1px solid var(--line-soft);
+      border-radius: var(--r-lg);
       overflow: hidden;
     }
     .card-hdr {
       padding: 12px 16px;
-      border-bottom: 1px solid var(--border);
+      border-bottom: 1px solid var(--line-soft);
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 8px;
     }
     .card-title {
-      font-size: 11px;
+      font-size: 10px;
       font-weight: 700;
-      letter-spacing: .08em;
+      letter-spacing: 0.12em;
       text-transform: uppercase;
-      color: var(--muted);
+      color: var(--ink-3);
     }
     .empty {
       padding: 36px;
       text-align: center;
-      color: var(--muted);
+      color: var(--ink-3);
       font-size: 13px;
     }
+
+    /* ── Badge ──────────────────────────────────────────────── */
     .badge {
       display: inline-flex;
       align-items: center;
@@ -249,53 +408,160 @@
       border-radius: 4px;
       font-size: 11px;
       font-weight: 700;
-      letter-spacing: .04em;
+      letter-spacing: 0.04em;
       text-transform: uppercase;
       white-space: nowrap;
     }
+
+    /* ── Buttons ────────────────────────────────────────────── */
     .btn {
-      padding: 8px 14px;
-      border-radius: 7px;
-      font-size: 12px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: all .15s;
-      border: 1px solid;
-      font-family: 'Inter', sans-serif;
       display: inline-flex;
       align-items: center;
-      gap: 6px;
-      letter-spacing: .02em;
+      justify-content: center;
+      gap: 8px;
+      padding: 9px 14px;
+      border-radius: var(--r);
+      font-size: 13px;
+      font-weight: 600;
+      border: 1px solid var(--line);
+      background: var(--bg-2);
+      color: var(--ink);
+      font-family: var(--font-ui);
+      cursor: pointer;
+      transition: background .15s, border-color .15s, transform .05s;
+      letter-spacing: 0.02em;
     }
-    .btn:hover { filter: brightness(1.2); transform: translateY(-1px); }
+    .btn:hover { filter: brightness(1.15); transform: translateY(-1px); }
     .btn:active { transform: translateY(0); filter: brightness(.95); }
-    .btn-green  { background: rgba(16,185,129,.12);  color: #10b981; border-color: rgba(16,185,129,.35); }
-    .btn-red    { background: rgba(239,68,68,.12);   color: #ef4444; border-color: rgba(239,68,68,.35); }
-    .btn-blue   { background: rgba(59,130,246,.12);  color: #3b82f6; border-color: rgba(59,130,246,.35); }
-    .btn-yellow { background: rgba(245,158,11,.12);  color: #f59e0b; border-color: rgba(245,158,11,.35); }
-    .btn-ghost  { background: transparent; color: var(--muted); border-color: var(--border); }
+    .btn.primary, .btn-blue { background: var(--accent); color: oklch(0.16 0.012 250); border-color: transparent; }
+    .btn.success, .btn-green { background: var(--up-soft); color: var(--up); border-color: transparent; }
+    .btn.danger, .btn-red { background: var(--down-soft); color: var(--down); border-color: transparent; }
+    .btn.ghost, .btn-ghost { background: transparent; color: var(--ink-3); border-color: var(--line-soft); }
+    .btn-yellow { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
+    .btn-sm { padding: 5px 10px; font-size: 12px; border-radius: var(--r-sm); }
 
-    input[type="number"] {
-      width: 100%;
-      background: var(--bg-input);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      color: var(--text);
-      padding: 6px 10px;
-      font-size: 14px;
-      font-family: 'JetBrains Mono', monospace;
+    /* ── Tables ─────────────────────────────────────────────── */
+    .mono { font-family: var(--font-mono); }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    thead th {
+      padding: 9px 14px;
+      text-align: left;
+      color: var(--ink-4);
+      font-size: 10px;
       font-weight: 700;
+      letter-spacing: 0.10em;
+      text-transform: uppercase;
+      background: oklch(0.16 0.012 250 / 0.9);
+      border-bottom: 1px solid var(--line-soft);
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      white-space: nowrap;
+    }
+    tbody td {
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--line-soft);
+      vertical-align: middle;
+      color: var(--ink-2);
+    }
+    tbody tr:hover td { background: var(--bg-2); }
+    tbody tr:last-child td { border-bottom: none; }
+
+    /* ── Inputs ─────────────────────────────────────────────── */
+    input[type="number"],
+    input[type="text"],
+    input[type="password"],
+    select,
+    textarea {
+      background: var(--bg-2);
+      border: 1px solid var(--line);
+      border-radius: var(--r-sm);
+      color: var(--ink);
+      padding: 6px 10px;
+      font-size: 13px;
+      font-family: var(--font-mono);
       outline: none;
       transition: border-color .15s;
     }
-    input[type="number"]:focus { border-color: var(--blue); }
+    input[type="number"] { width: 100%; font-size: 14px; font-weight: 700; padding: 6px 10px; }
+    input:focus, select:focus, textarea:focus { border-color: var(--accent); }
 
+    /* ── Scrollbars ─────────────────────────────────────────── */
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--line); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--line-soft); }
+
+    /* ── Base ───────────────────────────────────────────────── */
+    html { font-size: 14px; }
+    body {
+      background: var(--bg-0);
+      background-image: radial-gradient(circle at 0 0, oklch(0.22 0.02 250) 0 1px, transparent 1px);
+      background-size: 32px 32px;
+      color: var(--ink);
+      font-family: var(--font-ui);
+      line-height: 1.5;
+      min-height: 100vh;
+    }
+
+    /* ── Animations ─────────────────────────────────────────── */
+    @keyframes pulse-dot { 0%,100%{opacity:1}50%{opacity:0.35} }
     @keyframes pulse  { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.5;transform:scale(1.3)} }
     @keyframes spin   { to { transform: rotate(360deg); } }
     @keyframes fadein { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
-    .pulse  { animation: pulse  1.8s ease-in-out infinite; }
+    .pulse  { animation: pulse-dot 1.6s ease-in-out infinite; }
     .spin   { animation: spin   1s  linear      infinite; }
     .fadein { animation: fadein .25s ease; }
+
+    /* ── Responsive ─────────────────────────────────────────── */
+    @media (max-width: 1024px) {
+      .shell { grid-template-columns: 64px 1fr; }
+      .sidebar { padding: 18px 8px; }
+      .brand-name, .brand-sub, .nav-item span:not(.nav-rail), .nav-section, .sidebar-status-row span { display: none !important; }
+      .nav-item { justify-content: center; padding: 10px 8px; }
+      .brand { padding: 4px 4px 22px; justify-content: center; }
+      .kpis { grid-template-columns: repeat(2, 1fr); }
+    }
+    @media (max-width: 880px) {
+      .shell { grid-template-columns: 1fr; }
+      .sidebar { display: none; }
+      .mobile-bar { display: block; }
+      .content { padding-bottom: 96px; }
+      .kpis { grid-template-columns: repeat(2, 1fr); }
+      .row-2, .row-2-eq { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 640px) {
+      .kpis { grid-template-columns: 1fr 1fr; }
+      .topbar { padding: 10px 14px; gap: 10px; }
+      .topbar-stat { display: none; }
+      .topbar-stat.always { display: flex; }
+      .content { padding: 12px 12px 96px; }
+      table { font-size: 11px; }
+      thead th, tbody td { padding: 7px 8px !important; }
+      canvas { max-height: 200px !important; }
+    }
+    @media (max-width: 480px) {
+      .kpis { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 768px) {
+      .toast-container, [data-toast-container] {
+        bottom: 80px !important; top: auto !important;
+        right: 8px !important; left: 8px !important;
+        max-width: calc(100vw - 16px);
+      }
+    }
+    @media (hover: none) and (pointer: coarse) {
+      button, a.btn, .btn { min-height: 40px; }
+      input[type=checkbox], input[type=radio] { transform: scale(1.2); }
+      a, button { -webkit-tap-highlight-color: oklch(0.72 0.16 235 / 0.25); }
+    }
+
+    /* Compat: hide-on-mobile */
+    @media (max-width: 900px) { .hide-on-mobile { display: none !important; } }
+
+    /* ── Light theme table override ─────────────────────────── */
+    html[data-theme="light"] thead th { background: oklch(0.95 0.006 250 / 0.95); }
+    html[data-theme="light"] ::-webkit-scrollbar-thumb { background: oklch(0.80 0.010 250); }
   </style>
 </head>
 <body>
@@ -329,7 +595,7 @@
     const fpct = n =>
       n == null ? '—' : (n >= 0 ? '+' : '') + n.toFixed(2) + '%';
 
-    const clr = (n, pos='#10b981', neg='#ef4444', zero='#64748b') =>
+    const clr = (n, pos='var(--up)', neg='var(--down)', zero='var(--ink-3)') =>
       n == null ? zero : n > 0 ? pos : n < 0 ? neg : zero;
 
     const timeAgo = (ts) => {
@@ -347,28 +613,28 @@
     const Dot = ({ on, pulse }) => (
       <span style={{
         display: 'inline-block', width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
-        background: on ? '#10b981' : '#ef4444',
-        boxShadow: `0 0 6px ${on ? '#10b981' : '#ef4444'}`,
-        ...(pulse && on ? { animation: 'pulse 1.8s ease-in-out infinite' } : {}),
+        background: on ? 'var(--up)' : 'var(--down)',
+        boxShadow: `0 0 6px ${on ? 'var(--up)' : 'var(--down)'}`,
+        ...(pulse && on ? { animation: 'pulse-dot 1.6s ease-in-out infinite' } : {}),
       }} />
     );
 
     /* ── Badge ───────────────────────────────────────────────── */
-    const Badge = ({ children, color = '#64748b', bg }) => (
+    const Badge = ({ children, color = 'var(--ink-3)', bg }) => (
       <span className="badge" style={{
         color,
-        background: bg || (color + '1a'),
+        background: bg || (color.startsWith('var') ? 'var(--bg-2)' : color + '1a'),
       }}>{children}</span>
     );
 
     /* ── Regime badge ────────────────────────────────────────── */
     const Regime = ({ v }) => {
       const map = {
-        bullish:  ['#10b981','Bullish'],
-        trending: ['#3b82f6','Trending'],
-        bearish:  ['#ef4444','Bearish'],
-        choppy:   ['#f59e0b','Choppy'],
-        unknown:  ['#64748b','Unknown'],
+        bullish:  ['var(--up)','Bullish'],
+        trending: ['var(--accent)','Trending'],
+        bearish:  ['var(--down)','Bearish'],
+        choppy:   ['var(--warn)','Choppy'],
+        unknown:  ['var(--ink-3)','Unknown'],
       };
       const [c, label] = map[v?.toLowerCase()] || map.unknown;
       return <Badge color={c}>{label}</Badge>;
@@ -380,17 +646,13 @@
       const pct   = total ? Math.round(wins / total * 100) : 0;
       return (
         <div>
-          <div style={{display:'flex',justifyContent:'space-between',marginBottom:5,fontSize:11,fontFamily:'JetBrains Mono'}}>
-            <span style={{color:'#10b981'}}>{wins}W</span>
-            <span style={{color:'#94a3b8',fontWeight:700}}>{pct}%</span>
-            <span style={{color:'#ef4444'}}>{losses}L</span>
+          <div style={{display:'flex',justifyContent:'space-between',marginBottom:5,fontSize:11,fontFamily:'var(--font-mono)'}}>
+            <span style={{color:'var(--up)'}}>{wins}W</span>
+            <span style={{color:'var(--ink-2)',fontWeight:700}}>{pct}%</span>
+            <span style={{color:'var(--down)'}}>{losses}L</span>
           </div>
-          <div style={{height:5,background:'var(--border)',borderRadius:3,overflow:'hidden'}}>
-            <div style={{
-              height:'100%', width:`${pct}%`, borderRadius:3,
-              background:'linear-gradient(90deg,#10b981,#34d399)',
-              transition:'width .5s ease',
-            }} />
+          <div className="progress up" style={{height:5}}>
+            <span style={{width:`${pct}%`}} />
           </div>
         </div>
       );
@@ -398,29 +660,26 @@
 
     /* ── Confidence bar ──────────────────────────────────────── */
     const ConfBar = ({ value = 0 }) => {
-      const c = value >= 75 ? '#10b981' : value >= 55 ? '#3b82f6' : '#f59e0b';
+      const c = value >= 75 ? 'var(--up)' : value >= 55 ? 'var(--accent)' : 'var(--warn)';
       return (
         <div style={{display:'flex',alignItems:'center',gap:8}}>
-          <div style={{flex:1,height:4,background:'var(--border)',borderRadius:2,overflow:'hidden'}}>
+          <div style={{flex:1,height:4,background:'var(--bg-2)',borderRadius:2,overflow:'hidden'}}>
             <div style={{height:'100%',width:`${Math.min(value,100)}%`,background:c,borderRadius:2,transition:'width .5s'}} />
           </div>
-          <span style={{fontSize:12,fontWeight:700,fontFamily:'JetBrains Mono',color:c,width:28,textAlign:'right'}}>{value}</span>
+          <span style={{fontSize:12,fontWeight:700,fontFamily:'var(--font-mono)',color:c,width:28,textAlign:'right'}}>{value}</span>
         </div>
       );
     };
 
     /* ── Metric card ─────────────────────────────────────────── */
     const MetCard = ({ label, value, sub, color, children }) => (
-      <div style={{
-        background:'var(--bg-card)', border:'1px solid var(--border)', borderRadius:10, padding:'14px 16px',
-        transition:'border-color .15s, transform .15s', cursor:'default',
-      }}
-        onMouseEnter={e=>{ e.currentTarget.style.borderColor='var(--border-lt)'; e.currentTarget.style.transform='translateY(-2px)'; }}
-        onMouseLeave={e=>{ e.currentTarget.style.borderColor='var(--border)'; e.currentTarget.style.transform=''; }}
+      <div className="kpi"
+        onMouseEnter={e=>{ e.currentTarget.style.borderColor='var(--line)'; e.currentTarget.style.transform='translateY(-2px)'; }}
+        onMouseLeave={e=>{ e.currentTarget.style.borderColor=''; e.currentTarget.style.transform=''; }}
       >
-        <div style={{fontSize:10,fontWeight:700,letterSpacing:'.1em',textTransform:'uppercase',color:'var(--muted)',marginBottom:8}}>{label}</div>
-        <div style={{fontSize:22,fontWeight:700,fontFamily:'JetBrains Mono',color:color||'var(--text)',lineHeight:1}}>{value}</div>
-        {sub   && <div style={{fontSize:11,color:'var(--muted)',marginTop:5}}>{sub}</div>}
+        <div className="lbl">{label}</div>
+        <div className="val" style={{fontSize:22,color:color||'var(--ink)'}}>{value}</div>
+        {sub   && <div className="sub">{sub}</div>}
         {children && <div style={{marginTop:8}}>{children}</div>}
       </div>
     );
@@ -438,8 +697,8 @@
         const labels = curve?.length ? curve.map(p => p.time) : ['09:30','—'];
         const vals   = curve?.length ? curve.map(p => p.pnl)  : [0, 0];
         const last   = vals[vals.length - 1] ?? 0;
-        const c      = last >= 0 ? '#10b981' : '#ef4444';
-        const cBg    = last >= 0 ? 'rgba(16,185,129,.1)' : 'rgba(239,68,68,.1)';
+        const c      = last >= 0 ? 'oklch(0.74 0.16 152)' : 'oklch(0.68 0.20 25)';
+        const cBg    = last >= 0 ? 'oklch(0.74 0.16 152 / 0.12)' : 'oklch(0.68 0.20 25 / 0.12)';
 
         chart.current = new window.Chart(ref.current.getContext('2d'), {
           type: 'line',
@@ -463,23 +722,23 @@
             plugins: {
               legend: { display: false },
               tooltip: {
-                backgroundColor: '#0b1629',
-                borderColor: '#162440',
+                backgroundColor: 'oklch(0.20 0.014 250)',
+                borderColor: 'oklch(0.24 0.014 250)',
                 borderWidth: 1,
-                titleColor: '#64748b',
+                titleColor: 'oklch(0.58 0.014 250)',
                 bodyColor: c,
                 callbacks: { label: ctx => ' ' + f$(ctx.raw) }
               }
             },
             scales: {
               x: {
-                grid: { color: 'rgba(22,36,64,.6)' },
-                ticks: { color: '#64748b', font: { size: 10, family: 'JetBrains Mono' }, maxTicksLimit: 8 }
+                grid: { color: 'oklch(0.24 0.014 250 / 0.6)' },
+                ticks: { color: 'oklch(0.58 0.014 250)', font: { size: 10, family: 'JetBrains Mono' }, maxTicksLimit: 8 }
               },
               y: {
-                grid: { color: 'rgba(22,36,64,.6)' },
+                grid: { color: 'oklch(0.24 0.014 250 / 0.6)' },
                 ticks: {
-                  color: '#64748b',
+                  color: 'oklch(0.58 0.014 250)',
                   font: { size: 10, family: 'JetBrains Mono' },
                   callback: v => '$' + v.toFixed(0)
                 },
@@ -497,51 +756,46 @@
           {(!curve || curve.length === 0) && (
             <div style={{
               position:'absolute', inset:0, display:'flex', alignItems:'center',
-              justifyContent:'center', color:'var(--muted)', fontSize:13, pointerEvents:'none'
+              justifyContent:'center', color:'var(--ink-3)', fontSize:13, pointerEvents:'none'
             }}>No completed trades yet today</div>
           )}
         </div>
       );
     };
 
-    /* ── Positions table ─────────────────────────────────────── */
+    /* ── Positions card ──────────────────────────────────────── */
     const Positions = ({ rows = [], equity = 0 }) => (
       <div className="card" style={{height:'100%'}}>
         <div className="card-hdr">
-          <span className="card-title">📍 Open Positions</span>
-          <Badge color="#3b82f6">{rows.length} / 3</Badge>
+          <span className="card-title">Open Positions</span>
+          <span className="pill accent">{rows.length} / 3</span>
         </div>
-        <div style={{overflowX:'auto',maxHeight:290,overflowY:'auto'}}>
-          <table>
-            <thead><tr>
-              <th>Symbol</th><th>Qty</th><th>Entry</th><th>Current</th><th>P&L %</th>
-              {equity > 0 && <th className="hide-on-mobile">% Equity</th>}
-              <th>Stop</th>
-            </tr></thead>
-            <tbody>
-              {rows.length === 0
-                ? <tr><td colSpan="7"><div className="empty">No open positions</div></td></tr>
-                : rows.map((p, i) => {
-                  const posValue = (p.curr || p.entry || 0) * (p.qty || 0);
-                  const equityPct = equity > 0 ? (posValue / equity * 100) : null;
-                  return (
-                    <tr key={i}>
-                      <td style={{borderLeft:`3px solid ${clr(p.pct)}`}}>
-                        <span style={{fontWeight:700}}>{p.sym}</span>
-                      </td>
-                      <td className="mono">{p.qty}</td>
-                      <td className="mono">{f$(p.entry)}</td>
-                      <td className="mono">{f$(p.curr)}</td>
-                      <td className="mono" style={{color:clr(p.pct),fontWeight:700}}>{fpct(p.pct)}</td>
-                      {equity > 0 && <td className="mono hide-on-mobile" style={{color:'var(--muted)',fontSize:11}}>{equityPct != null ? equityPct.toFixed(1)+'%' : '—'}</td>}
-                      <td className="mono" style={{color:'var(--muted)'}}>{f$(p.stop)}</td>
-                    </tr>
-                  );
-                })
-              }
-            </tbody>
-          </table>
-        </div>
+        {rows.length === 0
+          ? <div className="empty">No open positions</div>
+          : rows.map((p, i) => {
+            const posValue = (p.curr || p.entry || 0) * (p.qty || 0);
+            const equityPct = equity > 0 ? (posValue / equity * 100) : null;
+            const isUp = (p.pct || 0) >= 0;
+            return (
+              <div key={i} className="pos-row">
+                <div style={{display:'flex',alignItems:'center',gap:10,minWidth:0}}>
+                  <div className="tick-glyph">{(p.sym||'?').slice(0,3)}</div>
+                  <div style={{minWidth:0}}>
+                    <div style={{fontWeight:700,fontSize:13,color:'var(--ink)'}}>{p.sym}</div>
+                    <div style={{fontSize:11,color:'var(--ink-3)',fontFamily:'var(--font-mono)',marginTop:1}}>
+                      {p.qty} × {f$(p.entry)} · stop {f$(p.stop)}
+                    </div>
+                  </div>
+                </div>
+                <div style={{textAlign:'right',flexShrink:0}}>
+                  <div style={{fontFamily:'var(--font-mono)',fontWeight:700,fontSize:14,color:clr(p.pct)}}>{fpct(p.pct)}</div>
+                  <div style={{fontSize:11,color:'var(--ink-3)',marginTop:2,fontFamily:'var(--font-mono)'}}>{f$(p.curr)}</div>
+                  {equityPct != null && <div className="hide-on-mobile" style={{fontSize:10,color:'var(--ink-4)',marginTop:1}}>{equityPct.toFixed(1)}% eq</div>}
+                </div>
+              </div>
+            );
+          })
+        }
       </div>
     );
 
@@ -667,24 +921,24 @@
         <div className="fadein">
           <div style={{display:'flex',gap:8,marginBottom:12,flexWrap:'wrap',alignItems:'center'}}>
             {['day','week','month','all'].map(r => (
-              <button key={r} className={`btn ${range===r?'btn-blue':'btn-ghost'}`}
+              <button key={r} className={`btn ${range===r?'primary':'ghost'}`}
                 style={{padding:'4px 12px',fontSize:12}} onClick={() => setRange(r)}>
                 {r.charAt(0).toUpperCase()+r.slice(1)}
               </button>
             ))}
-            <span style={{color:'var(--muted)',fontSize:11,margin:'0 4px'}}>|</span>
+            <span style={{color:'var(--ink-4)',fontSize:11,margin:'0 4px'}}>|</span>
             {['all','alpaca','angelone','zerodha','indian'].map(b => (
-              <button key={b} className={`btn ${broker===b?'btn-blue':'btn-ghost'}`}
+              <button key={b} className={`btn ${broker===b?'primary':'ghost'}`}
                 style={{padding:'4px 10px',fontSize:11}} onClick={() => setBroker(b)}>
                 {b}
               </button>
             ))}
             <a href="/api/export/combined.csv" download style={{marginLeft:'auto',textDecoration:'none'}}>
-              <button className="btn btn-ghost" style={{padding:'4px 12px',fontSize:12}}>⬇ Export CSV</button>
+              <button className="btn ghost" style={{padding:'4px 12px',fontSize:12}}>⬇ Export CSV</button>
             </a>
           </div>
           {loading && !data && <div className="empty" style={{padding:40}}>Loading…</div>}
-          {err && <div className="empty" style={{padding:20,color:'#ef4444'}}>{err} <button className="btn btn-blue" onClick={load}>↻</button></div>}
+          {err && <div className="empty" style={{padding:20,color:'var(--down)'}}>{err} <button className="btn primary" onClick={load}>↻</button></div>}
           {data && (
             <>
               <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(160px,1fr))',gap:8,marginBottom:12}}>
@@ -708,26 +962,42 @@
     };
 
     /* ── Activity log ────────────────────────────────────────── */
-    const Log = ({ rows = [] }) => (
-      <div className="card" style={{height:'100%'}}>
-        <div className="card-hdr"><span className="card-title">📟 Activity Log</span></div>
-        <div style={{
-          fontFamily:'JetBrains Mono,monospace', fontSize:12, lineHeight:1.6,
-          padding:'12px 16px', maxHeight:280, overflowY:'auto',
-          background:'rgba(6,13,24,.6)',
-        }}>
-          {rows.length === 0
-            ? <span style={{color:'var(--muted)',fontStyle:'italic'}}>No activity yet</span>
-            : rows.map((item, i) => (
-              <div key={i} style={{marginBottom:4,display:'flex',gap:8}}>
-                <span style={{color:'#3b82f6',flexShrink:0}}>[{item.t}]</span>
-                <span style={{color:'#94a3b8'}}>{item.m}</span>
-              </div>
-            ))
-          }
+    const Log = ({ rows = [] }) => {
+      const tagClass = (m) => {
+        const u = (m||'').toUpperCase();
+        if (u.includes('BUY'))  return 'buy';
+        if (u.includes('SELL')) return 'sell';
+        if (u.includes('SCAN')) return 'scan';
+        if (u.includes('WARN') || u.includes('PAUS') || u.includes('ERROR')) return 'warn';
+        return 'info';
+      };
+      const tagLabel = (m) => {
+        const u = (m||'').toUpperCase();
+        if (u.includes('BUY'))  return 'BUY';
+        if (u.includes('SELL')) return 'SELL';
+        if (u.includes('SCAN')) return 'SCAN';
+        if (u.includes('WARN') || u.includes('PAUS')) return 'WARN';
+        if (u.includes('ERROR')) return 'ERR';
+        return 'INFO';
+      };
+      return (
+        <div className="card" style={{height:'100%'}}>
+          <div className="card-hdr"><span className="card-title">Activity Log</span></div>
+          <div className="log">
+            {rows.length === 0
+              ? <div className="empty">No activity yet</div>
+              : rows.map((item, i) => (
+                <div key={i} className="log-row">
+                  <span style={{color:'var(--ink-4)',fontSize:10}}>{item.t}</span>
+                  <span className={`log-tag ${tagClass(item.m)}`}>{tagLabel(item.m)}</span>
+                  <span style={{color:'var(--ink-2)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{item.m}</span>
+                </div>
+              ))
+            }
+          </div>
         </div>
-      </div>
-    );
+      );
+    };
 
     /* ── Controls ────────────────────────────────────────────── */
     const Controls = ({ onAction, paused, pauseReason }) => {
@@ -754,21 +1024,27 @@
 
       return (
         <div className="card">
-          <div className="card-hdr"><span className="card-title">⚙️ Bot Controls</span></div>
+          <div className="card-hdr">
+            <span className="card-title">Bot Controls</span>
+            <span className={`pill ${paused ? 'warn' : 'up'}`}>
+              <span className="dot" style={{background: paused ? 'var(--warn)' : 'var(--up)', width:6, height:6}} />
+              {paused ? 'PAUSED' : 'RUNNING'}
+            </span>
+          </div>
           <div style={{padding:14}}>
             {paused && (
               <div style={{
-                background:'rgba(245,158,11,.1)', border:'1px solid rgba(245,158,11,.3)',
+                background:'var(--warn-soft)', border:'1px solid transparent',
                 borderRadius:7, padding:'9px 12px', marginBottom:12,
-                color:'#f59e0b', fontSize:12, display:'flex', alignItems:'center', gap:6,
-              }}>⚠️ {pauseReason || 'Bot is paused'}</div>
+                color:'var(--warn)', fontSize:12, display:'flex', alignItems:'center', gap:6,
+              }}>⚠ {pauseReason || 'Bot is paused'}</div>
             )}
             <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
               {[
-                ['start',     'btn-green',  '▶ Start'],
-                ['stop',      'btn-red',    '⏸ Stop'],
-                ['scan',      'btn-blue',   '🔍 Scan'],
-                ['close_all', 'btn-yellow', '✕ Close All'],
+                ['start',     'success',  '▶ Start'],
+                ['stop',      'danger',   '⏸ Stop'],
+                ['scan',      'primary',  '⌕ Scan'],
+                ['close_all', 'danger',   '✕ Close All'],
               ].map(([a, cls, label]) => (
                 <button key={a} className={`btn ${cls}`} onClick={() => act(a)}>
                   {busy === a ? <span className="spin" style={{width:12,height:12,border:'2px solid currentColor',borderTopColor:'transparent',borderRadius:'50%',display:'inline-block'}} /> : label}
@@ -778,8 +1054,8 @@
             {msg && (
               <div style={{
                 marginTop:10, padding:'8px 12px', borderRadius:6, fontSize:12,
-                background: msg.ok ? 'rgba(16,185,129,.1)' : 'rgba(239,68,68,.1)',
-                color:       msg.ok ? '#10b981'            : '#ef4444',
+                background: msg.ok ? 'var(--up-soft)' : 'var(--down-soft)',
+                color:       msg.ok ? 'var(--up)'     : 'var(--down)',
               }}>{msg.text}</div>
             )}
           </div>
@@ -875,22 +1151,20 @@
       return (
         <div className="card">
           <div className="card-hdr" style={{justifyContent:'space-between'}}>
-            <span className="card-title">🇮🇳 Indian Bot (Zerodha)</span>
-            <div style={{display:'flex',alignItems:'center',gap:8}}>
+            <span className="card-title">Indian Bot (Zerodha)</span>
+            <span className={`pill ${running ? 'up' : 'down'}`}>
               <Dot on={running} />
-              <span style={{fontSize:11,fontWeight:600,color:running?'#10b981':'#ef4444'}}>
-                {status.toUpperCase()}
-              </span>
-            </div>
+              {status.toUpperCase()}
+            </span>
           </div>
 
           <div style={{padding:14}}>
             {/* Start / Stop / Restart row */}
             <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:8,marginBottom:12}}>
               {[
-                ['indian_start',   'btn-green',  '▶ Start'],
-                ['indian_stop',    'btn-red',    '⏸ Stop'],
-                ['indian_restart', 'btn-blue',   '↺ Restart'],
+                ['indian_start',   'success', '▶ Start'],
+                ['indian_stop',    'danger',  '⏸ Stop'],
+                ['indian_restart', 'primary', '↺ Restart'],
               ].map(([a, cls, label]) => (
                 <button key={a} className={`btn ${cls}`} onClick={() => act(a)}
                         disabled={!!busy} style={{fontSize:12,padding:'7px 4px'}}>
@@ -911,7 +1185,7 @@
                 </div>
               </div>
               <button onClick={toggleAutoTrade} disabled={busy==='toggle'}
-                      className={`btn ${alloc?.auto_trade ? 'btn-green' : 'btn-ghost'}`}
+                      className={`btn ${alloc?.auto_trade ? 'success' : 'ghost'}`}
                       style={{minWidth:56,fontSize:12,padding:'5px 12px'}}>
                 {busy==='toggle'
                   ? <span className="spin" style={{width:11,height:11,border:'2px solid currentColor',borderTopColor:'transparent',borderRadius:'50%',display:'inline-block'}} />
@@ -939,14 +1213,14 @@
             )}
 
             {!editing && (
-              <button className="btn btn-ghost" style={{width:'100%',fontSize:11,padding:'5px 0'}}
+              <button className="btn ghost" style={{width:'100%',fontSize:11,padding:'5px 0'}}
                       onClick={() => setEditing(true)}>
-                ✏️ Edit Allocation
+                Edit Allocation
               </button>
             )}
 
             {editing && (
-              <div style={{background:'rgba(15,23,42,.5)',borderRadius:7,padding:12,marginBottom:8}}>
+              <div style={{background:'var(--bg-2)',borderRadius:7,padding:12,marginBottom:8}}>
                 <div style={{fontSize:12,fontWeight:600,marginBottom:10,color:'var(--accent)'}}>
                   Fund Allocation — Zerodha
                 </div>
@@ -973,11 +1247,11 @@
                   </div>
                 </div>
                 <div style={{display:'flex',gap:8}}>
-                  <button className="btn btn-green" style={{flex:1,fontSize:12}}
+                  <button className="btn success" style={{flex:1,fontSize:12}}
                           onClick={saveAlloc} disabled={busy==='save'}>
                     {busy==='save' ? '…' : '✓ Save'}
                   </button>
-                  <button className="btn btn-ghost" style={{flex:1,fontSize:12}}
+                  <button className="btn ghost" style={{flex:1,fontSize:12}}
                           onClick={() => setEditing(false)}>
                     Cancel
                   </button>
@@ -987,8 +1261,8 @@
 
             {msg && (
               <div style={{marginTop:8,padding:'7px 10px',borderRadius:6,fontSize:12,
-                           background: msg.ok?'rgba(16,185,129,.1)':'rgba(239,68,68,.1)',
-                           color:       msg.ok?'#10b981':'#ef4444'}}>
+                           background: msg.ok?'var(--up-soft)':'var(--down-soft)',
+                           color:       msg.ok?'var(--up)':'var(--down)'}}>
                 {msg.text}
               </div>
             )}
@@ -1000,14 +1274,14 @@
     /* ── System health ───────────────────────────────────────── */
     const Health = ({ health }) => {
       const svcs = [
-        { key: 'trading-bot', icon: '🤖', label: 'Trading Bot' },
-        { key: 'scanner',     icon: '🔍', label: 'AI Scanner'  },
-        { key: 'dashboard',   icon: '📊', label: 'Dashboard'   },
+        { key: 'trading-bot', icon: '⬡', label: 'Trading Bot' },
+        { key: 'scanner',     icon: '⌕', label: 'AI Scanner'  },
+        { key: 'dashboard',   icon: '⊞', label: 'Dashboard'   },
       ];
       return (
         <div className="card">
-          <div className="card-hdr"><span className="card-title">💻 System Health</span></div>
-          {[...svcs, { key: '_ollama', icon: '🧠', label: 'Ollama LLM' }].map(s => {
+          <div className="card-hdr"><span className="card-title">System Health</span></div>
+          {[...svcs, { key: '_ollama', icon: '⬟', label: 'Ollama LLM' }].map(s => {
             const st = s.key === '_ollama'
               ? (health?.ollama === 'online' ? 'running' : health?.ollama || 'unknown')
               : (health?.services?.[s.key] || 'unknown');
@@ -1015,13 +1289,13 @@
             return (
               <div key={s.key} style={{
                 display:'flex', alignItems:'center', justifyContent:'space-between',
-                padding:'10px 14px', borderBottom:'1px solid rgba(22,36,64,.5)',
+                padding:'10px 14px', borderBottom:'1px solid var(--line-soft)',
               }}>
-                <span style={{fontSize:13}}>{s.icon} {s.label}</span>
-                <div style={{display:'flex',alignItems:'center',gap:7}}>
+                <span style={{fontSize:13,color:'var(--ink-2)'}}>{s.icon} {s.label}</span>
+                <span className={`pill ${ok ? 'up' : 'down'}`}>
                   <Dot on={ok} />
-                  <span style={{fontSize:12,fontWeight:600,color:ok?'#10b981':'#ef4444'}}>{st.toUpperCase()}</span>
-                </div>
+                  {st.toUpperCase()}
+                </span>
               </div>
             );
           })}
@@ -1081,37 +1355,37 @@
               {saved && <span style={{color:'#10b981',fontSize:12,fontWeight:600}}>✓ Saved</span>}
               {editing
                 ? <>
-                    <button className="btn btn-ghost" style={{padding:'4px 12px',fontSize:12}} onClick={() => setEditing(false)}>Cancel</button>
-                    <button className="btn btn-green" style={{padding:'4px 12px',fontSize:12}} onClick={save}>Save Changes</button>
+                    <button className="btn ghost" style={{padding:'4px 12px',fontSize:12}} onClick={() => setEditing(false)}>Cancel</button>
+                    <button className="btn success" style={{padding:'4px 12px',fontSize:12}} onClick={save}>Save Changes</button>
                   </>
-                : <button className="btn btn-blue" style={{padding:'4px 12px',fontSize:12}} onClick={() => setEditing(true)}>✏️ Edit</button>
+                : <button className="btn primary" style={{padding:'4px 12px',fontSize:12}} onClick={() => setEditing(true)}>Edit</button>
               }
             </div>
           </div>
           <div style={{padding:16, display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(260px,1fr))', gap:12}}>
             {numDefs.map(d => (
-              <div key={d.key} style={{background:'rgba(6,13,24,.7)',border:'1px solid var(--border)',borderRadius:8,padding:'12px 14px'}}>
-                <div style={{fontSize:10,color:'var(--muted)',fontWeight:700,letterSpacing:'.06em',textTransform:'uppercase',marginBottom:7}}>{d.label}</div>
+              <div key={d.key} style={{background:'var(--bg-2)',border:'1px solid var(--line-soft)',borderRadius:8,padding:'12px 14px'}}>
+                <div className="eyebrow" style={{marginBottom:7}}>{d.label}</div>
                 {editing
                   ? <input type="number" step="any" value={form[d.key] ?? ''}
                       onChange={e => setForm(f => ({...f, [d.key]: parseFloat(e.target.value)}))} />
-                  : <div style={{fontSize:20,fontWeight:700,fontFamily:'JetBrains Mono',color:'#3b82f6'}}>{params?.[d.key] ?? '—'}</div>
+                  : <div style={{fontSize:20,fontWeight:700,fontFamily:'var(--font-mono)',color:'var(--accent)'}}>{params?.[d.key] ?? '—'}</div>
                 }
-                <div style={{fontSize:11,color:'#475569',marginTop:5}}>{d.desc}</div>
+                <div style={{fontSize:11,color:'var(--ink-4)',marginTop:5}}>{d.desc}</div>
               </div>
             ))}
             {txtDefs.map(d => (
-              <div key={d.key} style={{background:'rgba(6,13,24,.7)',border:'1px solid var(--border)',borderRadius:8,padding:'12px 14px'}}>
-                <div style={{fontSize:10,color:'var(--muted)',fontWeight:700,letterSpacing:'.06em',textTransform:'uppercase',marginBottom:7}}>{d.label}</div>
+              <div key={d.key} style={{background:'var(--bg-2)',border:'1px solid var(--line-soft)',borderRadius:8,padding:'12px 14px'}}>
+                <div className="eyebrow" style={{marginBottom:7}}>{d.label}</div>
                 {editing
                   ? <input type="text"
                       value={form[d.key] ?? ''}
                       onChange={e => setForm(f => ({...f, [d.key]: e.target.value}))}
-                      style={{width:'100%',background:'var(--bg-input)',border:'1px solid var(--border)',borderRadius:6,color:'var(--text)',padding:'6px 10px',fontSize:13,fontFamily:'JetBrains Mono',outline:'none'}}
+                      style={{width:'100%',background:'var(--bg-2)',border:'1px solid var(--line)',borderRadius:6,color:'var(--ink)',padding:'6px 10px',fontSize:13,fontFamily:'var(--font-mono)',outline:'none'}}
                     />
-                  : <div style={{fontSize:15,fontWeight:700,fontFamily:'JetBrains Mono',color:'#8b5cf6'}}>{params?.[d.key] || <span style={{color:'var(--muted)'}}>—</span>}</div>
+                  : <div style={{fontSize:15,fontWeight:700,fontFamily:'var(--font-mono)',color:'var(--purple)'}}>{params?.[d.key] || <span style={{color:'var(--ink-3)'}}>—</span>}</div>
                 }
-                <div style={{fontSize:11,color:'#475569',marginTop:5}}>{d.desc}</div>
+                <div style={{fontSize:11,color:'var(--ink-4)',marginTop:5}}>{d.desc}</div>
               </div>
             ))}
           </div>
@@ -1465,13 +1739,13 @@
                 <div style={{display:'flex',gap:6,marginTop:6}}>
                   {['dark','light','auto'].map(t => (
                     <button key={t} onClick={() => setTheme(t)}
-                      className={`btn ${theme===t?'btn-blue':'btn-ghost'}`}
+                      className={`btn ${theme===t?'primary':'ghost'}`}
                       style={{flex:1,padding:'7px 10px',fontSize:12,textTransform:'capitalize'}}>{t}</button>
                   ))}
                 </div>
               </div>
               <div style={{gridColumn:'span 2',display:'flex',gap:8,justifyContent:'flex-end'}}>
-                <button className="btn btn-green" onClick={saveProfile}>Save changes</button>
+                <button className="btn success" onClick={saveProfile}>Save changes</button>
               </div>
             </div>
           </div>
@@ -1824,10 +2098,11 @@
       return (
         <div style={{
           padding:'8px 14px', textAlign:'center',
-          background: live ? '#7f1d1d' : '#1e3a8a',
-          color: '#fff', fontWeight: 700, fontSize: 13,
+          background: live ? 'var(--down-soft)' : 'var(--accent-soft)',
+          color: live ? 'var(--down)' : 'var(--accent)',
+          fontWeight: 700, fontSize: 13,
           letterSpacing:'.05em', textTransform:'uppercase',
-          borderBottom: live ? '2px solid #ef4444' : '2px solid #3b82f6',
+          borderBottom: `2px solid ${live ? 'var(--down)' : 'var(--accent)'}`,
         }}>
           {live ? '⚠ LIVE — REAL MONEY' : 'PAPER MODE'}
           <span style={{fontWeight:400,marginLeft:10,opacity:.8,textTransform:'none'}}>
@@ -1926,8 +2201,8 @@
             </>
           )}
           <div style={{marginTop:18,display:'flex',gap:8,justifyContent:'space-between',flexWrap:'wrap'}}>
-            <button className="btn btn-red" disabled={busy || !info} onClick={panic}>Panic flat (cancel + close all)</button>
-            <button className={`btn ${target==='live'?'btn-red':'btn-green'}`} disabled={busy} onClick={apply}>
+            <button className="btn danger" disabled={busy || !info} onClick={panic}>Panic flat (cancel + close all)</button>
+            <button className={`btn ${target==='live'?'danger':'success'}`} disabled={busy} onClick={apply}>
               {busy ? 'Working…' : `Switch to ${target.toUpperCase()} & restart bot`}
             </button>
           </div>
@@ -1959,20 +2234,26 @@
             labels,
             datasets: [{
               data: vals,
-              borderColor: '#3b82f6',
-              backgroundColor: 'rgba(59,130,246,.1)',
+              borderColor: 'oklch(0.72 0.16 235)',
+              backgroundColor: 'oklch(0.72 0.16 235 / 0.12)',
               fill: true, tension: 0.3, pointRadius: 2, borderWidth: 2,
             }],
           },
           options: {
             responsive: true, maintainAspectRatio: false,
             plugins: { legend: { display: false },
-              tooltip: { callbacks: { label: ctx => ' ' + f$(ctx.raw) } } },
+              tooltip: {
+                backgroundColor: 'oklch(0.20 0.014 250)',
+                borderColor: 'oklch(0.24 0.014 250)', borderWidth: 1,
+                titleColor: 'oklch(0.58 0.014 250)', bodyColor: 'oklch(0.72 0.16 235)',
+                callbacks: { label: ctx => ' ' + f$(ctx.raw) }
+              }
+            },
             scales: {
-              x: { grid: { color: 'rgba(22,36,64,.6)' },
-                   ticks: { color: '#64748b', font: { size: 10 }, maxTicksLimit: 12 } },
-              y: { grid: { color: 'rgba(22,36,64,.6)' },
-                   ticks: { color: '#64748b', font: { size: 10 },
+              x: { grid: { color: 'oklch(0.24 0.014 250 / 0.6)' },
+                   ticks: { color: 'oklch(0.58 0.014 250)', font: { size: 10 }, maxTicksLimit: 12 } },
+              y: { grid: { color: 'oklch(0.24 0.014 250 / 0.6)' },
+                   ticks: { color: 'oklch(0.58 0.014 250)', font: { size: 10 },
                             callback: v => '$' + v.toLocaleString() } },
             },
           },
@@ -1984,7 +2265,7 @@
           <canvas ref={ref} />
           {!history?.length && (
             <div style={{position:'absolute',inset:0,display:'flex',alignItems:'center',
-                         justifyContent:'center',color:'var(--muted)'}}>
+                         justifyContent:'center',color:'var(--ink-3)'}}>
               No equity history yet — bot writes one snapshot per day.
             </div>
           )}
@@ -2014,10 +2295,10 @@
         </div>
       );
 
-      const sharpeColor =  a?.sharpe_ratio  >= 1   ? '#10b981'
-                         : a?.sharpe_ratio  >= 0.5 ? '#f59e0b' : '#ef4444';
-      const sortinoColor = a?.sortino_ratio >= 1.5 ? '#10b981'
-                         : a?.sortino_ratio >= 0.7 ? '#f59e0b' : '#ef4444';
+      const sharpeColor =  a?.sharpe_ratio  >= 1   ? 'var(--up)'
+                         : a?.sharpe_ratio  >= 0.5 ? 'var(--warn)' : 'var(--down)';
+      const sortinoColor = a?.sortino_ratio >= 1.5 ? 'var(--up)'
+                         : a?.sortino_ratio >= 0.7 ? 'var(--warn)' : 'var(--down)';
 
       return (
         <div className="fadein">
@@ -2025,16 +2306,16 @@
             <MetCard label="Sharpe Ratio"  value={a?.sharpe_ratio}    color={sharpeColor}
                      sub={a?.sharpe_ratio>=1?'Good':a?.sharpe_ratio>=0.5?'OK':'Weak'} />
             <MetCard label="Sortino Ratio" value={a?.sortino_ratio}   color={sortinoColor} />
-            <MetCard label="Max Drawdown"  value={fpct(a?.max_drawdown)} color="#ef4444"
+            <MetCard label="Max Drawdown"  value={fpct(a?.max_drawdown)} color="var(--down)"
                      sub="Worst cumulative dip" />
-            <MetCard label="Profit Factor" value={a?.profit_factor}   color={a?.profit_factor>=1.5?'#10b981':'#f59e0b'}
+            <MetCard label="Profit Factor" value={a?.profit_factor}   color={a?.profit_factor>=1.5?'var(--up)':'var(--warn)'}
                      sub="Wins$ / Losses$" />
-            <MetCard label="Expectancy"    value={`${a?.expectancy ?? 0}%`} color="#3b82f6"
+            <MetCard label="Expectancy"    value={`${a?.expectancy ?? 0}%`} color="var(--accent)"
                      sub="Per-trade edge" />
-            <MetCard label="Avg Slippage"  value={`${a?.avg_slippage_pct ?? 0}%`} color="#f59e0b"
+            <MetCard label="Avg Slippage"  value={`${a?.avg_slippage_pct ?? 0}%`} color="var(--warn)"
                      sub="Buy-side fills" />
-            <MetCard label="Total Trades"  value={a?.total_trades}    color="#8b5cf6" />
-            <MetCard label="Equity Peak"   value={f$(eq?.peak)}       color="#10b981"
+            <MetCard label="Total Trades"  value={a?.total_trades}    color="var(--purple)" />
+            <MetCard label="Equity Peak"   value={f$(eq?.peak)}       color="var(--up)"
                      sub={`DD: ${fpct(eq?.drawdown_pct)}`} />
           </div>
 
@@ -2118,11 +2399,11 @@
           <div style={{display:'flex',gap:8,marginBottom:16,flexWrap:'wrap'}}>
             {ranges.map(r => (
               <button key={r.id} onClick={() => setRange(r.id)}
-                className={`btn ${range === r.id ? 'btn-blue' : 'btn-ghost'}`}
+                className={`btn ${range === r.id ? 'primary' : 'ghost'}`}
                 style={{padding:'8px 18px'}}>{r.label}</button>
             ))}
-            <button className="btn btn-ghost" style={{padding:'8px 14px',marginLeft:'auto'}}
-              onClick={() => load(range)}>🔄 Refresh</button>
+            <button className="btn ghost" style={{padding:'8px 14px',marginLeft:'auto'}}
+              onClick={() => load(range)}>↻ Refresh</button>
           </div>
 
           {err && <div style={{padding:14,background:'rgba(239,68,68,.1)',color:'#ef4444',borderRadius:8,marginBottom:16}}>{err}</div>}
@@ -2523,7 +2804,7 @@
       useEffect(() => { load(); const id = setInterval(load, 30000); return () => clearInterval(id); }, [load]);
 
       if (loading && !data) return <div className="empty" style={{padding:40}}>Loading aggregate view…</div>;
-      if (err && !data) return <div className="empty" style={{padding:40}}><div style={{color:'#ef4444',marginBottom:12}}>Error: {err}</div><button className="btn btn-blue" onClick={load}>↻ Retry</button></div>;
+      if (err && !data) return <div className="empty" style={{padding:40}}><div style={{color:'var(--down)',marginBottom:12}}>Error: {err}</div><button className="btn primary" onClick={load}>↻ Retry</button></div>;
       const b = data?.brokers || {};
       const totals = data?.totals || {};
 
@@ -2537,11 +2818,9 @@
       const pnlClr = v => Number(v) > 0 ? '#10b981' : Number(v) < 0 ? '#ef4444' : 'var(--muted)';
 
       const StatusPill = ({connected, mode, error}) => (
-        <span style={{
-          fontSize:10,fontWeight:700,padding:'3px 8px',borderRadius:10,letterSpacing:'.05em',textTransform:'uppercase',
-          background: error ? 'rgba(239,68,68,.15)' : connected ? (mode === 'live' ? 'rgba(239,68,68,.15)' : 'rgba(16,185,129,.15)') : 'rgba(100,116,139,.15)',
-          color: error ? '#ef4444' : connected ? (mode === 'live' ? '#ef4444' : '#10b981') : '#64748b',
-        }}>{error ? 'ERROR' : connected ? (mode === 'live' ? 'LIVE' : 'CONNECTED') : 'NOT CONNECTED'}</span>
+        <span className={`pill ${error ? 'down' : connected ? (mode === 'live' ? 'down' : 'up') : ''}`}>
+          {error ? 'ERROR' : connected ? (mode === 'live' ? 'LIVE' : 'CONNECTED') : 'NOT CONNECTED'}
+        </span>
       );
 
       const BrokerCard = ({name, label, info, ccy}) => {
@@ -2649,7 +2928,7 @@
           <div className="card">
             <div className="card-hdr">
               <span className="card-title">🌐 All Accounts</span>
-              <button className="btn btn-ghost" style={{padding:'4px 12px',fontSize:11}} onClick={load}>↻ Refresh</button>
+              <button className="btn ghost" style={{padding:'4px 12px',fontSize:11}} onClick={load}>↻ Refresh</button>
             </div>
             <div style={{padding:18,display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(180px,1fr))',gap:10}}>
               <div style={{padding:12,background:'var(--bg-input)',borderRadius:8}}>
@@ -2673,11 +2952,11 @@
 
           {/* Panic flat button — closes all positions across all brokers */}
           {totals.positions > 0 && (
-            <div className="card" style={{border:'1px solid rgba(239,68,68,.3)'}}>
+            <div className="card" style={{borderColor:'var(--down)'}}>
               <div style={{padding:'14px 18px',display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:12}}>
                 <div>
-                  <div style={{fontWeight:700,color:'#ef4444',fontSize:14}}>⚠️ Emergency Close All</div>
-                  <div style={{fontSize:12,color:'var(--muted)',marginTop:2}}>Cancel all open orders and liquidate all positions across every connected broker.</div>
+                  <div style={{fontWeight:700,color:'var(--down)',fontSize:14}}>Emergency Close All</div>
+                  <div style={{fontSize:12,color:'var(--ink-3)',marginTop:2}}>Cancel all open orders and liquidate all positions across every connected broker.</div>
                 </div>
                 <PanicFlatBtn onDone={load} />
               </div>
@@ -2803,12 +3082,12 @@
       if (!ao.connected) return (
         <div className="fadein" style={{maxWidth:600,margin:'40px auto',textAlign:'center'}}>
           <div className="card" style={{padding:32}}>
-            <div style={{fontSize:40,marginBottom:12}}>🏦</div>
-            <h2 style={{fontSize:18,fontWeight:700,marginBottom:8}}>Angel One Not Connected</h2>
-            <p style={{color:'var(--muted)',fontSize:14,marginBottom:20}}>
+            <div style={{fontSize:40,marginBottom:12,color:'var(--ink-3)'}}>◈</div>
+            <h2 style={{fontSize:18,fontWeight:700,marginBottom:8,color:'var(--ink)'}}>Angel One Not Connected</h2>
+            <p style={{color:'var(--ink-3)',fontSize:14,marginBottom:20}}>
               Connect your Angel One account from the Profile tab to start trading on NSE/BSE.
             </p>
-            <button className="btn btn-blue" onClick={()=>window._setTab?.('profile')}>
+            <button className="btn primary" onClick={()=>window._setTab?.('profile')}>
               Go to Profile →
             </button>
           </div>
@@ -3053,12 +3332,12 @@
       if (!zrd.connected) return (
         <div className="fadein" style={{maxWidth:600,margin:'40px auto',textAlign:'center'}}>
           <div className="card" style={{padding:32}}>
-            <div style={{fontSize:40,marginBottom:12}}>📈</div>
-            <h2 style={{fontSize:18,fontWeight:700,marginBottom:8}}>Zerodha Not Connected</h2>
-            <p style={{color:'var(--muted)',fontSize:14,marginBottom:20}}>
+            <div style={{fontSize:40,marginBottom:12,color:'var(--ink-3)'}}>◉</div>
+            <h2 style={{fontSize:18,fontWeight:700,marginBottom:8,color:'var(--ink)'}}>Zerodha Not Connected</h2>
+            <p style={{color:'var(--ink-3)',fontSize:14,marginBottom:20}}>
               Connect your Zerodha account from the Profile tab to start trading on NSE/BSE.
             </p>
-            <button className="btn btn-blue" onClick={()=>window._setTab?.('profile')}>
+            <button className="btn primary" onClick={()=>window._setTab?.('profile')}>
               Go to Profile →
             </button>
           </div>
@@ -3315,14 +3594,22 @@
         if (!window._appReadyAt) window._appReadyAt = Date.now();
       }, [data?.trades?.length]);
 
-      /* Clock */
+      /* Clock — IST */
+      const [istClock, setIstClock] = useState('');
       useEffect(() => {
-        const tick = () => setClock(
-          new Date().toLocaleTimeString('en-US', {
-            timeZone:'America/New_York', hour12:false,
+        const tick = () => {
+          const ist = new Date().toLocaleTimeString('en-IN', {
+            timeZone:'Asia/Kolkata', hour12:false,
             hour:'2-digit', minute:'2-digit', second:'2-digit',
-          }) + ' ET'
-        );
+          });
+          setClock(
+            new Date().toLocaleTimeString('en-US', {
+              timeZone:'America/New_York', hour12:false,
+              hour:'2-digit', minute:'2-digit', second:'2-digit',
+            }) + ' ET'
+          );
+          setIstClock(ist + ' IST');
+        };
         tick();
         const id = setInterval(tick, 1000);
         return () => clearInterval(id);
@@ -3361,8 +3648,8 @@
         });
 
       if (!data) return (
-        <div style={{height:'100vh',display:'flex',alignItems:'center',justifyContent:'center',flexDirection:'column',gap:12,color:'var(--muted)'}}>
-          <div style={{width:32,height:32,border:'3px solid var(--border)',borderTopColor:'#3b82f6',borderRadius:'50%'}} className="spin" />
+        <div style={{height:'100vh',display:'flex',alignItems:'center',justifyContent:'center',flexDirection:'column',gap:12,color:'var(--ink-3)'}}>
+          <div style={{width:32,height:32,border:'3px solid var(--line)',borderTopColor:'var(--accent)',borderRadius:'50%'}} className="spin" />
           <div>Connecting to trading server…</div>
         </div>
       );
@@ -3399,115 +3686,186 @@
       };
       const themeIcon = { dark:'🌙', light:'☀️', auto:'🖥️' }[me?.theme || localStorage.getItem('theme') || 'dark'] || '🌙';
 
+      /* Sidebar nav mapping */
+      const SIDEBAR_TABS = [
+        { id:'overview',  label:'Overview',    icon:'⊞' },
+        { id:'trades',    label:'Trades',      icon:'⬡' },
+        { id:'combined',  label:'Combined',    icon:'⊕' },
+        { id:'history',   label:'History',     icon:'⊘' },
+        { id:'analytics', label:'Analytics',   icon:'⬗' },
+      ];
+      const SIDEBAR_BROKER_TABS = [
+        { id:'angelone',  label:'Angel One',   icon:'◈' },
+        { id:'zerodha',   label:'Zerodha',     icon:'◉' },
+        { id:'reports',   label:'Reports',     icon:'▣' },
+      ];
+      const SIDEBAR_BOT_TABS = [
+        { id:'strategy',  label:'Strategy',    icon:'⚙' },
+        { id:'system',    label:'System',      icon:'⬟' },
+        { id:'profile',   label:'Profile',     icon:'◯' },
+      ];
+
+      const isMarketOpen = () => {
+        const now = new Date();
+        const et = new Date(now.toLocaleString('en-US',{timeZone:'America/New_York'}));
+        const h = et.getHours(), m2 = et.getMinutes(), day = et.getDay();
+        if (day === 0 || day === 6) return false;
+        return (h > 9 || (h === 9 && m2 >= 30)) && h < 16;
+      };
+      const mktOpen = isMarketOpen();
+
       return (
         <div>
+          <BotModeBanner me={me} />
+          <div className="shell">
 
-          {/* ── Header ─────────────────────────────────────────── */}
-          <><BotModeBanner me={me} /><header style={{
-            background:'var(--bg-card)', borderBottom:'1px solid var(--border)',
-            position:'sticky', top:0, zIndex:100,
-          }}>
-            <div style={{
-              display:'flex', alignItems:'center', justifyContent:'space-between',
-              padding:'10px 20px', flexWrap:'wrap', gap:12,
-              maxWidth:1640, margin:'0 auto',
-            }}>
-              {/* Logo */}
-              <div style={{display:'flex',alignItems:'center',gap:10,flexShrink:0}}>
-                <span style={{fontSize:26}}>📈</span>
-                <div>
-                  <div style={{fontWeight:700,fontSize:16,letterSpacing:'-.02em'}}>AlgoTrader</div>
-                  <div style={{fontSize:10,color:'var(--muted)',letterSpacing:'.08em',textTransform:'uppercase'}}>Alpaca Paper</div>
-                </div>
-              </div>
-
-              {/* Status + metrics row */}
-              <div style={{display:'flex',alignItems:'center',gap:20,flexWrap:'wrap'}}>
-
-                {/* Live dot */}
-                <div style={{display:'flex',alignItems:'center',gap:6}}>
-                  <Dot on={connected} pulse />
-                  <span style={{fontSize:12,fontWeight:600,color:connected?'#10b981':'#ef4444'}}>{connected?'LIVE':'OFFLINE'}</span>
-                </div>
-
-                {/* Bot status */}
-                <div style={{display:'flex',alignItems:'center',gap:6}}>
-                  <Dot on={!paused} pulse={!paused} />
-                  <span style={{fontSize:12,fontWeight:600,color:paused?'#f59e0b':'var(--muted)'}}>BOT: {paused?'PAUSED':'RUNNING'}</span>
-                </div>
-
-                <Regime v={m?.regime} />
-
-                {/* Equity */}
-                <div style={{textAlign:'right'}}>
-                  <div style={{fontSize:10,color:'var(--muted)',marginBottom:2,letterSpacing:'.06em',textTransform:'uppercase'}}>Equity</div>
-                  <div style={{fontSize:16,fontWeight:700,fontFamily:'JetBrains Mono'}}>{f$(m?.equity)}</div>
-                </div>
-
-                {/* Day P&L */}
-                <div style={{textAlign:'right'}}>
-                  <div style={{fontSize:10,color:'var(--muted)',marginBottom:2,letterSpacing:'.06em',textTransform:'uppercase'}}>Day P&L</div>
-                  <div style={{fontSize:16,fontWeight:700,fontFamily:'JetBrains Mono',color:clr(m?.daily_pnl)}}>
-                    {f$(m?.daily_pnl)}
-                    <span style={{fontSize:12,opacity:.75,marginLeft:4}}>({fpct(m?.daily_pnl_pct)})</span>
-                  </div>
-                </div>
-
-                {/* Clock */}
-                <div style={{textAlign:'right',flexShrink:0}} className="hide-on-mobile">
-                  <div style={{fontSize:10,color:'var(--muted)',marginBottom:2,letterSpacing:'.06em',textTransform:'uppercase'}}>Time</div>
-                  <div style={{fontSize:14,fontWeight:600,fontFamily:'JetBrains Mono'}}>{clock}</div>
-                </div>
-
-                {/* Theme + user menu */}
-                <button onClick={cycleTheme} title="Toggle theme"
-                  style={{background:'var(--bg-input)',border:'1px solid var(--border)',
-                          borderRadius:8,padding:'6px 10px',cursor:'pointer',fontSize:16,
-                          color:'var(--text)'}}>{themeIcon}</button>
-
-                {me && (
-                  <button onClick={() => setTab('profile')} title={me.email}
-                    style={{background:'var(--blue)',color:'#fff',border:'none',
-                            borderRadius:'50%',width:34,height:34,cursor:'pointer',
-                            fontWeight:700,fontSize:14}}>
-                    {(me.name || me.email || '?')[0].toUpperCase()}
-                  </button>
-                )}
+          {/* ── Sidebar ─────────────────────────────────────────── */}
+          <aside className="sidebar">
+            <div className="brand">
+              <div className="brand-mark">A</div>
+              <div>
+                <div className="brand-name">AlgoTrader</div>
+                <div className="brand-sub">Dashboard</div>
               </div>
             </div>
 
-            {/* Nav tabs (scrollable on mobile) */}
-            <div className="nav-tabs" style={{
-              display:'flex', padding:'0 16px', borderTop:'1px solid var(--border)',
-              maxWidth:1640, margin:'0 auto',
-              overflowX:'auto', overflowY:'hidden',
-              scrollbarWidth:'none', WebkitOverflowScrolling:'touch',
-            }}>
-              {TABS.map(t => (
-                <button key={t.id} onClick={() => setTab(t.id)} style={{
-                  padding:'9px 16px', fontSize:13, fontWeight:500,
-                  background:'none', border:'none', whiteSpace:'nowrap', flex:'0 0 auto',
-                  color: tab === t.id ? '#3b82f6' : 'var(--muted)',
-                  borderBottom: `2px solid ${tab === t.id ? '#3b82f6' : 'transparent'}`,
-                  cursor:'pointer', transition:'color .15s',
-                }}>{t.label}</button>
-              ))}
+            {SIDEBAR_TABS.map(t => (
+              <button key={t.id} className={`nav-item${tab===t.id?' active':''}`} onClick={() => setTab(t.id)}>
+                <span className="nav-rail" />
+                <span style={{fontSize:15,flexShrink:0}}>{t.icon}</span>
+                <span>{t.label}</span>
+              </button>
+            ))}
+
+            <div className="nav-section">Brokers</div>
+            {SIDEBAR_BROKER_TABS.map(t => (
+              <button key={t.id} className={`nav-item${tab===t.id?' active':''}`} onClick={() => setTab(t.id)}>
+                <span className="nav-rail" />
+                <span style={{fontSize:15,flexShrink:0}}>{t.icon}</span>
+                <span>{t.label}</span>
+              </button>
+            ))}
+
+            <div className="nav-section">Config</div>
+            {SIDEBAR_BOT_TABS.map(t => (
+              <button key={t.id} className={`nav-item${tab===t.id?' active':''}`} onClick={() => setTab(t.id)}>
+                <span className="nav-rail" />
+                <span style={{fontSize:15,flexShrink:0}}>{t.icon}</span>
+                <span>{t.label}</span>
+              </button>
+            ))}
+
+            <div className="sidebar-status">
+              <div className="sidebar-status-row">
+                <Dot on={connected} />
+                <span>{connected ? 'Live feed' : 'Offline'}</span>
+              </div>
+              <div className="sidebar-status-row">
+                <span className={`pill ${paused ? 'warn' : 'up'}`} style={{fontSize:10}}>
+                  {paused ? 'Paused' : 'Running'}
+                </span>
+              </div>
+              <div className="sidebar-status-row" style={{fontSize:10,color:'var(--ink-4)'}}>
+                <span>v2.0</span>
+              </div>
             </div>
-          </header></>
+          </aside>
+
+          {/* ── Shell body: topbar + content ─────────────────────── */}
+          <div className="shell-body">
+
+          {/* ── Top bar ─────────────────────────────────────────── */}
+          <header className="topbar">
+            <div className="topbar-left">
+              {/* Cosmetic search */}
+              <div className="topbar-search hide-on-mobile">
+                <span style={{fontSize:13}}>⌕</span>
+                <span>Search symbols…</span>
+              </div>
+              {/* Market status */}
+              <div style={{display:'flex',alignItems:'center',gap:6}}>
+                <span className={`dot ${mktOpen ? 'up' : 'down'} pulse`} />
+                <span style={{fontSize:12,fontWeight:600,color:mktOpen?'var(--up)':'var(--ink-3)'}}>{mktOpen ? 'OPEN' : 'CLOSED'}</span>
+              </div>
+              <div className="topbar-divider hide-on-mobile" />
+              {/* IST clock */}
+              <div className="topbar-stat hide-on-mobile">
+                <span className="lbl">IST</span>
+                <span className="val" style={{fontSize:13}}>{istClock}</span>
+              </div>
+            </div>
+
+            <div className="topbar-right">
+              {/* Equity */}
+              <div className="topbar-stat always">
+                <span className="lbl">Equity</span>
+                <span className="val">{f$(m?.equity)}</span>
+              </div>
+              <div className="topbar-divider hide-on-mobile" />
+              {/* Day P&L */}
+              <div className="topbar-stat always">
+                <span className="lbl">Day P&L</span>
+                <span className="val" style={{color:clr(m?.daily_pnl)}}>
+                  {f$(m?.daily_pnl)}
+                  <span style={{fontSize:11,opacity:.75,marginLeft:4,fontWeight:400}}>({fpct(m?.daily_pnl_pct)})</span>
+                </span>
+              </div>
+              <div className="topbar-divider" />
+              {/* Pause button */}
+              <button className={`btn btn-sm ${paused ? 'warn' : 'ghost'}`} style={{fontSize:12}}
+                onClick={() => sendAction(paused ? 'start' : 'stop')}>
+                {paused ? '▶ Resume' : '⏸ Pause'}
+              </button>
+              {/* Theme toggle */}
+              <button onClick={cycleTheme} title="Toggle theme"
+                style={{background:'var(--bg-2)',border:'1px solid var(--line)',borderRadius:'var(--r)',
+                        padding:'6px 10px',cursor:'pointer',fontSize:15,color:'var(--ink)',lineHeight:1}}>
+                {themeIcon}
+              </button>
+              {/* Avatar */}
+              {me && (
+                <button onClick={() => setTab('profile')} title={me.email}
+                  style={{background:'var(--accent)',color:'oklch(0.16 0.012 250)',border:'none',
+                          borderRadius:'50%',width:32,height:32,cursor:'pointer',
+                          fontWeight:700,fontSize:13,flexShrink:0}}>
+                  {(me.name || me.email || '?')[0].toUpperCase()}
+                </button>
+              )}
+            </div>
+          </header>
 
           {/* ── Page content ───────────────────────────────────── */}
-          <main style={{padding:'16px 20px 48px',maxWidth:1640,margin:'0 auto'}}>
+          <main className="content">
+
+          {/* Mobile bottom nav */}
+          <nav className="mobile-bar">
+            <div className="mobile-bar-inner">
+              {[
+                {id:'overview', label:'Overview', icon:'⊞'},
+                {id:'trades',   label:'Trades',   icon:'⬡'},
+                {id:'angelone', label:'India',     icon:'◈'},
+                {id:'analytics',label:'Analytics',icon:'⬗'},
+                {id:'profile',  label:'Profile',  icon:'◯'},
+              ].map(t => (
+                <button key={t.id} className={`mobile-bar-btn${tab===t.id?' active':''}`} onClick={()=>setTab(t.id)}>
+                  <span className="mb-icon">{t.icon}</span>
+                  {t.label}
+                </button>
+              ))}
+            </div>
+          </nav>
+
 
             {/* Alpaca-not-connected banner (any tab) */}
             {me && !me.alpaca?.connected && tab !== 'profile' && (
               <div style={{
-                background:'rgba(59,130,246,.1)', border:'1px solid rgba(59,130,246,.3)',
-                borderRadius:8, padding:'12px 16px', marginBottom:16,
-                color:'#3b82f6', display:'flex', alignItems:'center', justifyContent:'space-between',
+                background:'var(--accent-soft)', border:'1px solid transparent',
+                borderRadius:'var(--r)', padding:'12px 16px', marginBottom:16,
+                color:'var(--accent)', display:'flex', alignItems:'center', justifyContent:'space-between',
                 gap:12, flexWrap:'wrap',
               }}>
-                <span>🔌 <b>No Alpaca account connected</b> — connect your API keys to start trading with this dashboard.</span>
-                <button className="btn btn-blue" onClick={() => setTab('profile')}>Connect now →</button>
+                <span><b>No Alpaca account connected</b> — connect your API keys to start trading with this dashboard.</span>
+                <button className="btn primary" onClick={() => setTab('profile')}>Connect now →</button>
               </div>
             )}
 
@@ -3519,59 +3877,87 @@
                 {/* Paused banner */}
                 {paused && (
                   <div style={{
-                    background:'rgba(245,158,11,.08)', border:'1px solid rgba(245,158,11,.3)',
-                    borderRadius:8, padding:'11px 16px', marginBottom:16,
-                    color:'#f59e0b', display:'flex', alignItems:'center', gap:8, fontSize:13,
+                    background:'var(--warn-soft)', border:'1px solid transparent',
+                    borderRadius:'var(--r)', padding:'11px 16px', marginBottom:16,
+                    color:'var(--warn)', display:'flex', alignItems:'center', gap:8, fontSize:13,
                   }}>
-                    <span style={{fontSize:18}}>⚠️</span>
+                    <span>⚠</span>
                     <span style={{fontWeight:700}}>Trading Paused</span>
-                    {m?.pause_reason && <span style={{color:'#94a3b8'}}>— {m.pause_reason}</span>}
+                    {m?.pause_reason && <span style={{color:'var(--ink-3)'}}>— {m.pause_reason}</span>}
                   </div>
                 )}
 
-                {/* Metrics grid */}
-                <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(170px,1fr))',gap:12,marginBottom:16}}>
-                  <MetCard label="Account Equity" value={f$(m?.equity)} color={clr((m?.equity??100000)-100000,'#10b981','#ef4444','#e2e8f0')} />
-                  <MetCard label="Buying Power"   value={f$(m?.buying_power)} />
-                  <MetCard label="Day P&L"        value={fpct(m?.daily_pnl_pct)} sub={f$(m?.daily_pnl)} color={clr(m?.daily_pnl)} />
-                  <MetCard label="Win Rate"       value={`${stats?.win_rate??0}%`} color="#3b82f6">
-                    <WinBar wins={stats?.wins??0} losses={stats?.losses??0} />
-                  </MetCard>
-                  <MetCard label="Trades Today"   value={stats?.total_trades??0}  sub={`${stats?.wins??0}W · ${stats?.losses??0}L`} color="#8b5cf6" />
-                  <MetCard label="Open Positions" value={`${positions?.length??0} / ${params?.max_positions??3}`} color="#3b82f6" />
-                  <MetCard
-                    label="VIX"
-                    value={m?.vix?.toFixed(1)??'—'}
-                    sub={m?.vix==null?'N/A':m.vix<20?'Low Fear':m.vix<28?'Elevated':'High Fear'}
-                    color={m?.vix==null?'#64748b':m.vix<20?'#10b981':m.vix<28?'#f59e0b':'#ef4444'}
-                  />
-                  <div style={{background:'var(--bg-card)',border:'1px solid var(--border)',borderRadius:10,padding:'14px 16px'}}>
-                    <div style={{fontSize:10,fontWeight:700,letterSpacing:'.1em',textTransform:'uppercase',color:'var(--muted)',marginBottom:8}}>Regime</div>
-                    <Regime v={m?.regime} />
-                    {stats?.avg_win ? <div style={{fontSize:11,color:'var(--muted)',marginTop:6}}>Avg W: +{stats.avg_win}%</div> : null}
+                {/* KPI cards — 4 col grid */}
+                <div className="kpis">
+                  {/* Equity KPI */}
+                  <div className="kpi">
+                    <div className="lbl">Account Equity</div>
+                    <div className="val" style={{color:clr((m?.equity??100000)-100000)}}>{f$(m?.equity)}</div>
+                    <div className="sub">
+                      <span style={{color:'var(--ink-3)'}}>Buying power: {f$(m?.buying_power)}</span>
+                    </div>
+                  </div>
+
+                  {/* Day P&L KPI */}
+                  <div className="kpi">
+                    <div className="lbl">Day P&amp;L</div>
+                    <div className="val" style={{color:clr(m?.daily_pnl)}}>{fpct(m?.daily_pnl_pct)}</div>
+                    <div className="sub">{f$(m?.daily_pnl)}</div>
+                    <div className="progress" style={{marginTop:8}}>
+                      <span style={{width:`${Math.min(Math.abs(m?.daily_pnl_pct??0)/2*100,100)}%`,background:(m?.daily_pnl??0)>=0?'var(--up)':'var(--down)'}} />
+                    </div>
+                  </div>
+
+                  {/* Open Positions KPI */}
+                  <div className="kpi">
+                    <div className="lbl">Open Positions</div>
+                    <div className="val">{positions?.length??0}<span style={{fontSize:16,color:'var(--ink-3)'}}> / {params?.max_positions??3}</span></div>
+                    <div className="sub">
+                      <span>{stats?.total_trades??0} trades today</span>
+                    </div>
+                    <div className="progress" style={{marginTop:8}}>
+                      <span style={{width:`${((positions?.length??0)/(params?.max_positions??3))*100}%`}} />
+                    </div>
+                  </div>
+
+                  {/* Win Rate KPI */}
+                  <div className="kpi">
+                    <div className="lbl">Win Rate</div>
+                    <div className="val" style={{color:'var(--accent)'}}>{stats?.win_rate??0}<span style={{fontSize:16}}>%</span></div>
+                    <div className="sub">
+                      <span style={{color:'var(--up)'}}>{stats?.wins??0}W</span>
+                      <span style={{color:'var(--ink-4)'}}>·</span>
+                      <span style={{color:'var(--down)'}}>{stats?.losses??0}L</span>
+                    </div>
+                    <div className="progress up" style={{marginTop:8}}>
+                      <span style={{width:`${stats?.win_rate??0}%`}} />
+                    </div>
                   </div>
                 </div>
 
                 {/* Positions + Chart */}
-                <div style={{display:'grid',gridTemplateColumns:'1fr 1.5fr',gap:16,marginBottom:16}}>
+                <div className="row-2">
                   <Positions rows={positions??[]} equity={m?.equity ?? 0} />
                   <div className="card">
-                    <div className="card-hdr">
-                      <span className="card-title">📈 Intraday P&L</span>
-                      <span style={{fontFamily:'JetBrains Mono',fontWeight:700,fontSize:14,color:clr(m?.daily_pnl)}}>{f$(m?.daily_pnl)}</span>
+                    <div className="chart-h">
+                      <div>
+                        <div className="eyebrow">Intraday P&amp;L</div>
+                        <div className="big" style={{color:clr(m?.daily_pnl),fontSize:22,marginTop:2}}>{f$(m?.daily_pnl)}</div>
+                      </div>
+                      <Regime v={m?.regime} />
                     </div>
-                    <div style={{padding:'12px 16px 16px'}}><PnLChart curve={curve} /></div>
+                    <div style={{padding:'4px 16px 16px'}}><PnLChart curve={curve} /></div>
                   </div>
                 </div>
 
                 {/* Picks + Trades */}
-                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16,marginBottom:16}}>
+                <div className="row-2-eq">
                   <Picks rows={picks??[]} />
                   <Trades rows={trades??[]} />
                 </div>
 
                 {/* Log + Controls + Health */}
-                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16}}>
+                <div className="row-2-eq">
                   <div style={{display:'flex',flexDirection:'column',gap:16}}>
                     <Log rows={activity_log??[]} />
                     <DailyStats stats={stats} />
@@ -3622,14 +4008,16 @@
             {tab === 'profile' && <ProfileTab me={me} onMe={loadMe} />}
 
             <div style={{textAlign:'center',marginTop:32,padding:'20px 0',
-                         borderTop:'1px solid var(--border)',color:'var(--muted)',fontSize:12}}>
-              ⚠️ Trading involves risk of loss. Read the&nbsp;
+                         borderTop:'1px solid var(--line-soft)',color:'var(--ink-4)',fontSize:12}}>
+              Trading involves risk of loss. Read the&nbsp;
               <a href="/disclaimer" target="_blank" rel="noopener"
-                 style={{color:'#3b82f6'}}>Terms & Disclaimer</a>
+                 style={{color:'var(--accent)'}}>Terms &amp; Disclaimer</a>
               &nbsp;before use. Not financial advice.
             </div>
 
           </main>
+          </div>{/* end shell-body */}
+          </div>{/* end shell */}
         </div>
       );
     };
