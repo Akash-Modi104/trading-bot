@@ -2980,15 +2980,39 @@
       }, []);
       useEffect(() => { loadMe(); }, [loadMe]);
 
-      /* Handle Zerodha OAuth callback redirect (?zerodha_ok=1 or ?zerodha_error=...) */
+      /* Handle Zerodha OAuth callback — two cases:
+         1. /api/zerodha/callback processed it → ?zerodha_ok=1 or ?zerodha_error=...
+         2. Kite redirect URL points to / directly → ?request_token=XXX&status=success */
       useEffect(() => {
-        const sp = new URLSearchParams(window.location.search);
-        const ok  = sp.get('zerodha_ok');
-        const err = sp.get('zerodha_error');
-        if (!ok && !err) return;
+        const sp           = new URLSearchParams(window.location.search);
+        const ok           = sp.get('zerodha_ok');
+        const err          = sp.get('zerodha_error');
+        const requestToken = sp.get('request_token');
+        const status       = sp.get('status');
+
+        if (!ok && !err && !requestToken) return;
+
+        // Case 1: backend already exchanged the token
         if (ok)  { toast.push('Zerodha session activated!', 'success'); setTab('profile'); loadMe(); }
         if (err) { toast.push('Zerodha activation failed: ' + decodeURIComponent(err).replace(/_/g,' '), 'error'); setTab('profile'); }
-        // Strip the params from the URL so a refresh doesn't re-trigger
+
+        // Case 2: raw Kite redirect landed on / — exchange the token now
+        if (requestToken && status === 'success') {
+          fetch('/api/zerodha/session', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ request_token: requestToken }),
+          }).then(r => r.json()).then(d => {
+            if (d.ok) {
+              toast.push('Zerodha session activated!', 'success');
+            } else {
+              toast.push('Zerodha activation failed: ' + (d.error || 'unknown error'), 'error');
+            }
+            setTab('profile');
+            loadMe();
+          }).catch(() => toast.push('Zerodha session request failed', 'error'));
+        }
+
         window.history.replaceState({}, '', window.location.pathname + window.location.hash);
       }, [loadMe]);
 
