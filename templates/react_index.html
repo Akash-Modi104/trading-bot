@@ -1515,21 +1515,21 @@
       };
 
       const saveTelegram = async () => {
-        if (!tgToken.trim() || !tgChatId.trim()) {
-          toast.push('Bot token and chat ID are required', 'error');
-          return;
-        }
+        if (!tgChatId.trim()) { toast.push('Chat ID is required', 'error'); return; }
+        if (!tgConfigured && !tgToken.trim()) { toast.push('Bot token is required for first setup', 'error'); return; }
         setTgBusy(true);
         try {
+          const body = {chat_id: tgChatId, enabled: tgEnabled, events: tgEvents};
+          if (tgToken.trim()) body.bot_token = tgToken;
           const r = await fetch('/api/telegram/save', {
             method: 'POST', headers: {'Content-Type':'application/json'},
-            body: JSON.stringify({bot_token: tgToken, chat_id: tgChatId, enabled: tgEnabled, events: tgEvents}),
+            body: JSON.stringify(body),
           });
           const d = await r.json();
           if (r.ok) {
-            toast.push('Saved. Sending test message…', 'success');
+            toast.push(tgConfigured ? 'Settings updated' : 'Saved. Sending test message…', 'success');
             setTgToken('');
-            await fetch('/api/telegram/test', {method:'POST'});
+            if (!tgConfigured) await fetch('/api/telegram/test', {method:'POST'});
             loadTelegram();
           } else {
             toast.push(d.error || 'Save failed', 'error');
@@ -1690,7 +1690,9 @@
           toast.push('Password changed — please log in again', 'success');
           setTimeout(() => window.location.href = '/login', 1500);
         } else {
-          toast.push(d.message || 'Failed to change password', 'error');
+          const msg = d.error === 'wrong_password' ? 'Current password is incorrect'
+                    : d.message || d.error || 'Failed to change password';
+          toast.push(msg, 'error');
         }
       };
 
@@ -2785,6 +2787,120 @@
       );
     };
 
+    /* ── Alpaca broker tab ───────────────────────────────────── */
+    const AlpacaTab = ({ me }) => {
+      const [info, setInfo] = useState(null);
+      const [loading, setLoading] = useState(true);
+      const [err, setErr] = useState(null);
+      const load = useCallback(() => {
+        setLoading(true);
+        fetch('/api/aggregate/overview')
+          .then(r => r.ok ? r.json() : r.json().then(e => Promise.reject(e)))
+          .then(d => { setInfo(d?.brokers?.alpaca || {}); setErr(null); })
+          .catch(e => setErr(e?.error || 'Failed to load'))
+          .finally(() => setLoading(false));
+      }, []);
+      useEffect(() => { load(); const id = setInterval(load, 30000); return () => clearInterval(id); }, [load]);
+
+      const alp = me?.alpaca || {};
+      const fmtUSD = v => {
+        if (v == null || v === '') return '—';
+        const n = Number(v); if (isNaN(n)) return '—';
+        return (n < 0 ? '-$' : '$') + Math.abs(n).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
+      };
+      const clr = v => Number(v) > 0 ? 'var(--up)' : Number(v) < 0 ? 'var(--down)' : 'var(--ink-3)';
+
+      if (!alp.connected) return (
+        <div className="fadein">
+          <div className="card" style={{maxWidth:560,margin:'40px auto'}}>
+            <div className="card-hdr"><span className="card-title">🔌 Alpaca Not Connected</span></div>
+            <div style={{padding:24,textAlign:'center'}}>
+              <div style={{fontSize:14,color:'var(--ink-3)',marginBottom:16}}>
+                Connect your Alpaca account in Profile to view positions and orders here.
+              </div>
+              <button className="btn primary" onClick={() => window._setTab?.('profile')}>Go to Profile</button>
+            </div>
+          </div>
+        </div>
+      );
+
+      if (loading && !info) return <div className="empty" style={{padding:40}}>Loading Alpaca data…</div>;
+      if (err && !info) return <div className="empty" style={{padding:40,color:'var(--down)'}}>{err} <button className="btn primary" style={{marginLeft:8}} onClick={load}>↻</button></div>;
+
+      return (
+        <div className="fadein">
+          <div className="kpis" style={{marginBottom:16}}>
+            <div className="kpi">
+              <div className="lbl">Equity</div>
+              <div className="val">{fmtUSD(info?.equity)}</div>
+              <div className="sub"><span style={{color:'var(--ink-3)'}}>{alp.is_paper ? 'Paper' : 'Live'} · {alp.account_number?.slice(0,8) || '—'}</span></div>
+            </div>
+            <div className="kpi">
+              <div className="lbl">Buying Power</div>
+              <div className="val">{fmtUSD(info?.buying_power)}</div>
+            </div>
+            <div className="kpi">
+              <div className="lbl">Open Positions</div>
+              <div className="val">{(info?.positions || []).length}</div>
+            </div>
+            <div className="kpi">
+              <div className="lbl">API Key</div>
+              <div className="val" style={{fontSize:16,fontFamily:'var(--font-mono)'}}>{alp.key_preview || '—'}</div>
+              <div className="sub"><span className={`pill ${alp.is_paper ? 'up' : 'down'}`}>{alp.is_paper ? 'PAPER' : 'LIVE'}</span></div>
+            </div>
+          </div>
+
+          <div className="card" style={{marginBottom:16}}>
+            <div className="card-hdr">
+              <span className="card-title">Positions</span>
+              <button className="btn ghost" style={{padding:'3px 9px',fontSize:11}} onClick={load}>↻ Refresh</button>
+            </div>
+            {!(info?.positions?.length) ? <div className="empty">No open positions</div> : (
+              <div style={{overflow:'auto'}}>
+                <table>
+                  <thead><tr><th>Symbol</th><th>Qty</th><th>Avg Cost</th><th>Current</th><th>P&amp;L</th></tr></thead>
+                  <tbody>
+                    {(info.positions).map((p,i) => (
+                      <tr key={i}>
+                        <td className="mono" style={{fontWeight:600}}>{p.symbol}</td>
+                        <td className="mono">{p.qty}</td>
+                        <td className="mono">{fmtUSD(p.avg)}</td>
+                        <td className="mono">{fmtUSD(p.ltp)}</td>
+                        <td className="mono" style={{color:clr(p.pnl)}}>{fmtUSD(p.pnl)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          <div className="card">
+            <div className="card-hdr"><span className="card-title">Recent Orders</span></div>
+            {!(info?.recent_orders?.length) ? <div className="empty">No recent orders</div> : (
+              <div style={{overflow:'auto'}}>
+                <table>
+                  <thead><tr><th>Symbol</th><th>Side</th><th>Qty</th><th>Fill Price</th><th>Status</th><th>Time</th></tr></thead>
+                  <tbody>
+                    {(info.recent_orders).map((o,i) => (
+                      <tr key={i}>
+                        <td className="mono" style={{fontWeight:600}}>{o.sym}</td>
+                        <td><span className={`pill ${(o.side||'').toLowerCase()==='buy'?'up':'down'}`}>{(o.side||'').toUpperCase()}</span></td>
+                        <td className="mono">{o.qty}</td>
+                        <td className="mono">{fmtUSD(o.px)}</td>
+                        <td><span className="pill">{o.status}</span></td>
+                        <td className="mono" style={{fontSize:11,color:'var(--ink-3)'}}>{o.ts?.slice(0,16).replace('T',' ')}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    };
+
     /* ── All Accounts unified tab ───────────────────────────── */
     const AllAccountsTab = () => {
       const [data, setData] = useState(null);
@@ -3695,6 +3811,7 @@
         { id:'analytics', label:'Analytics',   icon:'⬗' },
       ];
       const SIDEBAR_BROKER_TABS = [
+        { id:'alpaca',    label:'Alpaca',      icon:'◆' },
         { id:'angelone',  label:'Angel One',   icon:'◈' },
         { id:'zerodha',   label:'Zerodha',     icon:'◉' },
         { id:'reports',   label:'Reports',     icon:'▣' },
@@ -3984,6 +4101,10 @@
 
             {/* ANALYTICS */}
             {tab === 'analytics' && <AnalyticsTab />}
+
+            {/* ANGEL ONE */}
+            {/* ALPACA */}
+            {tab === 'alpaca' && <ErrorBoundary key="alp"><AlpacaTab me={me} /></ErrorBoundary>}
 
             {/* ANGEL ONE */}
             {tab === 'angelone' && <ErrorBoundary key="ao"><AngelOneTab me={me} /></ErrorBoundary>}
