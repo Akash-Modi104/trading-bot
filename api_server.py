@@ -3,7 +3,7 @@ from flask import (Flask, jsonify, request, Response, redirect,
 from flask_cors import CORS
 from functools import wraps
 import json, os, subprocess, time, threading, secrets
-from datetime import datetime
+from datetime import datetime, timedelta
 import pytz
 
 
@@ -808,13 +808,56 @@ def api_zerodha_session():
         session = broker.generate_session(req_token)
         access_token   = session.get("access_token", "")
         login_time     = session.get("login_time", "")
-        expiry_ts      = (datetime.utcnow() + __import__("datetime").timedelta(hours=20)).isoformat()
+        expiry_ts      = (datetime.utcnow() + timedelta(hours=20)).isoformat()
         auth.update_zerodha_access_token(u["id"], access_token, session_expiry=expiry_ts)
         auth.audit(u["id"], "zerodha_session_created", _client_ip())
         return jsonify({"ok": True, "login_time": login_time,
                         "message": "Zerodha session established"})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+@app.route("/api/zerodha/callback")
+def api_zerodha_callback():
+    """
+    Kite OAuth redirect target. Set this URL in your Kite Developer Console:
+        https://<your-domain>/api/zerodha/callback
+
+    Kite redirects the browser here as a GET request with:
+        ?request_token=XXX&action=login&status=success
+
+    We exchange the request_token for an access_token using the user's stored
+    api_key + api_secret, persist it, and bounce back to the dashboard.
+
+    Requires the user to be logged in to the dashboard (session cookie). If
+    the cookie has expired, send them to /login first.
+    """
+    u = _current_user()
+    if not u:
+        return redirect("/login")
+
+    request_token = (request.args.get("request_token") or "").strip()
+    status        = request.args.get("status", "")
+
+    if not request_token:
+        return redirect("/?zerodha_error=missing_token")
+    if status and status != "success":
+        return redirect("/?zerodha_error=" + status)
+
+    broker, err = _get_zerodha_broker(u["id"])
+    if err:
+        return redirect("/?zerodha_error=" + err)
+
+    try:
+        session      = broker.generate_session(request_token)
+        access_token = session.get("access_token", "")
+        if not access_token:
+            return redirect("/?zerodha_error=no_access_token")
+        expiry_ts = (datetime.utcnow() + timedelta(hours=20)).isoformat()
+        auth.update_zerodha_access_token(u["id"], access_token, session_expiry=expiry_ts)
+        auth.audit(u["id"], "zerodha_session_created", _client_ip(), {"via": "callback"})
+        return redirect("/?zerodha_ok=1")
+    except Exception as e:
+        return redirect("/?zerodha_error=" + str(e)[:120].replace(" ", "_"))
 
 @app.route("/api/zerodha/disconnect", methods=["POST"])
 @_require_auth

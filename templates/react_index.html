@@ -1414,7 +1414,7 @@
                     <div>
                       {!zrd.has_access_token && (
                         <div style={{padding:'12px 14px',background:'rgba(245,158,11,.1)',border:'1px solid rgba(245,158,11,.3)',borderRadius:7,marginBottom:14,fontSize:13}}>
-                          <b>Daily login required.</b> Zerodha access tokens expire every day. Complete the OAuth flow below.
+                          <b>Daily login required.</b> Zerodha access tokens expire every day. Click below — you'll be redirected back automatically after login.
                         </div>
                       )}
                       {zrd.has_access_token && (
@@ -1422,21 +1422,11 @@
                           ✅ Session active — expires ~{zrd.session_expiry?.slice(0,16).replace('T',' ')} UTC
                         </div>
                       )}
-                      {/* Daily re-auth step */}
                       <div style={{marginBottom:14}}>
-                        <a href={zrd.login_url} target="_blank" rel="noopener"
-                          className="btn btn-blue" style={{display:'inline-block',marginBottom:10,textDecoration:'none',fontSize:13}}>
+                        <a href={zrd.login_url}
+                          className="btn btn-blue" style={{display:'inline-block',textDecoration:'none',fontSize:13}}>
                           🔗 Open Kite Login (daily)
                         </a>
-                        <label style={lbl}>Paste request_token from redirect URL</label>
-                        <div style={{display:'flex',gap:8,marginTop:6}}>
-                          <input type="text" value={zrdReqToken} onChange={e=>setZrdReqToken(e.target.value)}
-                            placeholder="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-                            style={{...inp, marginTop:0, flex:1}} />
-                          <button className="btn btn-green" disabled={zrdTokenBusy||!zrdReqToken} onClick={activateZerodha}>
-                            {zrdTokenBusy?'Activating…':'Activate'}
-                          </button>
-                        </div>
                       </div>
                       <div style={{display:'flex',gap:8,justifyContent:'flex-end'}}>
                         <button className="btn btn-red" onClick={disconnectZerodha}>Disconnect</button>
@@ -2989,6 +2979,18 @@
         }).catch(() => {});
       }, []);
       useEffect(() => { loadMe(); }, [loadMe]);
+
+      /* Handle Zerodha OAuth callback redirect (?zerodha_ok=1 or ?zerodha_error=...) */
+      useEffect(() => {
+        const sp = new URLSearchParams(window.location.search);
+        const ok  = sp.get('zerodha_ok');
+        const err = sp.get('zerodha_error');
+        if (!ok && !err) return;
+        if (ok)  { toast.push('Zerodha session activated!', 'success'); setTab('profile'); loadMe(); }
+        if (err) { toast.push('Zerodha activation failed: ' + decodeURIComponent(err).replace(/_/g,' '), 'error'); setTab('profile'); }
+        // Strip the params from the URL so a refresh doesn't re-trigger
+        window.history.replaceState({}, '', window.location.pathname + window.location.hash);
+      }, [loadMe]);
 
       /* Expose setTab globally so broker tabs can redirect to profile */
       useEffect(() => { window._setTab = setTab; return () => { window._setTab = null; }; }, [setTab]);
