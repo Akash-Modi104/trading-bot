@@ -357,6 +357,120 @@ class ZerodhaBroker:
         return [i for i in all_inst if q in i.get("tradingsymbol", "").upper()
                 or q in i.get("name", "").upper()][:50]
 
+    # ── GTT (Good Till Triggered) orders ─────────────────────────
+    # GTT orders persist across trading sessions — no bot needed to hold SL/TP.
+    # Kite supports two trigger types:
+    #   "single"  — fires when LTP crosses one price level (used for plain SL or TP)
+    #   "two-leg" — fires when LTP first crosses condition[0] (SL), then places
+    #               a second order at condition[1] price; or use for OCO.
+
+    def place_gtt(
+        self,
+        tradingsymbol: str,
+        exchange: str,
+        trigger_type: str,          # "single" | "two-leg"
+        trigger_values: list,       # [sl_price] or [sl_price, tp_price]
+        last_price: float,          # current LTP — required by Kite for validation
+        orders: list,               # list of order dicts matching each trigger leg
+    ) -> int:
+        """
+        Place a GTT order. Returns gtt_id (int).
+
+        Example — single SL:
+          place_gtt("RELIANCE", "NSE", "single", [2400.0], 2450.0,
+                    [{"transaction_type":"SELL","quantity":5,
+                      "order_type":"LIMIT","product":"CNC","price":2400.0}])
+
+        Example — two-leg OCO (SL + TP):
+          place_gtt("RELIANCE", "NSE", "two-leg", [2300.0, 2600.0], 2450.0,
+                    [{"transaction_type":"SELL","quantity":5,"order_type":"LIMIT",
+                      "product":"CNC","price":2300.0},
+                     {"transaction_type":"SELL","quantity":5,"order_type":"LIMIT",
+                      "product":"CNC","price":2600.0}])
+        """
+        condition = {
+            "exchange":         exchange.upper(),
+            "tradingsymbol":    tradingsymbol.upper(),
+            "trigger_values":   trigger_values,
+            "last_price":       last_price,
+        }
+        payload = {
+            "type":      trigger_type,
+            "condition": json.dumps(condition),
+            "orders":    json.dumps(orders),
+        }
+        result = self._post("/gtt/triggers", payload)
+        return int(result.get("trigger_id", 0))
+
+    def get_gtts(self) -> list:
+        """List all active GTT orders."""
+        return self._get("/gtt/triggers") or []
+
+    def get_gtt(self, gtt_id: int) -> dict:
+        """Fetch a single GTT by ID."""
+        return self._get(f"/gtt/triggers/{gtt_id}") or {}
+
+    def modify_gtt(
+        self,
+        gtt_id: int,
+        trigger_type: str,
+        trigger_values: list,
+        last_price: float,
+        orders: list,
+        tradingsymbol: str,
+        exchange: str,
+    ) -> int:
+        """Update an existing GTT. Returns gtt_id."""
+        condition = {
+            "exchange":       exchange.upper(),
+            "tradingsymbol":  tradingsymbol.upper(),
+            "trigger_values": trigger_values,
+            "last_price":     last_price,
+        }
+        payload = {
+            "type":      trigger_type,
+            "condition": json.dumps(condition),
+            "orders":    json.dumps(orders),
+        }
+        result = self._put(f"/gtt/triggers/{gtt_id}", payload)
+        return int(result.get("trigger_id", gtt_id))
+
+    def delete_gtt(self, gtt_id: int) -> int:
+        """Cancel/delete a GTT order. Returns gtt_id."""
+        result = self._delete(f"/gtt/triggers/{gtt_id}")
+        return int(result.get("trigger_id", gtt_id))
+
+    def place_oco_gtt(
+        self,
+        tradingsymbol: str,
+        exchange: str,
+        quantity: int,
+        sl_price: float,
+        tp_price: float,
+        last_price: float,
+        product: str = "MIS",
+    ) -> int:
+        """
+        Convenience: place a two-leg OCO GTT (stop-loss + take-profit) for a long position.
+        Whichever leg triggers first, the other is also cancelled by Kite automatically.
+        Returns gtt_id.
+        """
+        leg = lambda price: {
+            "transaction_type": "SELL",
+            "quantity":         quantity,
+            "order_type":       "LIMIT",
+            "product":          product.upper(),
+            "price":            price,
+        }
+        return self.place_gtt(
+            tradingsymbol = tradingsymbol,
+            exchange      = exchange,
+            trigger_type  = "two-leg",
+            trigger_values= [sl_price, tp_price],
+            last_price    = last_price,
+            orders        = [leg(sl_price), leg(tp_price)],
+        )
+
     # ── Helpers ──────────────────────────────────────────────────
 
     def account_summary(self) -> dict:

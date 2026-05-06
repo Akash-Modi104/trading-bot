@@ -1117,6 +1117,174 @@ def api_zerodha_candles():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+# ── Zerodha GTT endpoints ────────────────────────────────────────
+
+@app.route("/api/zerodha/gtt", methods=["GET"])
+@_require_auth
+def api_zerodha_gtt_list():
+    """List all active GTT orders."""
+    u = _current_user()
+    broker, err = _get_zerodha_broker(u["id"])
+    if err:
+        return jsonify({"error": err}), 400
+    try:
+        return jsonify(broker.get_gtts())
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/zerodha/gtt", methods=["POST"])
+@_require_auth
+def api_zerodha_gtt_place():
+    """
+    Place a GTT (Good Till Triggered) order.
+
+    Body:
+      tradingsymbol   — e.g. "RELIANCE"
+      exchange        — NSE | BSE | NFO (default NSE)
+      trigger_type    — "single" | "two-leg"
+      trigger_values  — array of prices, e.g. [2400] or [2300, 2600]
+      last_price      — current LTP (float)
+      orders          — array of order dicts matching each trigger leg
+                        each: {transaction_type, quantity, order_type, product, price}
+
+    Shortcut for OCO (two-leg SL+TP):
+      tradingsymbol, exchange, quantity, sl_price, tp_price, last_price, product
+    """
+    u    = _current_user()
+    body = request.get_json(force=True, silent=True) or {}
+    broker, err = _get_zerodha_broker(u["id"])
+    if err:
+        return jsonify({"error": err}), 400
+    try:
+        # Shortcut OCO path
+        if "sl_price" in body and "tp_price" in body:
+            gtt_id = broker.place_oco_gtt(
+                tradingsymbol = body.get("tradingsymbol", "").upper(),
+                exchange      = body.get("exchange", "NSE").upper(),
+                quantity      = int(body["quantity"]),
+                sl_price      = float(body["sl_price"]),
+                tp_price      = float(body["tp_price"]),
+                last_price    = float(body["last_price"]),
+                product       = body.get("product", "MIS"),
+            )
+        else:
+            for f in ["tradingsymbol", "trigger_type", "trigger_values", "last_price", "orders"]:
+                if f not in body:
+                    return jsonify({"error": "missing_field", "field": f}), 400
+            gtt_id = broker.place_gtt(
+                tradingsymbol  = body["tradingsymbol"].upper(),
+                exchange       = body.get("exchange", "NSE").upper(),
+                trigger_type   = body["trigger_type"],
+                trigger_values = body["trigger_values"],
+                last_price     = float(body["last_price"]),
+                orders         = body["orders"],
+            )
+        auth.audit(u["id"], "zerodha_gtt_placed", _client_ip(), {"gtt_id": gtt_id})
+        return jsonify({"ok": True, "gtt_id": gtt_id})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/zerodha/gtt/<int:gtt_id>", methods=["GET"])
+@_require_auth
+def api_zerodha_gtt_get(gtt_id: int):
+    u = _current_user()
+    broker, err = _get_zerodha_broker(u["id"])
+    if err:
+        return jsonify({"error": err}), 400
+    try:
+        return jsonify(broker.get_gtt(gtt_id))
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/zerodha/gtt/<int:gtt_id>", methods=["DELETE"])
+@_require_auth
+def api_zerodha_gtt_delete(gtt_id: int):
+    u = _current_user()
+    broker, err = _get_zerodha_broker(u["id"])
+    if err:
+        return jsonify({"error": err}), 400
+    try:
+        broker.delete_gtt(gtt_id)
+        auth.audit(u["id"], "zerodha_gtt_deleted", _client_ip(), {"gtt_id": gtt_id})
+        return jsonify({"ok": True, "gtt_id": gtt_id})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ── Fund allocation endpoints ─────────────────────────────────────
+
+@app.route("/api/allocations", methods=["GET"])
+@_require_auth
+def api_get_allocations():
+    """Return fund allocations for all brokers for the current user."""
+    u = _current_user()
+    rows = db.get_all_fund_allocations(u["id"])
+    # Fill in any missing brokers with defaults
+    existing = {r["broker"] for r in rows}
+    for broker in ("zerodha", "angelone", "alpaca"):
+        if broker not in existing:
+            rows.append(db.get_fund_allocation(u["id"], broker))
+    return jsonify(rows)
+
+
+@app.route("/api/allocations/<broker>", methods=["GET"])
+@_require_auth
+def api_get_allocation(broker: str):
+    u = _current_user()
+    if broker not in ("zerodha", "angelone", "alpaca"):
+        return jsonify({"error": "unknown broker"}), 400
+    return jsonify(db.get_fund_allocation(u["id"], broker))
+
+
+@app.route("/api/allocations/<broker>", methods=["POST"])
+@_require_auth
+def api_set_allocation(broker: str):
+    """
+    Configure fund allocation for a bot/broker.
+
+    Body (all optional):
+      budget        — capital ceiling in broker's native currency (INR or USD). 0 = no cap.
+      max_positions — max simultaneous open positions. 0 = use bot default.
+      stop_pct      — stop-loss % override. 0 = use bot default.
+      tp_pct        — take-profit % override. 0 = use bot default.
+      auto_trade    — 1 = bot may trade autonomously, 0 = paused.
+    """
+    u = _current_user()
+    if broker not in ("zerodha", "angelone", "alpaca"):
+        return jsonify({"error": "unknown broker"}), 400
+    body = request.get_json(force=True, silent=True) or {}
+    kwargs = {}
+    for field, cast in [("budget", float), ("max_positions", int),
+                        ("stop_pct", float), ("tp_pct", float), ("auto_trade", int)]:
+        if field in body:
+            try:
+                kwargs[field] = cast(body[field])
+            except (TypeError, ValueError):
+                return jsonify({"error": f"invalid {field}"}), 400
+    if not kwargs:
+        return jsonify({"error": "no fields to update"}), 400
+    db.upsert_fund_allocation(u["id"], broker, **kwargs)
+    auth.audit(u["id"], f"allocation_updated_{broker}", _client_ip(), kwargs)
+    return jsonify({"ok": True, "allocation": db.get_fund_allocation(u["id"], broker)})
+
+
+@app.route("/api/allocations/<broker>/toggle", methods=["POST"])
+@_require_auth
+def api_toggle_auto_trade(broker: str):
+    """Quick toggle: flip auto_trade on/off for a broker."""
+    u = _current_user()
+    if broker not in ("zerodha", "angelone", "alpaca"):
+        return jsonify({"error": "unknown broker"}), 400
+    current = db.get_fund_allocation(u["id"], broker)
+    new_val = 0 if current.get("auto_trade") else 1
+    db.upsert_fund_allocation(u["id"], broker, auto_trade=new_val)
+    auth.audit(u["id"], f"auto_trade_toggled_{broker}", _client_ip(), {"auto_trade": new_val})
+    return jsonify({"ok": True, "auto_trade": new_val})
+
+
 @app.route("/api/sessions")
 @_require_auth
 def api_sessions():
@@ -2021,6 +2189,120 @@ def api_audit_full():
             "ip": r["ip"], "meta": meta, "at": r["created_at"],
         })
     return jsonify(out)
+
+
+# ── Zerodha session status endpoint ──────────────────────────────
+
+@app.route("/api/zerodha/session_status")
+@_require_auth
+def api_zerodha_session_status():
+    """
+    Check whether the stored Zerodha access_token is still valid.
+    Tries a lightweight profile call and reports result.
+    """
+    u = _current_user()
+    creds = auth.get_zerodha_creds(u["id"])
+    if not creds:
+        return jsonify({"connected": False, "reason": "no_credentials"})
+
+    from brokers.zerodha import ZerodhaBroker, ZerodhaError
+    broker = ZerodhaBroker(
+        api_key=creds["api_key"],
+        api_secret=creds["api_secret"],
+        access_token=creds["access_token"],
+    )
+    try:
+        profile = broker.get_profile()
+        return jsonify({
+            "connected": True,
+            "user_id":   profile.get("user_id", ""),
+            "user_name": profile.get("user_name", ""),
+            "session_expiry": creds.get("session_expiry", ""),
+            "login_url": broker.login_url(),
+        })
+    except Exception as e:
+        return jsonify({
+            "connected": False,
+            "reason": str(e)[:200],
+            "login_url": broker.login_url(),
+        })
+
+
+# ── Zerodha daily token refresh scheduler ────────────────────────
+# Runs in background thread. Each morning at 08:30 IST it checks if the
+# stored access_token is expired and sends a Telegram alert with the re-login
+# URL if needed. Token TTL is ~6 AM IST so by 08:30 users must re-auth.
+
+def _zerodha_token_refresh_loop():
+    import requests as _rq
+    IST = pytz.timezone("Asia/Kolkata")
+
+    def _send_tg(bot_token, chat_id, msg):
+        try:
+            _rq.post(
+                f"https://api.telegram.org/bot{bot_token}/sendMessage",
+                json={"chat_id": chat_id, "text": msg, "parse_mode": "HTML"},
+                timeout=8,
+            )
+        except Exception:
+            pass
+
+    while True:
+        try:
+            now_ist = datetime.now(IST)
+            # Target: 08:30 IST — fire check
+            target = now_ist.replace(hour=8, minute=30, second=0, microsecond=0)
+            if now_ist >= target:
+                # Already past 08:30 today — schedule for tomorrow
+                target += timedelta(days=1)
+            secs = (target - now_ist).total_seconds()
+            time.sleep(max(secs, 1))
+
+            # Check each user's Zerodha token
+            users = db.query_all("SELECT id, email FROM users")
+            for u_row in users:
+                uid = u_row["id"]
+                try:
+                    creds = auth.get_zerodha_creds(uid)
+                    if not creds or not creds.get("api_key"):
+                        continue
+
+                    from brokers.zerodha import ZerodhaBroker, ZerodhaError
+                    broker = ZerodhaBroker(
+                        api_key=creds["api_key"],
+                        api_secret=creds["api_secret"],
+                        access_token=creds.get("access_token", ""),
+                    )
+                    token_ok = True
+                    try:
+                        broker.get_profile()
+                    except ZerodhaError:
+                        token_ok = False
+
+                    if not token_ok:
+                        # Alert via Telegram if configured
+                        tg = auth.get_telegram(uid)
+                        if tg and tg.get("bot_token") and tg.get("chat_id"):
+                            login_url = broker.login_url()
+                            msg = (
+                                f"⚠️ <b>Zerodha Re-Login Required</b>\n\n"
+                                f"Your Zerodha session has expired (daily reset).\n"
+                                f"<b>1.</b> Click to re-login:\n{login_url}\n\n"
+                                f"<b>2.</b> After login, paste the <code>request_token</code> "
+                                f"from the redirect URL into the dashboard → Zerodha Settings.\n\n"
+                                f"The bot will not trade until the session is refreshed."
+                            )
+                            _send_tg(tg["bot_token"], tg["chat_id"], msg)
+                            auth.audit(uid, "zerodha_token_expired_alert_sent", "scheduler")
+                except Exception:
+                    pass
+
+        except Exception:
+            time.sleep(300)
+
+
+_refresh_thread = threading.Thread(target=_zerodha_token_refresh_loop, daemon=True)
+_refresh_thread.start()
 
 
 if __name__ == "__main__":

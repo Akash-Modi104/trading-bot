@@ -33,6 +33,7 @@ import requests
 
 from brokers import get_broker
 from brokers.angelone import AngelOneBroker, AngelOneError
+from brokers.zerodha import ZerodhaBroker
 from telegram_alerts import alert_buy, alert_sell, alert_daily_loss, alert_eod, alert_startup
 
 # ── Paths ──────────────────────────────────────────────────────
@@ -63,6 +64,42 @@ MAX_POSITIONS     = int(os.environ.get("INDIAN_BOT_MAX_POSITIONS", 3))
 STOP_PCT          = float(os.environ.get("INDIAN_BOT_STOP_PCT", 1.5))
 TP_PCT            = float(os.environ.get("INDIAN_BOT_TP_PCT", 3.0))
 DAILY_LOSS_LIMIT  = float(os.environ.get("INDIAN_BOT_DAILY_LOSS_LIMIT", 3.0))
+
+
+def _load_allocation(broker_name: str) -> dict:
+    """Load fund allocation overrides from DB (silently falls back to env defaults)."""
+    try:
+        import db as _db
+        user_id = int(os.environ.get("BOT_USER_ID", 1))
+        return _db.get_fund_allocation(user_id, broker_name)
+    except Exception:
+        return {}
+
+
+def _apply_allocation(broker_name: str):
+    """Override module-level config with DB allocation settings if set."""
+    global BUDGET_PER_TRADE, MAX_POSITIONS, STOP_PCT, TP_PCT
+    alloc = _load_allocation(broker_name)
+    if alloc.get("budget", 0) > 0:
+        BUDGET_PER_TRADE = alloc["budget"]
+    if alloc.get("max_positions", 0) > 0:
+        MAX_POSITIONS = int(alloc["max_positions"])
+    if alloc.get("stop_pct", 0) > 0:
+        STOP_PCT = alloc["stop_pct"]
+    if alloc.get("tp_pct", 0) > 0:
+        TP_PCT = alloc["tp_pct"]
+
+
+def _is_auto_trade_enabled(broker_name: str) -> bool:
+    """Returns True if the user has enabled autonomous trading for this broker."""
+    try:
+        import db as _db
+        user_id = int(os.environ.get("BOT_USER_ID", 1))
+        alloc = _db.get_fund_allocation(user_id, broker_name)
+        return bool(alloc.get("auto_trade", 0))
+    except Exception:
+        # If DB is unavailable, respect env var
+        return os.environ.get("INDIAN_BOT_AUTO_TRADE", "0") == "1"
 
 # ── Nifty 50 watchlist (NSE trading symbols) ──────────────────
 WATCHLIST = [
@@ -301,6 +338,59 @@ def ema_cross(closes, fast=9, slow=21):
     return "hold"
 
 
+# ── India VIX filter ──────────────────────────────────────────
+# VIX thresholds: pause new entries above PAUSE, halt all entries above HALT
+INDIA_VIX_PAUSE = float(os.environ.get("INDIA_VIX_PAUSE", 20.0))
+INDIA_VIX_HALT  = float(os.environ.get("INDIA_VIX_HALT",  25.0))
+
+_vix_cache = {"value": None, "ts": 0}
+
+
+def get_india_vix() -> float:
+    """
+    Fetch India VIX from NSE. Cached for 5 minutes to avoid hammering NSE.
+    Falls back to 0.0 (fail-open) if NSE is unreachable.
+    """
+    now_ts = time.time()
+    if _vix_cache["value"] is not None and now_ts - _vix_cache["ts"] < 300:
+        return _vix_cache["value"]
+    try:
+        resp = requests.get(
+            "https://www.nseindia.com/api/allIndices",
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+                "Accept": "application/json",
+                "Referer": "https://www.nseindia.com/",
+            },
+            timeout=8,
+        )
+        data = resp.json().get("data", [])
+        for item in data:
+            if item.get("index") == "INDIA VIX":
+                vix = float(item.get("last", 0))
+                _vix_cache["value"] = vix
+                _vix_cache["ts"] = now_ts
+                return vix
+    except Exception as e:
+        log_event(f"India VIX fetch failed: {e} — using cached/default")
+    return _vix_cache["value"] or 0.0
+
+
+def india_vix_ok() -> tuple:
+    """
+    Returns (can_enter: bool, vix_value: float, reason: str).
+    can_enter=True means VIX is within acceptable range.
+    """
+    vix = get_india_vix()
+    if vix <= 0:
+        return True, vix, "VIX unavailable — fail open"
+    if vix >= INDIA_VIX_HALT:
+        return False, vix, f"India VIX={vix:.1f} ≥ HALT {INDIA_VIX_HALT} — no new entries"
+    if vix >= INDIA_VIX_PAUSE:
+        return False, vix, f"India VIX={vix:.1f} ≥ PAUSE {INDIA_VIX_PAUSE} — reducing risk"
+    return True, vix, f"India VIX={vix:.1f} OK"
+
+
 # ── NIFTY trend filter (replaces SPY) ────────────────────────
 
 def nifty_bull(broker) -> bool:
@@ -322,6 +412,22 @@ def nifty_bull(broker) -> bool:
             if len(bars) < 25:
                 return True
             closes = [b["c"] for b in bars]
+            ef = ema_val(closes, 21)
+            if not ef:
+                return True
+            return closes[-1] >= ef * 0.998
+        elif isinstance(broker, ZerodhaBroker):
+            # Zerodha: fetch NIFTY 50 index candles using instrument token 256265
+            now = now_ist()
+            from_dt = now.replace(hour=9, minute=0, second=0, microsecond=0)
+            raw = broker.get_candles(
+                "256265", "5minute",
+                from_dt.strftime("%Y-%m-%d %H:%M:%S"),
+                now.strftime("%Y-%m-%d %H:%M:%S"),
+            )
+            if len(raw) < 25:
+                return True
+            closes = [c[4] for c in raw if len(c) >= 5]
             ef = ema_val(closes, 21)
             if not ef:
                 return True
@@ -474,6 +580,21 @@ def check_exits_indian(broker, p_list: list):
                         quantity=qty,
                         transaction_type="SELL",
                     )
+                elif isinstance(broker, ZerodhaBroker):
+                    broker.close_position(
+                        tradingsymbol=sym,
+                        quantity=qty,
+                        transaction_type="SELL",
+                        exchange="NSE",
+                        product="MIS",
+                    )
+                    # Cancel the outstanding GTT so it doesn't fire again
+                    gtt_id = pos.get("gtt_id")
+                    if gtt_id:
+                        try:
+                            broker.delete_gtt(gtt_id)
+                        except Exception:
+                            pass
                 else:
                     broker.close_position(sym)
                 open_positions.pop(sym, None)
@@ -516,6 +637,23 @@ def execute_buy(broker, symbol: str, qty: int, price: float, stop: float, tp: fl
             res = broker.place_order(symbol, qty, "buy")
             order_id = res.get("id", "") if isinstance(res, dict) else str(res)
 
+        gtt_id = None
+        if isinstance(broker, ZerodhaBroker):
+            # Place an OCO GTT so SL/TP fires even if the bot restarts
+            try:
+                gtt_id = broker.place_oco_gtt(
+                    tradingsymbol=symbol,
+                    exchange="NSE",
+                    quantity=qty,
+                    sl_price=stop,
+                    tp_price=tp,
+                    last_price=price,
+                    product="MIS",
+                )
+                log_event(f"  GTT OCO placed → gtt_id={gtt_id} SL=₹{stop} TP=₹{tp}")
+            except Exception as ge:
+                log_event(f"  GTT placement failed (will use poll exits): {ge}")
+
         open_positions[symbol] = {
             "qty":      qty,
             "entry":    price,
@@ -523,6 +661,7 @@ def execute_buy(broker, symbol: str, qty: int, price: float, stop: float, tp: fl
             "trail_hi": price,
             "tp":       tp,
             "partial_taken": False,
+            "gtt_id":   gtt_id,
         }
         save_positions()
         alert_buy(symbol, qty, price, stop, tp, score, reasons)
@@ -570,9 +709,26 @@ def square_off_all(broker):
 
 def run():
     broker_name = os.environ.get("BROKER", "angelone")
+
+    # Apply DB fund allocation overrides (budget, positions, stop/tp %)
+    _apply_allocation(broker_name)
+
+    # Guard: do not start if auto_trade is disabled in DB
+    if not _is_auto_trade_enabled(broker_name):
+        print(f"[INDIAN BOT] auto_trade is OFF for {broker_name}. "
+              "Enable it via the dashboard → Allocations before the bot will trade.",
+              flush=True)
+        return
+
     broker = get_broker(broker_name)
     _state["broker"] = broker_name
     _state["started"] = now_ist().isoformat()
+    _state["allocation"] = {
+        "budget_per_trade": BUDGET_PER_TRADE,
+        "max_positions":    MAX_POSITIONS,
+        "stop_pct":         STOP_PCT,
+        "tp_pct":           TP_PCT,
+    }
 
     # Ensure login for Angel One
     if isinstance(broker, AngelOneBroker):
@@ -649,6 +805,17 @@ def run():
 
         print(f"\n[{now.strftime('%H:%M:%S')} IST] ── Scan cycle")
 
+        # ── India VIX filter ───────────────────────────────
+        vix_ok, vix_val, vix_reason = india_vix_ok()
+        if not vix_ok:
+            log_event(f"VIX HALT: {vix_reason}")
+            _state["vix"] = vix_val
+            _state["pause_reason"] = vix_reason
+            save_state()
+            time.sleep(60)
+            continue
+        _state["vix"] = vix_val
+
         # ── NIFTY trend filter ─────────────────────────────
         nifty_up = nifty_bull(broker)
         if not nifty_up:
@@ -715,9 +882,13 @@ def run():
         _state["equity"] = get_account_equity(broker, start_equity)
         save_state()
 
+        # Refresh allocation each cycle so live dashboard changes take effect
+        _apply_allocation(broker_name)
         print(f"  NIFTY={'bull' if nifty_up else 'bear'} | "
+              f"VIX={vix_val:.1f} | "
               f"DayPnL={daily_pnl:+.2f}% | "
-              f"Open={len(open_positions)}/{MAX_POSITIONS}")
+              f"Open={len(open_positions)}/{MAX_POSITIONS} | "
+              f"Budget=₹{BUDGET_PER_TRADE:,.0f}")
         time.sleep(60)
 
 
