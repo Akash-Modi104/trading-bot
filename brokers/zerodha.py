@@ -478,19 +478,34 @@ class ZerodhaBroker:
             profile = self.get_profile()
         except Exception:
             profile = {}
+        equity = {}
+        funds_error = None
         try:
             funds = self.get_funds()
             equity = funds.get("equity", {})
-        except Exception:
-            equity = {}
+        except Exception as e:
+            funds_error = str(e)
+
+        def _num(v):
+            """Return float or None — never empty string (avoids NaN on frontend)."""
+            if v is None or v == "":
+                return None
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                return None
+
+        avail = equity.get("available", {}) if isinstance(equity, dict) else {}
+        used  = equity.get("utilised",  {}) if isinstance(equity, dict) else {}
         return {
-            "client_id":      profile.get("user_id", ""),
-            "name":           profile.get("user_name", ""),
-            "email":          profile.get("email", ""),
-            "broker":         profile.get("broker", "ZERODHA"),
-            "exchanges":      profile.get("exchanges", []),
-            "available_cash": equity.get("available", {}).get("live_balance", ""),
-            "used_margin":    equity.get("utilised", {}).get("debits", ""),
-            "net":            equity.get("net", ""),
-            "opening_balance": equity.get("available", {}).get("opening_balance", ""),
+            "client_id":       profile.get("user_id", ""),
+            "name":            profile.get("user_name", ""),
+            "email":           profile.get("email", ""),
+            "broker":          profile.get("broker", "ZERODHA"),
+            "exchanges":       profile.get("exchanges", []),
+            "available_cash":  _num(avail.get("live_balance")),
+            "opening_balance": _num(avail.get("opening_balance")),
+            "used_margin":     _num(used.get("debits")),
+            "net":             _num(equity.get("net")),
+            "funds_error":     funds_error,
         }

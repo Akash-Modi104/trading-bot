@@ -1354,6 +1354,7 @@ def api_health():
         "trading-bot": "trading-bot",
         "scanner":     "scanner",
         "dashboard":   "dashboard",
+        "indian-bot":  "indian-bot",
     }
     svcs = {}
     for label, name in svc_names.items():
@@ -1805,10 +1806,13 @@ def api_action():
     action = (request.get_json(force=True) or {}).get("action", "")
 
     cmd_map = {
-        "start":   "supervisorctl start trading-bot",
-        "stop":    "supervisorctl stop trading-bot",
-        "restart": "supervisorctl restart trading-bot",
-        "scan":    "supervisorctl restart scanner",
+        "start":         "supervisorctl start trading-bot",
+        "stop":          "supervisorctl stop trading-bot",
+        "restart":       "supervisorctl restart trading-bot",
+        "scan":          "supervisorctl restart scanner",
+        "indian_start":  "supervisorctl start indian-bot",
+        "indian_stop":   "supervisorctl stop indian-bot",
+        "indian_restart":"supervisorctl restart indian-bot",
     }
 
     if action in cmd_map:

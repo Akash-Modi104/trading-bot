@@ -787,6 +787,216 @@
       );
     };
 
+    /* ── Indian Bot Controls ─────────────────────────────────── */
+    const IndianBotControls = ({ health }) => {
+      const [busy,    setBusy]    = useState(null);
+      const [msg,     setMsg]     = useState(null);
+      const [alloc,   setAlloc]   = useState(null);
+      const [editing, setEditing] = useState(false);
+      const [form,    setForm]    = useState({});
+
+      // Status derived from health
+      const status = health?.services?.['indian-bot'] || 'unknown';
+      const running = status === 'running';
+
+      useEffect(() => {
+        fetch('/api/allocations/zerodha')
+          .then(r => r.json())
+          .then(d => { setAlloc(d); setForm({
+            budget:       d.budget       || '',
+            max_positions:d.max_positions|| '',
+            stop_pct:     d.stop_pct     || '',
+            tp_pct:       d.tp_pct       || '',
+          }); })
+          .catch(() => {});
+      }, []);
+
+      const act = async (action) => {
+        if (action === 'indian_start' && !alloc?.auto_trade) {
+          setMsg({ ok: false, text: 'Enable auto-trade first (toggle below)' });
+          setTimeout(() => setMsg(null), 3000);
+          return;
+        }
+        setBusy(action);
+        try {
+          const r = await fetch('/api/action', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action }),
+          });
+          const d = await r.json();
+          setMsg({ ok: d.status === 'success',
+                   text: d.status === 'success' ? `✓ ${action.replace('indian_','')} done` : (d.message || 'Error') });
+        } catch {
+          setMsg({ ok: false, text: 'Request failed' });
+        } finally {
+          setBusy(null);
+          setTimeout(() => setMsg(null), 3000);
+        }
+      };
+
+      const toggleAutoTrade = async () => {
+        setBusy('toggle');
+        try {
+          const r = await fetch('/api/allocations/zerodha/toggle', { method: 'POST' });
+          const d = await r.json();
+          if (d.ok) setAlloc(prev => ({ ...prev, auto_trade: d.auto_trade }));
+        } catch {}
+        setBusy(null);
+      };
+
+      const saveAlloc = async () => {
+        setBusy('save');
+        const body = {};
+        if (form.budget       !== '') body.budget        = parseFloat(form.budget);
+        if (form.max_positions!== '') body.max_positions = parseInt(form.max_positions);
+        if (form.stop_pct     !== '') body.stop_pct      = parseFloat(form.stop_pct);
+        if (form.tp_pct       !== '') body.tp_pct        = parseFloat(form.tp_pct);
+        try {
+          const r = await fetch('/api/allocations/zerodha', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+          });
+          const d = await r.json();
+          if (d.ok) { setAlloc(d.allocation); setEditing(false);
+            setMsg({ ok: true, text: '✓ Allocation saved' }); }
+          else setMsg({ ok: false, text: d.error || 'Save failed' });
+        } catch {
+          setMsg({ ok: false, text: 'Request failed' });
+        } finally {
+          setBusy(null);
+          setTimeout(() => setMsg(null), 3000);
+        }
+      };
+
+      const inp = { background:'rgba(15,23,42,.6)', border:'1px solid rgba(99,179,237,.2)',
+                    borderRadius:5, color:'var(--text)', padding:'5px 8px', fontSize:12, width:'100%' };
+      const lbl = { fontSize:11, color:'var(--muted)', marginBottom:3 };
+
+      return (
+        <div className="card">
+          <div className="card-hdr" style={{justifyContent:'space-between'}}>
+            <span className="card-title">🇮🇳 Indian Bot (Zerodha)</span>
+            <div style={{display:'flex',alignItems:'center',gap:8}}>
+              <Dot on={running} />
+              <span style={{fontSize:11,fontWeight:600,color:running?'#10b981':'#ef4444'}}>
+                {status.toUpperCase()}
+              </span>
+            </div>
+          </div>
+
+          <div style={{padding:14}}>
+            {/* Start / Stop / Restart row */}
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:8,marginBottom:12}}>
+              {[
+                ['indian_start',   'btn-green',  '▶ Start'],
+                ['indian_stop',    'btn-red',    '⏸ Stop'],
+                ['indian_restart', 'btn-blue',   '↺ Restart'],
+              ].map(([a, cls, label]) => (
+                <button key={a} className={`btn ${cls}`} onClick={() => act(a)}
+                        disabled={!!busy} style={{fontSize:12,padding:'7px 4px'}}>
+                  {busy === a
+                    ? <span className="spin" style={{width:11,height:11,border:'2px solid currentColor',borderTopColor:'transparent',borderRadius:'50%',display:'inline-block'}} />
+                    : label}
+                </button>
+              ))}
+            </div>
+
+            {/* Auto-trade toggle */}
+            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',
+                         padding:'9px 12px',background:'rgba(15,23,42,.5)',borderRadius:7,marginBottom:12}}>
+              <div>
+                <div style={{fontSize:12,fontWeight:600}}>Auto-Trade</div>
+                <div style={{fontSize:11,color:'var(--muted)'}}>
+                  {alloc?.auto_trade ? 'Bot will enter trades autonomously' : 'Bot will not open new positions'}
+                </div>
+              </div>
+              <button onClick={toggleAutoTrade} disabled={busy==='toggle'}
+                      className={`btn ${alloc?.auto_trade ? 'btn-green' : 'btn-ghost'}`}
+                      style={{minWidth:56,fontSize:12,padding:'5px 12px'}}>
+                {busy==='toggle'
+                  ? <span className="spin" style={{width:11,height:11,border:'2px solid currentColor',borderTopColor:'transparent',borderRadius:'50%',display:'inline-block'}} />
+                  : alloc?.auto_trade ? 'ON' : 'OFF'}
+              </button>
+            </div>
+
+            {/* Allocation summary / edit */}
+            {alloc && !editing && (
+              <div style={{fontSize:12,color:'var(--muted)',marginBottom:10,
+                           display:'grid',gridTemplateColumns:'1fr 1fr',gap:4}}>
+                <span>Budget: <b style={{color:'var(--text)'}}>
+                  {alloc.budget > 0 ? '₹'+Number(alloc.budget).toLocaleString('en-IN') : 'account default'}
+                </b></span>
+                <span>Max pos: <b style={{color:'var(--text)'}}>
+                  {alloc.max_positions > 0 ? alloc.max_positions : 'bot default'}
+                </b></span>
+                <span>Stop: <b style={{color:'var(--text)'}}>
+                  {alloc.stop_pct > 0 ? alloc.stop_pct+'%' : 'bot default'}
+                </b></span>
+                <span>TP: <b style={{color:'var(--text)'}}>
+                  {alloc.tp_pct > 0 ? alloc.tp_pct+'%' : 'bot default'}
+                </b></span>
+              </div>
+            )}
+
+            {!editing && (
+              <button className="btn btn-ghost" style={{width:'100%',fontSize:11,padding:'5px 0'}}
+                      onClick={() => setEditing(true)}>
+                ✏️ Edit Allocation
+              </button>
+            )}
+
+            {editing && (
+              <div style={{background:'rgba(15,23,42,.5)',borderRadius:7,padding:12,marginBottom:8}}>
+                <div style={{fontSize:12,fontWeight:600,marginBottom:10,color:'var(--accent)'}}>
+                  Fund Allocation — Zerodha
+                </div>
+                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:10}}>
+                  <div>
+                    <div style={lbl}>Budget (₹) — 0 = no cap</div>
+                    <input style={inp} type="number" min="0" value={form.budget}
+                           onChange={e => setForm(f => ({...f, budget: e.target.value}))} />
+                  </div>
+                  <div>
+                    <div style={lbl}>Max Positions — 0 = bot default</div>
+                    <input style={inp} type="number" min="0" value={form.max_positions}
+                           onChange={e => setForm(f => ({...f, max_positions: e.target.value}))} />
+                  </div>
+                  <div>
+                    <div style={lbl}>Stop Loss % — 0 = bot default</div>
+                    <input style={inp} type="number" min="0" step="0.1" value={form.stop_pct}
+                           onChange={e => setForm(f => ({...f, stop_pct: e.target.value}))} />
+                  </div>
+                  <div>
+                    <div style={lbl}>Take Profit % — 0 = bot default</div>
+                    <input style={inp} type="number" min="0" step="0.1" value={form.tp_pct}
+                           onChange={e => setForm(f => ({...f, tp_pct: e.target.value}))} />
+                  </div>
+                </div>
+                <div style={{display:'flex',gap:8}}>
+                  <button className="btn btn-green" style={{flex:1,fontSize:12}}
+                          onClick={saveAlloc} disabled={busy==='save'}>
+                    {busy==='save' ? '…' : '✓ Save'}
+                  </button>
+                  <button className="btn btn-ghost" style={{flex:1,fontSize:12}}
+                          onClick={() => setEditing(false)}>
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {msg && (
+              <div style={{marginTop:8,padding:'7px 10px',borderRadius:6,fontSize:12,
+                           background: msg.ok?'rgba(16,185,129,.1)':'rgba(239,68,68,.1)',
+                           color:       msg.ok?'#10b981':'#ef4444'}}>
+                {msg.text}
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    };
+
     /* ── System health ───────────────────────────────────────── */
     const Health = ({ health }) => {
       const svcs = [
@@ -2092,7 +2302,12 @@
 
     /* ══════════════════════════════════════════════════════════ */
     /* ── Shared Indian broker helpers ───────────────────────── */
-    const INR = v => v == null ? '—' : '₹' + parseFloat(v).toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2});
+    const INR = v => {
+      if (v == null || v === '') return '—';
+      const n = parseFloat(v);
+      if (isNaN(n)) return '—';
+      return '₹' + n.toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2});
+    };
 
     const OrderForm = ({ onSubmit, loading, exchanges, products, orderTypes }) => {
       const [sym,   setSym]   = useState('');
@@ -2724,17 +2939,21 @@
       const [holdings,  setHoldings]  = useState(null);
       const [orders,    setOrders]    = useState(null);
       const [account,   setAccount]   = useState(null);
-      const [loading,   setLoading]   = useState(false);
-      const [sqOff,     setSqOff]     = useState(false);
-      const [orderBusy, setOrderBusy] = useState(false);
-      const [reqToken,  setReqToken]  = useState('');
-      const [tokenBusy, setTokenBusy] = useState(false);
+      const [loading,    setLoading]    = useState(false);
+      const [sqOff,      setSqOff]      = useState(false);
+      const [orderBusy,  setOrderBusy]  = useState(false);
+      const [reqToken,   setReqToken]   = useState('');
+      const [tokenBusy,  setTokenBusy]  = useState(false);
+      const [sessionExp, setSessionExp] = useState(false); // true when token is expired
 
       const mountedRef = useRef(true);
       useEffect(() => {
         mountedRef.current = true;
         return () => { mountedRef.current = false; };
       }, []);
+
+      // Auth-error keywords returned by Kite when token is bad/expired
+      const _isAuthErr = msg => /api_key|access_token|token|TokenException|Invalid/i.test(msg||'');
 
       const load = useCallback(async (what, signal) => {
         if (!mountedRef.current) return;
@@ -2743,7 +2962,12 @@
           const r = await fetch(`/api/zerodha/${what}`, { signal });
           const d = await r.json();
           if (!mountedRef.current) return;
-          if (!r.ok) throw new Error(d?.error || d?.message || 'Failed');
+          if (!r.ok) {
+            const msg = d?.error || d?.message || 'Failed';
+            if (_isAuthErr(msg)) { setSessionExp(true); return; }
+            throw new Error(msg);
+          }
+          setSessionExp(false);
           if (what === 'positions') setPositions(Array.isArray(d?.day) ? d.day : (Array.isArray(d) ? d : []));
           else if (what === 'holdings') setHoldings(Array.isArray(d) ? d : []);
           else if (what === 'orders')   setOrders(Array.isArray(d) ? d : []);
@@ -2874,6 +3098,38 @@
         </div>
       );
 
+      // Token expired or invalid — show re-login UI (same as no-token state)
+      if (sessionExp) return (
+        <div className="fadein" style={{maxWidth:600,margin:'40px auto'}}>
+          <div className="card">
+            <div className="card-hdr"><span className="card-title">🔐 Zerodha — Session Expired</span></div>
+            <div style={{padding:18}}>
+              <div style={{background:'rgba(239,68,68,.1)',border:'1px solid rgba(239,68,68,.3)',
+                           borderRadius:7,padding:'10px 14px',marginBottom:16,color:'#ef4444',fontSize:13}}>
+                ⚠️ Your Zerodha access token has expired (daily reset at ~6 AM IST). Please re-login.
+              </div>
+              <a href={zrd.login_url} target="_blank" rel="noopener"
+                className="btn btn-blue" style={{display:'inline-block',marginBottom:14,textDecoration:'none'}}>
+                🔗 Open Kite Login
+              </a>
+              <br/>
+              <label style={{fontSize:11,color:'var(--muted)',fontWeight:700,letterSpacing:'.06em',textTransform:'uppercase'}}>
+                Paste request_token from the redirect URL
+              </label>
+              <div style={{display:'flex',gap:8,marginTop:6}}>
+                <input value={reqToken} onChange={e=>setReqToken(e.target.value)}
+                  placeholder="abc123xyz…"
+                  style={{flex:1,background:'var(--bg-input)',border:'1px solid var(--border)',
+                          borderRadius:6,padding:'9px 12px',color:'var(--text)',fontSize:13,fontFamily:'JetBrains Mono'}} />
+                <button className="btn btn-green" disabled={tokenBusy||!reqToken} onClick={activateToken}>
+                  {tokenBusy?'Activating…':'Activate'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+
       return (
         <div className="fadein" style={{display:'grid',gridTemplateColumns:'1fr',gap:16}}>
 
@@ -2882,7 +3138,7 @@
               <MetCard label="Available Cash"    value={INR(account.available_cash)}   color="#10b981" />
               <MetCard label="Opening Balance"   value={INR(account.opening_balance)}  color="#3b82f6" />
               <MetCard label="Used Margin"       value={INR(account.used_margin)}      color="#f59e0b" />
-              <MetCard label="Net"               value={INR(account.net)}              color={parseFloat(account.net||0)>=0?'#10b981':'#ef4444'} />
+              <MetCard label="Net"               value={INR(account.net)}              color={(account.net||0)>=0?'#10b981':'#ef4444'} />
               <MetCard label="Client"            value={account.client_id}             color="#8b5cf6" />
             </div>
           )}
@@ -3322,6 +3578,7 @@
                   </div>
                   <div style={{display:'flex',flexDirection:'column',gap:16}}>
                     <Controls onAction={sendAction} paused={paused} pauseReason={m?.pause_reason} />
+                    <IndianBotControls health={health} />
                     <Health health={health} />
                   </div>
                 </div>
