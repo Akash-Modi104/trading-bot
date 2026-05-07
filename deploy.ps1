@@ -15,7 +15,7 @@ Write-Host "==> Deploying AlgoTrader to $Server`:$RemotePath" -ForegroundColor C
 # 1. Push latest commit to origin
 Write-Host "`n[1/4] Pushing to git origin..." -ForegroundColor Yellow
 git -C $RepoRoot push origin main
-if ($LASTEXITCODE -ne 0) { Write-Host "Git push failed — aborting." -ForegroundColor Red; exit 1 }
+if ($LASTEXITCODE -ne 0) { Write-Host "Git push failed - aborting." -ForegroundColor Red; exit 1 }
 
 # 2. Pull on server + install dependencies
 Write-Host "`n[2/4] Pulling latest code on server..." -ForegroundColor Yellow
