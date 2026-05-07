@@ -567,6 +567,7 @@
     .fadein { animation: fadein .25s ease; }
 
     /* ── Responsive ─────────────────────────────────────────── */
+    /* Tablet — collapse sidebar to icon strip */
     @media (max-width: 1024px) {
       .shell { grid-template-columns: 64px 1fr; }
       .sidebar { padding: 18px 8px; }
@@ -575,42 +576,125 @@
       .brand { padding: 4px 4px 22px; justify-content: center; }
       .kpis { grid-template-columns: repeat(2, 1fr); }
     }
+
+    /* Mobile — sidebar hidden, bottom nav shown */
     @media (max-width: 880px) {
       .shell { grid-template-columns: 1fr; }
       .sidebar { display: none; }
       .mobile-bar { display: block; }
-      .content { padding-bottom: 96px; }
-      .kpis { grid-template-columns: repeat(2, 1fr); }
-      .row-2, .row-2-eq { grid-template-columns: 1fr; }
+      .content { padding: 14px 12px 100px; }
+      .kpis { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+      .row-2, .row-2-eq { grid-template-columns: 1fr !important; gap: 12px; }
+      /* Topbar — make account switcher PRIMARY on mobile */
+      .topbar { padding: 10px 12px; gap: 8px; flex-wrap: wrap; row-gap: 8px; }
+      .topbar-left { flex: 1 1 auto; min-width: 0; order: 1; gap: 8px; }
+      .topbar-right { flex: 0 0 auto; justify-content: flex-end; order: 2; gap: 8px; }
+      /* Hide redundant equity / P&L from topbar on mobile — already shown in KPI cards */
+      .topbar-right .topbar-stat { display: none !important; }
+      /* Account switcher — clearly visible, full-width on small phones */
+      .acct-btn { min-width: 140px; max-width: none; flex: 0 1 auto; }
+      .acct-drop {
+        position: absolute;
+        top: calc(100% + 8px); right: -12px; left: auto;
+        bottom: auto;
+        width: calc(100vw - 24px);
+        max-height: 60vh;
+        overflow-y: auto;
+      }
+      /* Card padding tighter */
+      .card-hdr { padding: 10px 12px; }
+      /* Tables get horizontal scroll wrapper hint */
+      .card > table, .card > div > table { display: block; overflow-x: auto; }
+      /* Position rows: tighter padding */
+      .pos-row { padding: 10px 12px; }
+      .tick-glyph { width: 32px; height: 32px; font-size: 11px; }
+      /* Card body padding tighter */
+      .card-b, .card > div { padding-left: 12px; padding-right: 12px; }
+      /* KPI tighter */
+      .kpi { padding: 12px 14px; }
+      .kpi .val { font-size: 22px; }
+      .kpi .spark-wrap { display: none; }
+      /* Buttons wrap inside controls */
+      .card-hdr > div { flex-wrap: wrap; gap: 6px; }
+      /* Strategy/allocation forms — collapse 3-col grids to single column */
+      [data-mobile-stack] { grid-template-columns: 1fr !important; }
     }
+
+    /* Phone — single column */
     @media (max-width: 640px) {
       .kpis { grid-template-columns: 1fr 1fr; }
-      .topbar { padding: 10px 14px; gap: 10px; }
       .topbar-stat { display: none; }
       .topbar-stat.always { display: flex; }
-      .content { padding: 12px 12px 96px; }
-      table { font-size: 11px; }
+      .topbar-search { display: none; }
+      .content { padding: 12px 10px 100px; }
+      table { font-size: 11px; min-width: 100%; }
       thead th, tbody td { padding: 7px 8px !important; }
       canvas { max-height: 200px !important; }
+      /* Ensure all inline 2/3-column grids inside cards collapse */
+      .card div[style*="gridTemplateColumns"], .card div[style*="grid-template-columns"] {
+        /* note: inline styles can't be overridden purely by selector — use data-mobile-stack */
+      }
+      /* Form inputs full-width */
+      input, select, textarea { font-size: 14px; }
+      /* Modals/cards with maxWidth — full width on phone */
+      .card[style*="maxWidth"] { max-width: 100% !important; margin: 16px 0 !important; }
+      /* Indian Bot Controls — Start/Stop/Restart stack */
+      [data-bot-actions] { grid-template-columns: 1fr !important; }
+      /* Bot allocation 2x2 stays as 2x2 (good) but force gap */
+      [data-allocation-grid] { gap: 8px !important; }
+      /* Watchlist symbol pills — smaller */
+      [data-watchlist-grid] { grid-template-columns: repeat(auto-fill, minmax(80px, 1fr)) !important; }
+      /* Segmented date pills wrap */
+      .segment-pills { flex-wrap: wrap; }
+      /* Activity log — smaller text */
+      .log-row { font-size: 11px !important; }
     }
+
     @media (max-width: 480px) {
       .kpis { grid-template-columns: 1fr; }
+      .acct-btn { padding: 4px 8px 4px 4px; }
+      .acct-btn .acct-avatar { width: 24px; height: 24px; font-size: 10px; }
+      /* Card title smaller */
+      .card-title { font-size: 9px; }
+      /* Trades table: hide less-critical columns */
+      .hide-on-narrow { display: none !important; }
+      /* Force all inline 1fr 1fr / repeat(2 grids inside cards to stack */
+      .card div[style*="1fr 1fr"]:not([style*="1fr 1fr 1fr"]):not([data-keep-grid]),
+      .card div[style*="repeat(2,"]:not([data-keep-grid]) {
+        grid-template-columns: 1fr !important;
+      }
+      /* And 3-col grids inside cards become 2-col */
+      .card div[style*="1fr 1fr 1fr"]:not([data-bot-actions]):not([data-keep-grid]) {
+        grid-template-columns: 1fr 1fr !important;
+      }
     }
+
     @media (max-width: 768px) {
       .toast-container, [data-toast-container] {
-        bottom: 80px !important; top: auto !important;
+        bottom: 110px !important; top: auto !important;
         right: 8px !important; left: 8px !important;
         max-width: calc(100vw - 16px);
       }
     }
+
+    /* Touch optimisations */
     @media (hover: none) and (pointer: coarse) {
       button, a.btn, .btn { min-height: 40px; }
       input[type=checkbox], input[type=radio] { transform: scale(1.2); }
       a, button { -webkit-tap-highlight-color: oklch(0.72 0.16 235 / 0.25); }
+      /* Larger tap targets for compact buttons */
+      .btn-sm { min-height: 32px; padding: 6px 12px; }
+      /* Disable hover transforms — feels janky on touch */
+      .btn:hover, .kpi:hover { transform: none; }
     }
 
     /* Compat: hide-on-mobile */
     @media (max-width: 900px) { .hide-on-mobile { display: none !important; } }
+
+    /* Prevent horizontal page scroll on any device */
+    html, body { overflow-x: hidden; max-width: 100vw; }
+    .main { min-width: 0; max-width: 100vw; }
+    .content > div, .content > div > div { min-width: 0; }
 
     /* ── Light theme table override ─────────────────────────── */
     html[data-theme="light"] thead th { background: oklch(0.95 0.006 250 / 0.95); }
@@ -912,9 +996,11 @@
         <div style={{overflowX:'auto',maxHeight: full ? 600 : 290, overflowY:'auto'}}>
           <table>
             <thead><tr>
-              <th>Time</th><th>Symbol</th><th>Side</th><th>Qty</th><th>Price</th><th>P&L</th>
+              <th>Time</th><th>Symbol</th><th>Side</th>
+              <th className="hide-on-narrow">Qty</th>
+              <th>Price</th><th>P&L</th>
               {showBroker && <th className="hide-on-mobile">Broker</th>}
-              <th>Reason</th>
+              <th className="hide-on-narrow">Reason</th>
             </tr></thead>
             <tbody>
               {rows.length === 0
@@ -933,13 +1019,13 @@
                       <td>
                         <Badge color={buy?'#10b981':'#ef4444'}>{t.action?.toUpperCase()}</Badge>
                       </td>
-                      <td className="mono">{t.qty||'—'}</td>
+                      <td className="mono hide-on-narrow">{t.qty||'—'}</td>
                       <td className="mono">{fPrice(t.price)}</td>
                       <td className="mono" style={{color:hasPnl?clr(t.pct):'var(--muted)',fontWeight:hasPnl?700:400}}>
                         {hasPnl ? fpct(t.pct) : '—'}
                       </td>
                       {showBroker && <td className="hide-on-mobile" style={{fontSize:10,color:'var(--muted)'}}>{t.broker||'—'}</td>}
-                      <td style={{color:'var(--muted)',fontSize:11,maxWidth:140,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}
+                      <td className="hide-on-narrow" style={{color:'var(--muted)',fontSize:11,maxWidth:140,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}
                         title={t.reason}>{t.reason?.substring(0,35)}{t.reason?.length>35?'…':''}</td>
                     </tr>
                   );
@@ -952,7 +1038,7 @@
     );
 
     /* ── Combined trades tab ─────────────────────────────────── */
-    const CombinedTradesTab = ({ defaultBroker } = {}) => {
+    const CombinedTradesTab = ({ defaultBroker, lockBroker } = {}) => {
       const [data, setData] = useState(null);
       const [err,  setErr]  = useState(null);
       const [loading, setLoading] = useState(true);
@@ -966,7 +1052,7 @@
         fetch(`/api/trades/combined?range=${range}&broker=${broker}`)
           .then(r => r.ok ? r.json() : r.json().then(e => Promise.reject(e)))
           .then(d => { if (mountedRef.current) { setData(d); setErr(null); } })
-          .catch(e => { if (mountedRef.current) setErr(String(e?.message || 'Failed')); })
+          .catch(e => { if (mountedRef.current) setErr(String(e?.message ?? e ?? 'Failed')); })
           .finally(() => { if (mountedRef.current) setLoading(false); });
       }, [range, broker]);
       useEffect(() => { load(); }, [load]);
@@ -979,13 +1065,17 @@
                 {r.charAt(0).toUpperCase()+r.slice(1)}
               </button>
             ))}
-            <span style={{color:'var(--ink-4)',fontSize:11,margin:'0 4px'}}>|</span>
-            {['all','alpaca','angelone','zerodha','indian'].map(b => (
-              <button key={b} className={`btn ${broker===b?'primary':'ghost'}`}
-                style={{padding:'4px 10px',fontSize:11}} onClick={() => setBroker(b)}>
-                {b}
-              </button>
-            ))}
+            {!lockBroker && (
+              <>
+                <span style={{color:'var(--ink-4)',fontSize:11,margin:'0 4px'}}>|</span>
+                {['all','alpaca','angelone','zerodha','indian'].map(b => (
+                  <button key={b} className={`btn ${broker===b?'primary':'ghost'}`}
+                    style={{padding:'4px 10px',fontSize:11}} onClick={() => setBroker(b)}>
+                    {b}
+                  </button>
+                ))}
+              </>
+            )}
             <a href="/api/export/combined.csv" download style={{marginLeft:'auto',textDecoration:'none'}}>
               <button className="btn ghost" style={{padding:'4px 12px',fontSize:12}}>⬇ Export CSV</button>
             </a>
@@ -1213,7 +1303,7 @@
 
           <div style={{padding:14}}>
             {/* Start / Stop / Restart row */}
-            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:8,marginBottom:12}}>
+            <div data-bot-actions style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:8,marginBottom:12}}>
               {[
                 ['indian_start',   'success', '▶ Start'],
                 ['indian_stop',    'danger',  '⏸ Stop'],
@@ -1277,7 +1367,7 @@
                 <div style={{fontSize:12,fontWeight:600,marginBottom:10,color:'var(--accent)'}}>
                   Fund Allocation — Zerodha
                 </div>
-                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:10}}>
+                <div data-allocation-grid style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:10}}>
                   <div>
                     <div style={lbl}>Budget (₹) — 0 = no cap</div>
                     <input style={inp} type="number" min="0" value={form.budget}
@@ -1362,7 +1452,7 @@
       const [form,    setForm]    = useState({});
       const [saved,   setSaved]   = useState(false);
 
-      useEffect(() => { if (params) setForm(params); }, [JSON.stringify(params)]);
+      useEffect(() => { if (params) setForm(params); }, [params]);
 
       const numDefs = [
         { key:'ema_fast',            label:'EMA Fast',             desc:'Fast EMA period'               },
@@ -1391,13 +1481,17 @@
 
       const save = async () => {
         try {
-          await fetch('/api/config', {
+          const r = await fetch('/api/config', {
             method:'POST', headers:{'Content-Type':'application/json'},
             body: JSON.stringify(form),
           });
+          if (!r.ok) throw new Error(`Save failed (${r.status})`);
           setSaved(true); setEditing(false);
           setTimeout(() => setSaved(false), 3000);
-        } catch {}
+        } catch (e) {
+          setSaved(false);
+          alert(`Save failed: ${e?.message || e}`);
+        }
       };
 
       return (
@@ -1772,7 +1866,7 @@
           {/* Account */}
           <div className="card">
             <div className="card-hdr"><span className="card-title">👤 Account</span></div>
-            <div style={{padding:18,display:'grid',gridTemplateColumns:'1fr 1fr',gap:14}}>
+            <div data-mobile-stack style={{padding:18,display:'grid',gridTemplateColumns:'1fr 1fr',gap:14}}>
               <div>
                 <label style={{fontSize:11,color:'var(--muted)',fontWeight:700,letterSpacing:'.06em',textTransform:'uppercase'}}>Email</label>
                 <div style={{fontFamily:'JetBrains Mono',fontSize:14,marginTop:6}}>{me?.email}</div>
@@ -1841,12 +1935,12 @@
                     Your secret key is shown only once at creation.
                   </div>
                   <label style={{fontSize:11,color:'var(--muted)',fontWeight:700,letterSpacing:'.06em',textTransform:'uppercase'}}>API Key ID</label>
-                  <input type="text" value={apiKey} onChange={e => setApiKey(e.target.value)}
+                  <input type="text" value={apiKey} onChange={e => setApiKey(e.target.value.slice(0,256))} maxLength={256}
                     placeholder="PKxxxxxxxxxxxxxxxxxx"
                     style={{width:'100%',marginTop:5,background:'var(--bg-input)',border:'1px solid var(--border)',
                             borderRadius:6,padding:'9px 12px',color:'var(--text)',fontSize:13,fontFamily:'JetBrains Mono'}} />
                   <label style={{fontSize:11,color:'var(--muted)',fontWeight:700,letterSpacing:'.06em',textTransform:'uppercase',marginTop:12,display:'block'}}>Secret Key</label>
-                  <input type="password" value={secKey} onChange={e => setSecKey(e.target.value)}
+                  <input type="password" value={secKey} onChange={e => setSecKey(e.target.value.slice(0,256))} maxLength={256}
                     placeholder="••••••••••••••••••••••••••••••••"
                     style={{width:'100%',marginTop:5,background:'var(--bg-input)',border:'1px solid var(--border)',
                             borderRadius:6,padding:'9px 12px',color:'var(--text)',fontSize:13,fontFamily:'JetBrains Mono'}} />
@@ -1977,7 +2071,7 @@
                         <b>Get API credentials:</b> Login to <a href="https://developers.kite.trade" target="_blank" rel="noopener" style={{color:'#3b82f6'}}>developers.kite.trade</a> → Create an app. After saving keys below, you'll get a login URL to complete the OAuth flow daily.
                       </div>
                       <label style={lbl}>API Key</label>
-                      <input type="text" style={inp} value={zrdApiKey} onChange={e=>setZrdApiKey(e.target.value)} placeholder="xxxxxxxxxxxxxxxx" />
+                      <input type="text" style={inp} value={zrdApiKey} onChange={e=>setZrdApiKey(e.target.value.slice(0,128))} maxLength={128} placeholder="xxxxxxxxxxxxxxxx" />
                       <label style={lbl}>API Secret</label>
                       <input type="password" style={inp} value={zrdApiSecret} onChange={e=>setZrdApiSecret(e.target.value)} placeholder="••••••••••••••••••••••••" />
                       <div style={{marginTop:16,display:'flex',justifyContent:'flex-end'}}>
@@ -2281,8 +2375,9 @@
       useEffect(() => {
         if (!ref.current || !window.Chart) return;
         chart.current?.destroy();
-        const labels = history.map(h => h.date);
-        const vals   = history.map(h => h.equity);
+        const safe   = Array.isArray(history) ? history : [];
+        const labels = safe.map(h => h.date);
+        const vals   = safe.map(h => h.equity);
         chart.current = new window.Chart(ref.current.getContext('2d'), {
           type: 'line',
           data: {
@@ -2496,7 +2591,7 @@
                         <th>Win Rate</th><th>Best %</th><th>Worst %</th><th>Realized P&L</th>
                       </tr></thead>
                       <tbody>
-                        {history.daily.slice().reverse().map((d, i) => (
+                        {(history.daily || []).slice().reverse().map((d, i) => (
                           <tr key={i}>
                             <td className="mono">{d.date}</td>
                             <td className="mono">{d.trades}</td>
@@ -2524,7 +2619,7 @@
                     <th>Month</th><th>Trades</th><th>Wins</th><th>Win Rate</th><th>Realized P&L</th>
                   </tr></thead>
                   <tbody>
-                    {history.monthly.slice().reverse().map((m, i) => (
+                    {(history.monthly || []).slice().reverse().map((m, i) => (
                       <tr key={i}>
                         <td className="mono">{m.month}</td>
                         <td className="mono">{m.trades}</td>
@@ -2553,6 +2648,76 @@
       );
     };
 
+    /* ── Broker-specific reports tab (non-Alpaca) ───────────── */
+    const BrokerReportsTab = ({ broker }) => {
+      const [trades, setTrades] = useState([]);
+      const [loading, setLoading] = useState(true);
+      const label = BROKER_LABELS[broker] || broker;
+      const ccy = (broker === 'alpaca') ? 'USD' : 'INR';
+      const fmt = v => {
+        if (v == null || v === '') return '—';
+        const n = Number(v); if (isNaN(n)) return '—';
+        const sym = ccy === 'INR' ? '₹' : '$';
+        return (n < 0 ? '-' + sym : sym) + Math.abs(n).toLocaleString('en-IN', {maximumFractionDigits:2});
+      };
+
+      useEffect(() => {
+        setLoading(true);
+        fetch(`/api/trades/history?broker=${broker}&limit=200`)
+          .then(r => r.json())
+          .then(d => { setTrades(Array.isArray(d) ? d : (d.trades || [])); })
+          .catch(() => {})
+          .finally(() => setLoading(false));
+      }, [broker]);
+
+      const completed = trades.filter(t => t.pnl != null);
+      const totalPnl  = completed.reduce((s, t) => s + (Number(t.pnl) || 0), 0);
+      const wins      = completed.filter(t => (Number(t.pnl) || 0) > 0).length;
+      const winRate   = completed.length ? Math.round(wins / completed.length * 100) : 0;
+
+      return (
+        <div className="fadein">
+          <div className="kpis" style={{marginBottom:16}}>
+            <div className="kpi"><div className="lbl">Total Trades</div><div className="val">{completed.length}</div></div>
+            <div className="kpi"><div className="lbl">Win Rate</div><div className="val" style={{color:'var(--accent)'}}>{winRate}%</div></div>
+            <div className="kpi"><div className="lbl">Total P&amp;L</div><div className="val" style={{color:totalPnl>=0?'var(--up)':'var(--down)'}}>{fmt(totalPnl)}</div></div>
+            <div className="kpi"><div className="lbl">Broker</div><div className="val" style={{fontSize:16}}>{label}</div></div>
+          </div>
+          <div className="card">
+            <div className="card-hdr">
+              <span className="card-title">📄 {label} Trade History</span>
+              <Badge color="var(--accent)">{trades.length}</Badge>
+            </div>
+            {loading ? (
+              <div className="empty">Loading…</div>
+            ) : trades.length === 0 ? (
+              <div className="empty">No trade history found for {label}.</div>
+            ) : (
+              <div style={{overflow:'auto'}}>
+                <table>
+                  <thead><tr><th>Time</th><th>Symbol</th><th>Side</th><th>Qty</th><th>Price</th><th>P&amp;L</th></tr></thead>
+                  <tbody>
+                    {trades.map((t, i) => (
+                      <tr key={i}>
+                        <td className="mono" style={{color:'var(--ink-3)',fontSize:12}}>{t.time || t.timestamp || t.t || '—'}</td>
+                        <td className="mono" style={{fontWeight:600}}>{t.symbol || t.ticker || '—'}</td>
+                        <td><span className={`badge ${t.side==='BUY'||t.side==='buy'?'up':'down'}`}>{(t.side||'').toUpperCase()}</span></td>
+                        <td className="mono">{t.qty ?? t.quantity ?? '—'}</td>
+                        <td className="mono">{fmt(t.price ?? t.avg_price ?? t.px)}</td>
+                        <td className="mono" style={{color:t.pnl==null?'var(--ink-4)':Number(t.pnl)>=0?'var(--up)':'var(--down)'}}>
+                          {t.pnl == null ? 'open' : fmt(t.pnl)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    };
+
     /* ── Reports tab (past EOD HTML reports) ────────────────── */
     const ReportsTab = () => {
       const [list,    setList]    = useState([]);
@@ -2568,7 +2733,7 @@
       }, []);
 
       return (
-        <div className="fadein" style={{display:'grid',gridTemplateColumns:'260px 1fr',gap:16}}>
+        <div className="fadein" data-mobile-stack style={{display:'grid',gridTemplateColumns:'260px 1fr',gap:16}}>
           <div className="card">
             <div className="card-hdr">
               <span className="card-title">📄 Past Reports</span>
@@ -2855,9 +3020,23 @@
       const wrapRef = React.useRef(null);
       useEffect(() => {
         if (!open) return;
-        const h = e => { if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false); };
+        // Listen with a delay so this same tap event doesn't close immediately
+        let armed = false;
+        const arm = () => { armed = true; };
+        const h = e => {
+          if (!armed) return;
+          if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false);
+        };
+        const t = setTimeout(arm, 50);
+        document.addEventListener('pointerdown', h);
         document.addEventListener('mousedown', h);
-        return () => document.removeEventListener('mousedown', h);
+        document.addEventListener('touchstart', h);
+        return () => {
+          clearTimeout(t);
+          document.removeEventListener('pointerdown', h);
+          document.removeEventListener('mousedown', h);
+          document.removeEventListener('touchstart', h);
+        };
       }, [open]);
 
       const fmtShort = (v, ccy) => {
@@ -2890,14 +3069,10 @@
           preview: me?.zerodha?.has_access_token ? '••active' : 'needs login',
           equity: aggData?.brokers?.zerodha?.available_cash, ccy:'INR',
         },
-        { k:'indian',   label:'Indian Bot', color:'#10b981',
-          connected: !!(me?.zerodha?.connected),
-          initials:'IB', mode:'LIVE',
-          preview:'NSE · MIS', equity:null, ccy:'INR',
-        },
       ];
 
-      const connected = BROKERS.filter(b => b.connected);
+      const connected    = BROKERS.filter(b => b.connected);
+      const disconnected = BROKERS.filter(b => !b.connected);
       const curr = BROKERS.find(b => b.k === broker) || connected[0] || BROKERS[0];
 
       return (
@@ -2925,6 +3100,7 @@
                 </div>
               )}
 
+              {/* Connected brokers — switchable */}
               {connected.map(b => (
                 <div key={b.k} className={`acct-item${broker===b.k?' active':''}`}
                   onClick={() => { setBroker(b.k); setOpen(false); }}>
@@ -2943,6 +3119,28 @@
                   {broker === b.k && <span className="acct-check">✓</span>}
                 </div>
               ))}
+
+              {/* Disconnected brokers — go to profile to connect */}
+              {disconnected.length > 0 && (
+                <>
+                  <div className="acct-divider" />
+                  <div style={{padding:'8px 14px 4px',fontSize:9,fontWeight:700,letterSpacing:'.12em',
+                                textTransform:'uppercase',color:'var(--ink-4)'}}>Not Connected</div>
+                  {disconnected.map(b => (
+                    <div key={b.k} className="acct-item"
+                      style={{opacity:0.6}}
+                      onClick={() => { setOpen(false); window._setTab?.('profile'); }}>
+                      <div className="acct-avatar" style={{background:b.color,width:34,height:34,borderRadius:8,fontSize:12,opacity:0.6}}>
+                        {b.initials}
+                      </div>
+                      <div className="acct-info">
+                        <div className="acct-name">{b.label}</div>
+                        <div className="acct-sub" style={{color:'var(--accent)'}}>Tap to connect →</div>
+                      </div>
+                    </div>
+                  ))}
+                </>
+              )}
 
               <div className="acct-divider" />
               <div className="acct-action" onClick={() => { setOpen(false); window._setTab?.('profile'); }}>
@@ -2972,7 +3170,7 @@
             Deep historical analytics (Sharpe, MDD, equity curve) require Alpaca bot data. Switch to Alpaca to access full analytics.
           </div>
         </div>
-        <CombinedTradesTab defaultBroker={broker} />
+        <CombinedTradesTab defaultBroker={broker} lockBroker />
       </div>
     );
 
@@ -2997,8 +3195,190 @@
       </div>
     );
 
+    /* ── Zerodha Overview (mirrors Alpaca layout) ─────────────── */
+    const ZerodhaOverview = ({ aggData, loading, health }) => {
+      const zInfo = aggData?.brokers?.zerodha || {};
+      const zPos  = zInfo.positions || [];
+      const openPnl = zPos.reduce((s,p) => s + (Number(p.pnl)||0), 0);
+      const zFmt = v => {
+        if (v == null || v === '') return '—';
+        const n = Number(v); if (isNaN(n)) return '—';
+        return (n < 0 ? '-₹' : '₹') + Math.abs(n).toLocaleString('en-IN', {maximumFractionDigits:2});
+      };
+      const zFmtCompact = v => {
+        if (v == null || v === '') return '—';
+        const n = Number(v); if (isNaN(n)) return '—';
+        const abs = Math.abs(n);
+        const sign = n < 0 ? '-' : '';
+        if (abs >= 10000000) return `${sign}₹${(abs/10000000).toFixed(2)}Cr`;
+        if (abs >= 100000)   return `${sign}₹${(abs/100000).toFixed(2)}L`;
+        if (abs >= 1000)     return `${sign}₹${(abs/1000).toFixed(1)}k`;
+        return `${sign}₹${abs.toFixed(0)}`;
+      };
+      const zClr = v => Number(v) > 0 ? 'var(--up)' : Number(v) < 0 ? 'var(--down)' : 'var(--ink-3)';
+
+      // Live bot state
+      const [bot, setBot] = useState(null);
+      useEffect(() => {
+        const load = () => fetch('/api/indian/state').then(r => r.json()).then(setBot).catch(() => {});
+        load();
+        const id = setInterval(load, 8000);
+        return () => clearInterval(id);
+      }, []);
+
+      const botStatus = health?.services?.['indian-bot'] || 'unknown';
+      const botRunning = botStatus === 'running';
+      const dailyPnl = bot?.daily_pnl ?? 0;
+      const dailyTrades = bot?.daily_trades ?? 0;
+      const watchlist = bot?.watchlist || [];
+      const log = bot?.log || [];
+      const vix = bot?.vix;
+      const alloc = bot?.allocation || {};
+
+      if (!loading && !zInfo.connected) return (
+        <div className="fadein">
+          <div className="card" style={{maxWidth:560,margin:'40px auto'}}>
+            <div className="card-hdr"><span className="card-title">Zerodha — Not Connected</span></div>
+            <div style={{padding:24,textAlign:'center'}}>
+              <div style={{fontSize:14,color:'var(--ink-3)',marginBottom:16}}>Connect your Zerodha account in Profile to view live data.</div>
+              <button className="btn primary" onClick={() => window._setTab?.('profile')}>Go to Profile →</button>
+            </div>
+          </div>
+        </div>
+      );
+
+      return (
+        <div className="fadein">
+          {/* Paused banner */}
+          {bot?.trading_paused && (
+            <div style={{background:'var(--warn-soft)',border:'1px solid transparent',borderRadius:'var(--r)',padding:'11px 16px',marginBottom:16,color:'var(--warn)',display:'flex',alignItems:'center',gap:8,fontSize:13}}>
+              <span>⚠</span>
+              <span style={{fontWeight:700}}>Trading Paused</span>
+              {bot?.pause_reason && <span style={{color:'var(--ink-3)'}}>— {bot.pause_reason}</span>}
+            </div>
+          )}
+
+          {/* Error banner */}
+          {!loading && zInfo.error && (
+            <div style={{background:'var(--down-soft)',color:'var(--down)',border:'1px solid var(--down)',borderRadius:'var(--r)',padding:'10px 14px',marginBottom:16,fontSize:13,display:'flex',alignItems:'center',justifyContent:'space-between',gap:12}}>
+              <span>⚠ Zerodha API: {zInfo.error}</span>
+              <button className="btn ghost" style={{padding:'3px 10px',fontSize:11,flexShrink:0}} onClick={() => window._setTab?.('profile')}>Re-login →</button>
+            </div>
+          )}
+
+          {/* KPI cards — 4 col grid (mirrors Alpaca) */}
+          <div className="kpis">
+            <div className="kpi">
+              <div className="lbl">Available Cash</div>
+              <div className="val">{zFmtCompact(zInfo.available_cash)}</div>
+              <div className="sub"><span style={{color:'var(--ink-3)'}}>Budget/trade: {zFmtCompact(alloc.budget_per_trade)}</span></div>
+            </div>
+
+            <div className="kpi">
+              <div className="lbl">Day P&amp;L</div>
+              <div className="val" style={{color:zClr(dailyPnl)}}>{dailyPnl>=0?'+':''}{Number(dailyPnl).toFixed(2)}%</div>
+              <div className="sub">{dailyTrades} trade{dailyTrades!==1?'s':''} today</div>
+              <div className="progress" style={{marginTop:8}}>
+                <span style={{width:`${Math.min(Math.abs(dailyPnl)/3*100,100)}%`,background:dailyPnl>=0?'var(--up)':'var(--down)'}} />
+              </div>
+            </div>
+
+            <div className="kpi">
+              <div className="lbl">Open Positions</div>
+              <div className="val">{zPos.length}<span style={{fontSize:16,color:'var(--ink-3)'}}> / {alloc.max_positions ?? '—'}</span></div>
+              <div className="sub"><span style={{color:zClr(openPnl)}}>{openPnl>=0?'+':''}{zFmt(openPnl)} open</span></div>
+              <div className="progress" style={{marginTop:8}}>
+                <span style={{width:`${Math.min(zPos.length/(alloc.max_positions||5)*100,100)}%`}} />
+              </div>
+            </div>
+
+            <div className="kpi">
+              <div className="lbl">Bot Status</div>
+              <div className="val" style={{fontSize:22,color:botRunning?'var(--up)':'var(--ink-3)'}}>
+                {botRunning ? 'Active' : (botStatus.charAt(0).toUpperCase()+botStatus.slice(1))}
+              </div>
+              <div className="sub">
+                {vix != null && <span>VIX: <span className="mono" style={{color:vix>=20?'var(--warn)':'var(--ink-2)'}}>{vix.toFixed(2)}</span></span>}
+                {bot?.last_scan && <span style={{color:'var(--ink-4)',marginLeft:8}}>· {new Date(bot.last_scan).toLocaleTimeString('en-IN',{hour12:false}).slice(0,8)}</span>}
+              </div>
+            </div>
+          </div>
+
+          {/* Row 2: Positions + Bot Controls (mirrors Alpaca: Positions + Chart) */}
+          <div className="row-2">
+            <div className="card" style={{height:'100%'}}>
+              <div className="card-hdr">
+                <span className="card-title">Open Positions</span>
+                <span className="pill accent">{zPos.length} / {alloc.max_positions ?? '—'}</span>
+              </div>
+              {zPos.length === 0
+                ? <div className="empty">No open positions</div>
+                : zPos.map((p,i) => {
+                  const pnl = Number(p.pnl)||0;
+                  const pct = p.avg ? ((Number(p.ltp||p.avg) - Number(p.avg)) / Number(p.avg) * 100) : 0;
+                  return (
+                    <div key={i} className="pos-row">
+                      <div style={{display:'flex',alignItems:'center',gap:10,minWidth:0}}>
+                        <div className="tick-glyph">{(p.symbol||'?').slice(0,3)}</div>
+                        <div style={{minWidth:0}}>
+                          <div style={{fontWeight:700,fontSize:13,color:'var(--ink)'}}>{p.symbol}</div>
+                          <div style={{fontSize:11,color:'var(--ink-3)',fontFamily:'var(--font-mono)',marginTop:1}}>
+                            {p.qty} × {zFmt(p.avg)}
+                          </div>
+                        </div>
+                      </div>
+                      <div style={{textAlign:'right',flexShrink:0}}>
+                        <div style={{fontFamily:'var(--font-mono)',fontWeight:700,fontSize:14,color:zClr(pct)}}>{pct>=0?'+':''}{pct.toFixed(2)}%</div>
+                        <div style={{fontSize:11,color:zClr(pnl),marginTop:2,fontFamily:'var(--font-mono)'}}>{zFmt(pnl)}</div>
+                      </div>
+                    </div>
+                  );
+                })
+              }
+            </div>
+            <IndianBotControls health={health} />
+          </div>
+
+          {/* Row 3: Watchlist + Activity Log (mirrors Alpaca: Picks + Trades) */}
+          <div className="row-2-eq">
+            {/* Watchlist card */}
+            <div className="card" style={{height:'100%'}}>
+              <div className="card-hdr">
+                <span className="card-title">🎯 Bot Watchlist</span>
+                {watchlist.length > 0 && <Badge color="#10b981">{watchlist.length} symbols</Badge>}
+              </div>
+              <div style={{maxHeight:300,overflowY:'auto'}}>
+                {watchlist.length === 0
+                  ? <div className="empty"><div style={{fontSize:22,marginBottom:8}}>⏳</div>Bot not running — start it to populate watchlist</div>
+                  : (
+                    <div data-watchlist-grid style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(110px,1fr))',gap:6,padding:'12px'}}>
+                      {watchlist.map((sym, i) => (
+                        <div key={i} className="mono" style={{
+                          background:'var(--bg-2)',border:'1px solid var(--line-soft)',
+                          borderRadius:6,padding:'8px 10px',fontSize:12,fontWeight:600,
+                          textAlign:'center',color:'var(--ink-2)',
+                        }}>{sym}</div>
+                      ))}
+                    </div>
+                  )
+                }
+              </div>
+            </div>
+
+            {/* Activity Log */}
+            <Log rows={log.slice(0, 30).map(item => ({t: item.t, m: item.m}))} />
+          </div>
+
+          {/* Row 4: Today's Zerodha trades (no broker filter pills) */}
+          <div style={{marginTop:16}}>
+            <CombinedTradesTab defaultBroker="zerodha" lockBroker />
+          </div>
+        </div>
+      );
+    };
+
     /* ── Broker-aware overview (non-Alpaca) ─────────────────── */
-    const BrokerAggregateOverview = ({ broker, aggData: aggProp }) => {
+    const BrokerAggregateOverview = ({ broker, aggData: aggProp, health }) => {
       const [agg, setAgg] = useState(aggProp || null);
       const [loading, setLoading] = useState(!aggProp);
       const load = useCallback(() => {
@@ -3010,14 +3390,9 @@
       useEffect(() => { if (!aggProp) { load(); const id = setInterval(load, 30000); return () => clearInterval(id); } }, [aggProp, load]);
       useEffect(() => { if (aggProp) { setAgg(aggProp); setLoading(false); } }, [aggProp]);
 
-      if (broker === 'indian') return (
-        <div className="fadein">
-          <div className="kpis" style={{marginBottom:16}}>
-            <div className="kpi"><div className="lbl">Broker</div><div className="val" style={{fontSize:20}}>Indian Bot</div><div className="sub">Zerodha · NSE Intraday</div></div>
-          </div>
-          <CombinedTradesTab defaultBroker="indian" />
-        </div>
-      );
+      if (broker === 'zerodha' || broker === 'indian') {
+        return <ZerodhaOverview aggData={agg} loading={loading} health={health} />;
+      }
 
       const info = agg?.brokers?.[broker] || {};
       const ccy = info.currency || (broker==='alpaca' ? 'USD' : 'INR');
@@ -3458,7 +3833,7 @@
           if (what === 'positions') setPositions(Array.isArray(d) ? d : []);
           else if (what === 'holdings') setHoldings(Array.isArray(d) ? d : []);
           else if (what === 'orders')   setOrders(Array.isArray(d) ? d : []);
-          else if (what === 'account')  setAccount(d && typeof d === 'object' && !Array.isArray(d) ? d : null);
+          else if (what === 'account')  setAccount(d && typeof d === 'object' && !Array.isArray(d) && !d.error ? d : null);
         } catch(e) {
           if (e.name === 'AbortError') return;
           if (mountedRef.current) toast.push(String(e?.message || e), 'error');
@@ -3703,7 +4078,7 @@
           if (what === 'positions') setPositions(Array.isArray(d?.day) ? d.day : (Array.isArray(d) ? d : []));
           else if (what === 'holdings') setHoldings(Array.isArray(d) ? d : []);
           else if (what === 'orders')   setOrders(Array.isArray(d) ? d : []);
-          else if (what === 'account')  setAccount(d && typeof d === 'object' && !Array.isArray(d) ? d : null);
+          else if (what === 'account')  setAccount(d && typeof d === 'object' && !Array.isArray(d) && !d.error ? d : null);
         } catch(e) {
           if (e.name === 'AbortError') return;
           if (mountedRef.current) toast.push(String(e?.message || e), 'error');
@@ -4192,12 +4567,12 @@
         { id:'combined',  label:'Combined',    icon:'⊕' },
         { id:'history',   label:'History',     icon:'⊘' },
         { id:'analytics', label:'Analytics',   icon:'⬗' },
+        { id:'reports',   label:'Reports',     icon:'▣' },
       ];
       const SIDEBAR_BROKER_TABS = [
         { id:'alpaca',    label:'Alpaca',      icon:'◆' },
         { id:'angelone',  label:'Angel One',   icon:'◈' },
         { id:'zerodha',   label:'Zerodha',     icon:'◉' },
-        { id:'reports',   label:'Reports',     icon:'▣' },
       ];
       const SIDEBAR_BOT_TABS = [
         { id:'strategy',  label:'Strategy',    icon:'⚙' },
@@ -4312,7 +4687,7 @@
                   )}
                 </span>
               </div>
-              <div className="topbar-divider" />
+              <div className="topbar-divider hide-on-mobile" />
               {/* Pause — only for Alpaca bot */}
               {broker === 'alpaca' && (
                 <button className={`btn btn-sm ${paused ? 'warn' : 'ghost'}`} style={{fontSize:12}}
@@ -4344,8 +4719,8 @@
               {[
                 {id:'overview', label:'Overview', icon:'⊞'},
                 {id:'trades',   label:'Trades',   icon:'⬡'},
-                {id:'angelone', label:'India',     icon:'◈'},
-                {id:'analytics',label:'Analytics',icon:'⬗'},
+                {id:'history',  label:'History',  icon:'⊘'},
+                {id:'reports',  label:'Reports',  icon:'▣'},
                 {id:'profile',  label:'Profile',  icon:'◯'},
               ].map(t => (
                 <button key={t.id} className={`mobile-bar-btn${tab===t.id?' active':''}`} onClick={()=>setTab(t.id)}>
@@ -4373,7 +4748,7 @@
             {/* OVERVIEW */}
             {tab === 'all' && <AllAccountsTab />}
             {tab === 'overview' && broker !== 'alpaca' && (
-              <ErrorBoundary key={`overview-${broker}`}><BrokerAggregateOverview broker={broker} aggData={aggData} /></ErrorBoundary>
+              <ErrorBoundary key={`overview-${broker}`}><BrokerAggregateOverview broker={broker} aggData={aggData} health={health} /></ErrorBoundary>
             )}
             {tab === 'overview' && broker === 'alpaca' && (
               <div className="fadein">
@@ -4408,7 +4783,7 @@
                     <div className="val" style={{color:clr(m?.daily_pnl)}}>{fpct(m?.daily_pnl_pct)}</div>
                     <div className="sub">{f$(m?.daily_pnl)}</div>
                     <div className="progress" style={{marginTop:8}}>
-                      <span style={{width:`${Math.min(Math.abs(m?.daily_pnl_pct??0)/2*100,100)}%`,background:(m?.daily_pnl??0)>=0?'var(--up)':'var(--down)'}} />
+                      <span style={{width:`${Math.min(Math.abs(Number(m?.daily_pnl_pct)||0)/2*100,100)}%`,background:(Number(m?.daily_pnl)||0)>=0?'var(--up)':'var(--down)'}} />
                     </div>
                   </div>
 
@@ -4468,7 +4843,6 @@
                   </div>
                   <div style={{display:'flex',flexDirection:'column',gap:16}}>
                     <Controls onAction={sendAction} paused={paused} pauseReason={m?.pause_reason} />
-                    <IndianBotControls health={health} />
                     <Health health={health} />
                   </div>
                 </div>
@@ -4480,7 +4854,7 @@
               <div className="fadein"><Trades rows={trades??[]} full exportUrl="/api/export.csv" /></div>
             )}
             {tab === 'trades' && broker !== 'alpaca' && (
-              <ErrorBoundary key={`trades-${broker}`}><CombinedTradesTab defaultBroker={broker} /></ErrorBoundary>
+              <ErrorBoundary key={`trades-${broker}`}><CombinedTradesTab defaultBroker={broker} lockBroker /></ErrorBoundary>
             )}
 
             {/* COMBINED TRADES */}
@@ -4509,11 +4883,31 @@
             {tab === 'zerodha' && <ErrorBoundary key="zrd"><ZerodhaTab me={me} /></ErrorBoundary>}
 
             {/* REPORTS */}
-            {tab === 'reports' && <ReportsTab />}
+            {tab === 'reports' && broker === 'alpaca' && <ReportsTab />}
+            {tab === 'reports' && broker !== 'alpaca' && (
+              <ErrorBoundary key={`reports-${broker}`}><BrokerReportsTab broker={broker} /></ErrorBoundary>
+            )}
 
             {/* STRATEGY */}
-            {tab === 'strategy' && (
+            {tab === 'strategy' && broker === 'alpaca' && (
               <div className="fadein"><Strategy params={params} /></div>
+            )}
+            {tab === 'strategy' && broker !== 'alpaca' && (
+              <div className="fadein">
+                <div className="card" style={{maxWidth:640,margin:'40px auto'}}>
+                  <div className="card-hdr"><span className="card-title">📐 Strategy — {BROKER_LABELS[broker]}</span></div>
+                  <div style={{padding:32,textAlign:'center'}}>
+                    <div style={{fontSize:36,marginBottom:12}}>⚙️</div>
+                    <div style={{fontSize:15,fontWeight:600,marginBottom:8}}>Strategy parameters belong to the Alpaca bot</div>
+                    <div style={{fontSize:13,color:'var(--ink-3)',maxWidth:440,margin:'0 auto',lineHeight:1.6}}>
+                      For {BROKER_LABELS[broker]}, position sizing and risk are configured in <b>Overview → Edit Allocation</b> (budget per trade, max positions, stop %, take-profit %).
+                    </div>
+                    <div style={{marginTop:20}}>
+                      <button className="btn primary" onClick={() => window._setTab?.('overview')}>Go to Overview →</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
             )}
 
             {/* SYSTEM */}
