@@ -19,28 +19,12 @@ if ($LASTEXITCODE -ne 0) { Write-Host "Git push failed - aborting." -ForegroundC
 
 # 2. Pull on server + install dependencies
 Write-Host "`n[2/4] Pulling latest code on server..." -ForegroundColor Yellow
-ssh $Server @"
-set -e
-cd $RemotePath
-
-# Pull latest code
-git pull origin main
-
-# Install / upgrade Python dependencies
-pip install -r requirements.txt --quiet
-
-echo "Code updated successfully"
-"@
+ssh $Server "set -e; cd $RemotePath; git pull origin main; pip install -r requirements.txt; echo `"Code updated successfully`""
 if ($LASTEXITCODE -ne 0) { Write-Host "Remote pull failed." -ForegroundColor Red; exit 1 }
 
 # 3. Restart services via supervisor
 Write-Host "`n[3/4] Restarting services..." -ForegroundColor Yellow
-ssh $Server @"
-supervisorctl restart dashboard
-supervisorctl restart trading-bot
-supervisorctl restart scanner
-echo "Services restarted"
-"@
+ssh $Server "supervisorctl restart dashboard; supervisorctl restart trading-bot; supervisorctl restart scanner; echo `"Services restarted`""
 
 # 4. Show service status
 Write-Host "`n[4/4] Service status:" -ForegroundColor Yellow
