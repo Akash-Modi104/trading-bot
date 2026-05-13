@@ -37,6 +37,7 @@ from brokers.angelone import AngelOneBroker, AngelOneError
 from brokers.zerodha import ZerodhaBroker
 from telegram_alerts import alert_buy, alert_sell, alert_daily_loss, alert_eod, alert_startup
 import safe_io
+import profit_engine as pe  # Quality filters + risk management
 
 # ── Paths ──────────────────────────────────────────────────────
 BASE_DIR       = os.path.dirname(os.path.abspath(__file__))
@@ -954,6 +955,9 @@ def check_exits_indian(broker, p_list: list):
                 open_positions.pop(sym, None)
                 save_positions()
                 alert_sell(sym, qty, curr, pct, reason)
+                if pct < 0:
+                    pe.record_loss()
+                    log_event(f"  loss recorded for cool-off tracking ({pct:.2f}%)")
                 append_log({
                     "time": now_ist().isoformat(),
                     "sym":  sym,
@@ -1046,19 +1050,14 @@ def execute_buy(broker, symbol: str, qty: int, price: float, stop: float, tp: fl
         gtt_id = None
         if isinstance(broker, ZerodhaBroker):
             # Place an OCO GTT so SL/TP fires even if the bot restarts
-            try:
-                gtt_id = broker.place_oco_gtt(
-                    tradingsymbol=symbol,
-                    exchange="NSE",
-                    quantity=qty,
-                    sl_price=stop,
-                    tp_price=tp,
-                    last_price=price,
-                    product="MIS",
-                )
+            gtt_id = pe.place_gtt_with_retry(
+                broker, "place_oco_gtt",
+                {"tradingsymbol": symbol, "exchange": "NSE", "quantity": qty,
+                 "sl_price": stop, "tp_price": tp, "last_price": price, "product": "MIS"},
+                log_event, max_retries=3,
+            )
+            if gtt_id:
                 log_event(f"  GTT OCO placed → gtt_id={gtt_id} SL=₹{stop} TP=₹{tp}")
-            except Exception as ge:
-                log_event(f"  GTT placement failed (will use poll exits): {ge}")
 
         open_positions[symbol] = {
             "qty":      qty,
@@ -1228,13 +1227,50 @@ def run():
         _state["market_open"] = market_open_ist()
         _state["now_ist"]     = now.strftime("%Y-%m-%d %H:%M:%S")
 
+        # ── NSE holiday auto-skip ─────────────────────────
+        holiday, hname = pe.is_nse_holiday(now)
+        if holiday:
+            log_event(f"NSE holiday ({hname}) — bot idle. Sleeping 1 hour.")
+            save_state()
+            time.sleep(3600)
+            continue
+
         if not _state["market_open"]:
             log_event("Market closed — sleeping 60s")
             save_state()
             time.sleep(60)
             continue
 
-        # ── EOD square-off ─────────────────────────────────
+        # ── Pre-EOD / EOD flatten (avoid Zerodha auto-square penalty) ──
+        eod_phase = pe.pre_eod_phase()
+        if eod_phase == "closed":
+            log_event("Market closed — bot finished for today.")
+            save_state()
+            break
+        if eod_phase == "hard_flat":
+            log_event("HARD FLAT (15:14-15:20): MARKET exits to beat auto-square penalty")
+            square_off_all(broker)
+            daily_pnl = calc_daily_pnl(broker, start_equity)
+            alert_eod(get_account_equity(broker, start_equity), daily_pnl, _state["daily_trades"], "")
+            log_event("EOD done.")
+            save_state()
+            break
+        if eod_phase == "soft_flat":
+            # Cancel any pending LIMITs first, then place LIMIT exits
+            try:
+                if isinstance(broker, ZerodhaBroker):
+                    for o in (broker.get_orders() or []):
+                        if (o.get("status") or "").upper() in ("OPEN", "TRIGGER PENDING"):
+                            try: broker.cancel_order(o["order_id"], variety=o.get("variety","regular"))
+                            except Exception: pass
+            except Exception:
+                pass
+            square_off_all(broker)
+            log_event("SOFT FLAT (15:10-15:14): LIMIT exits placed — waiting for fills")
+            save_state()
+            time.sleep(60)
+            continue
+        # Legacy eod_time() guard kept for safety
         if eod_time():
             square_off_all(broker)
             daily_pnl = calc_daily_pnl(broker, start_equity)
@@ -1255,7 +1291,10 @@ def run():
         # ── Daily loss limit ───────────────────────────────
         daily_pnl = calc_daily_pnl(broker, start_equity)
         _state["daily_pnl"] = daily_pnl
-        if daily_pnl <= -DAILY_LOSS_LIMIT:
+        # Compute daily P&L in absolute INR (not %), cap at ₹500 default
+        daily_pnl_inr = (daily_pnl / 100.0) * start_equity
+        DAILY_LOSS_LIMIT_INR = float(os.environ.get("INDIAN_BOT_DAILY_LOSS_INR", 500))
+        if daily_pnl_inr <= -DAILY_LOSS_LIMIT_INR:
             if not _state["trading_paused"]:
                 log_event(f"Daily loss limit hit ({daily_pnl:.2f}%) — no new entries")
                 alert_daily_loss(daily_pnl)
@@ -1307,6 +1346,36 @@ def run():
             time.sleep(60)
             continue
 
+
+        # ── Stale order cleanup: cancel LIMITs older than 5 min ──
+        try:
+            if isinstance(broker, ZerodhaBroker):
+                for o in (broker.get_orders() or []):
+                    if pe.is_stale_order(o):
+                        try:
+                            broker.cancel_order(o["order_id"], variety=o.get("variety","regular"))
+                            log_event(f"  STALE cancelled: {o.get('tradingsymbol')} {o.get('order_id')}")
+                        except Exception as _e:
+                            log_event(f"  STALE cancel failed: {_e}")
+        except Exception:
+            pass
+
+        # ── Quality window filter (skip open volatility + lunch chop) ──
+        qok, qreason = pe.is_quality_window(now)
+        if not qok:
+            log_event(f"Quality window skip: {qreason}")
+            save_state()
+            time.sleep(60)
+            continue
+
+        # ── Cool-off after consecutive losses ──
+        cok, creason = pe.in_cooloff()
+        if cok:
+            log_event(f"Cool-off active: {creason}")
+            save_state()
+            time.sleep(60)
+            continue
+
         # ── Source-of-truth slot accounting: USE BROKER, not in-memory ──
         broker_held = _broker_open_positions(broker)   # dict sym → {qty, avg_price, ...}
         held_syms   = set(broker_held.keys())
@@ -1352,9 +1421,14 @@ def run():
             # SKIP if we already hold this symbol (broker is source of truth)
             if sym in held_syms:
                 continue
+            # SKIP if sector concentration cap reached (max 2/sector)
+            sec_ok, sec_reason = pe.can_add_to_sector(sym, held_syms)
+            if not sec_ok:
+                continue
             sc, reasons, bars = score_stock(broker, sym)
             log_event(f"{sym:12s} score={sc:3d}  {list(reasons.keys())[:3]}")
-            if sc >= 45:
+            # Require BOTH score ≥ 65 AND volume surge
+            if sc >= 65 and pe.has_volume_surge(bars):
                 candidates.append((sc, sym, reasons, bars))
 
         candidates.sort(reverse=True)
