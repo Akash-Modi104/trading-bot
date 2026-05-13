@@ -1,9 +1,24 @@
+import _force_ipv4_kite  # Force IPv4 for kite.trade per NSE IP whitelist
+import os
+
+# Load .env FIRST so auth.py picks up MASTER_ENCRYPTION_KEY before generating a new one
+_env_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+try:
+    from dotenv import load_dotenv as _ld; _ld(_env_file)
+except ImportError:
+    if os.path.exists(_env_file):
+        for _l in open(_env_file):
+            _l = _l.strip()
+            if _l and not _l.startswith("#") and "=" in _l:
+                k, v = _l.split("=", 1); os.environ.setdefault(k.strip(), v.strip())
+
 from flask import (Flask, jsonify, request, Response, redirect,
                    make_response, g, render_template_string, send_from_directory)
 from flask_cors import CORS
 from functools import wraps
-import json, os, subprocess, time, threading, secrets
-from datetime import datetime, timedelta
+import json, subprocess, time, threading, secrets
+from datetime import datetime, timedelta, timezone
+from urllib.parse import quote_plus
 import pytz
 
 
@@ -13,7 +28,11 @@ import auth
 
 
 # ── Login rate limiting (in-memory token bucket per IP) ───────
-import collections, threading
+import collections, threading, re
+
+# Trading-symbol whitelist regex (used by order/quote/search endpoints
+# to reject anything that's not a plain ticker).
+_SYMBOL_RE = re.compile(r"^[A-Z0-9\-&]{1,32}$")
 _LOGIN_BUCKET = collections.defaultdict(lambda: {"count":0, "ts":0})
 _LOGIN_LOCK = threading.Lock()
 _LOGIN_MAX = 8        # attempts
@@ -34,8 +53,9 @@ def _login_allowed(ip):
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY") or secrets.token_hex(32)
 CORS(app, supports_credentials=True, origins=[
-    "http://localhost:5001","http://127.0.0.1:5001",
-    "http://187.127.73.203:5001","https://187.127.73.203:5001"
+    "http://localhost:5001", "http://127.0.0.1:5001",     # dev only
+    "https://187.127.73.203:5001",                         # production server (HTTPS)
+    "https://dilipcentralacademy.tech",                    # production domain
 ])
 
 # Initialize DB and bootstrap legacy admin from .env if needed
@@ -68,19 +88,7 @@ def add_security_headers(resp):
     return resp
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-
-# Load .env
-_env_file = os.path.join(BASE_DIR, ".env")
-try:
-    from dotenv import load_dotenv
-    load_dotenv(_env_file)
-except ImportError:
-    if os.path.exists(_env_file):
-        for _l in open(_env_file):
-            _l = _l.strip()
-            if _l and not _l.startswith("#") and "=" in _l:
-                k, v = _l.split("=", 1)
-                os.environ.setdefault(k.strip(), v.strip())
+# Note: .env already loaded at top of file before auth import
 
 STATE_F = os.path.join(BASE_DIR, "bot_state.json")
 LOG_F   = os.path.join(BASE_DIR, "trade_log.json")
@@ -97,6 +105,45 @@ def _current_user():
     user = auth.get_user_by_session(token) if token else None
     g._cached_user = user
     return user
+
+
+# ── Numeric input validation helpers ─────────────────────────────────
+class _ValidationError(Exception):
+    """Raised by _validate_* helpers; callers convert to JSON 400."""
+
+def _bounded_number(value, *, name: str, lo, hi, allow_zero: bool = True,
+                    cast=float):
+    """Cast `value` to int/float and ensure lo <= value <= hi.
+    Returns the cast value or raises _ValidationError. Treat None/'' as
+    'field absent' — caller decides whether that's required."""
+    if value is None or value == "":
+        return None
+    try:
+        v = cast(value)
+    except (TypeError, ValueError):
+        raise _ValidationError(f"{name}: must be a number")
+    if not allow_zero and v == 0:
+        raise _ValidationError(f"{name}: must be non-zero")
+    if v < lo or v > hi:
+        raise _ValidationError(f"{name}: must be between {lo} and {hi}")
+    return v
+
+
+# Bounds (broad enough not to surprise legitimate users, tight enough to
+# block typos that move real money):
+#   budget: ₹0 – ₹10 Cr  /  $0 – $1 M
+#   max_positions: 0 – 50
+#   stop_pct / tp_pct: 0% – 50%
+#   order qty: 1 – 100,000
+#   order price: 0 – ₹1,00,000 (per share, intraday); 0 means MARKET
+_BOUNDS = {
+    "budget":         (0, 100_000_000),
+    "max_positions":  (0, 50),
+    "stop_pct":       (0, 50),
+    "tp_pct":         (0, 50),
+    "qty":            (1, 100_000),
+    "price":          (0, 100_000),
+}
 
 def _require_auth(f):
     """API endpoints: return 401 JSON if not authenticated."""
@@ -247,7 +294,7 @@ def api_login():
                         "message": "Invalid email or password."}), 401
     token = auth.create_session(user["id"], ip,
                                 request.headers.get("User-Agent", ""))
-    auth.update_user(user["id"], last_login_at=datetime.utcnow().isoformat())
+    auth.update_user(user["id"], last_login_at=auth.utcnow().isoformat())
     auth.record_login_attempt(ip, email, success=True)
     auth.audit(user["id"], "login_success", ip)
     resp = jsonify({"ok": True})
@@ -303,7 +350,15 @@ def index():
     path = os.path.join(BASE_DIR, "templates", "react_index.html")
     if os.path.exists(path):
         with open(path, encoding="utf-8") as f:
-            return f.read()
+            html = f.read()
+        mtime = int(os.path.getmtime(path))
+        resp = make_response(html)
+        # Tell browsers (esp. mobile Safari) NOT to cache the HTML shell
+        resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate, max-age=0"
+        resp.headers["Pragma"]        = "no-cache"
+        resp.headers["Expires"]       = "0"
+        resp.headers["X-App-Version"] = str(mtime)
+        return resp
     return "Dashboard template not found.", 503
 
 @app.route("/api/me")
@@ -452,7 +507,7 @@ def api_angelone_connect():
 
     jwt_token     = info.get("jwtToken", "")
     refresh_token = info.get("refreshToken", "")
-    logged_in_at  = datetime.utcnow().isoformat()
+    logged_in_at  = auth.utcnow().isoformat()
 
     auth.save_angelone_creds(
         u["id"], api_key, client_id, password, totp_secret,
@@ -592,35 +647,65 @@ def api_angelone_place_order():
         if not body.get(f):
             return jsonify({"error": "missing_field", "field": f}), 400
 
+    side = str(body["transaction_type"]).upper()
+    if side not in ("BUY", "SELL"):
+        return jsonify({"error": "invalid_input",
+                        "message": "transaction_type must be BUY or SELL"}), 400
+    sym = str(body["tradingsymbol"]).upper().strip()
+    if not _SYMBOL_RE.match(sym.replace("-EQ", "")):  # tolerate "-EQ" suffix
+        return jsonify({"error": "invalid_input",
+                        "message": "tradingsymbol must be 1-32 alphanumerics"}), 400
+    try:
+        qty   = _bounded_number(body["quantity"], name="quantity",
+                                lo=_BOUNDS["qty"][0], hi=_BOUNDS["qty"][1],
+                                allow_zero=False, cast=int)
+        price = _bounded_number(body.get("price", 0), name="price",
+                                lo=_BOUNDS["price"][0], hi=_BOUNDS["price"][1],
+                                cast=float) or 0
+        squareoff         = _bounded_number(body.get("squareoff", 0), name="squareoff",
+                                            lo=0, hi=_BOUNDS["price"][1], cast=float) or 0
+        stoploss          = _bounded_number(body.get("stoploss", 0), name="stoploss",
+                                            lo=0, hi=_BOUNDS["price"][1], cast=float) or 0
+        trailing_stoploss = _bounded_number(body.get("trailing_stoploss", 0), name="trailing_stoploss",
+                                            lo=0, hi=_BOUNDS["price"][1], cast=float) or 0
+    except _ValidationError as e:
+        return jsonify({"error": "invalid_input", "message": str(e)}), 400
+    order_type = str(body.get("order_type", "MARKET")).upper()
+    if order_type in ("LIMIT", "STOPLOSS_LIMIT") and price <= 0:
+        return jsonify({"error": "invalid_input",
+                        "message": f"{order_type} order requires price > 0"}), 400
+
     broker, err = _get_angelone_broker(u["id"])
     if err:
         return jsonify({"error": err}), 400
 
     try:
         order_id = broker.place_order(
-            tradingsymbol    = body["tradingsymbol"].upper(),
+            tradingsymbol    = sym,
             symboltoken      = str(body["symboltoken"]),
-            transaction_type = body["transaction_type"].upper(),
-            quantity         = int(body["quantity"]),
-            price            = float(body.get("price", 0)),
-            order_type       = body.get("order_type", "MARKET").upper(),
+            transaction_type = side,
+            quantity         = qty,
+            price            = price,
+            order_type       = order_type,
             product_type     = body.get("product_type", "INTRADAY").upper(),
             exchange         = body.get("exchange", "NSE").upper(),
             variety          = body.get("variety", "NORMAL").upper(),
             duration         = body.get("duration", "DAY").upper(),
-            squareoff        = float(body.get("squareoff", 0)),
-            stoploss         = float(body.get("stoploss", 0)),
-            trailing_stoploss= float(body.get("trailing_stoploss", 0)),
+            squareoff        = squareoff,
+            stoploss         = stoploss,
+            trailing_stoploss= trailing_stoploss,
         )
         _persist_angelone_tokens(u["id"], broker)
         auth.audit(u["id"], "angelone_order_placed", _client_ip(), {
-            "symbol": body["tradingsymbol"],
-            "side":   body["transaction_type"],
-            "qty":    body["quantity"],
+            "symbol": sym, "side": side, "qty": qty, "price": price,
+            "type": order_type, "order_id": str(order_id),
         })
         return jsonify({"ok": True, "order_id": order_id})
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        auth.audit(u["id"], "angelone_order_failed", _client_ip(), {
+            "symbol": sym, "side": side, "qty": qty, "error": str(e)[:200],
+        })
+        return jsonify({"error": "broker_error", "message": str(e)}), 400
 
 @app.route("/api/angelone/order/<order_id>", methods=["DELETE"])
 @_require_auth
@@ -754,18 +839,119 @@ def api_angelone_candles():
 
 # ── Zerodha broker endpoints ──────────────────────────────────────
 
-def _get_zerodha_broker(user_id: int):
-    """Build a ZerodhaBroker from stored credentials."""
+def _get_zerodha_broker(user_id: int, require_token: bool = True):
+    """Build a ZerodhaBroker from stored credentials.
+
+    require_token: when True (default), api_key AND access_token must both
+                   exist — used by trading endpoints (orders, positions, etc).
+                   When False, only api_key + api_secret are required —
+                   used by /api/zerodha/session which is the very call that
+                   creates the access_token (chicken-and-egg).
+    """
     from brokers.zerodha import ZerodhaBroker
     creds = auth.get_zerodha_creds(user_id)
     if not creds:
         return None, "not_connected"
+    if not creds.get("api_key") or not creds.get("api_secret"):
+        return None, "credentials_invalid — re-enter API key and secret in Profile"
+    if require_token and not creds.get("access_token"):
+        return None, "login_required — click Open Kite Login (daily) in Profile"
     broker = ZerodhaBroker(
         api_key=creds["api_key"],
         api_secret=creds["api_secret"],
-        access_token=creds["access_token"],
+        access_token=creds.get("access_token", ""),
     )
     return broker, None
+
+@app.route("/api/zerodha/postback", methods=["POST"])
+def api_zerodha_postback():
+    """
+    Kite Connect v3 Postback receiver.
+    https://kite.trade/docs/connect/v3/postbacks/
+
+    Zerodha POSTs JSON when order status changes (COMPLETE / CANCELLED /
+    REJECTED / UPDATE). The payload includes a SHA-256 checksum of
+        order_id + order_timestamp + api_secret
+    which we MUST verify to confirm the update is genuine.
+
+    No dashboard auth required — this endpoint is called by Zerodha's
+    servers, not by browsers.
+    """
+    import hashlib
+    payload = request.get_json(force=True, silent=True) or {}
+
+    order_id   = str(payload.get("order_id", ""))
+    timestamp  = str(payload.get("order_timestamp", ""))
+    checksum   = str(payload.get("checksum", ""))
+    status     = str(payload.get("status", "")).upper()
+
+    # ── HMAC verification ────────────────────────────────────────
+    verified = False
+    user_id  = 1            # Single-user system; admin owns the Zerodha account
+    expected = ""           # Always defined so we can log a prefix
+    debug    = ""
+    try:
+        creds = auth.get_zerodha_creds(user_id)
+        if not creds:
+            debug = "no_creds_in_db"
+        elif not creds.get("api_secret"):
+            debug = "api_secret_empty"
+        else:
+            expected = hashlib.sha256(
+                f"{order_id}{timestamp}{creds['api_secret']}".encode()
+            ).hexdigest()
+            verified = (expected == checksum)
+            if not verified:
+                debug = "checksum_mismatch"
+    except Exception as e:
+        debug = f"exception:{type(e).__name__}:{str(e)[:60]}"
+
+    if not verified:
+        auth.audit(user_id, "zerodha_postback_invalid_checksum",
+                   request.remote_addr or "kite",
+                   {"order_id": order_id, "status": status,
+                    "expected_prefix": expected[:12],
+                    "got_prefix": checksum[:12],
+                    "debug": debug})
+        return jsonify({"error": "invalid_checksum", "debug": debug}), 200
+
+    # ── Extract full order details per Kite v3 spec ──────────────
+    meta = {
+        "order_id":           order_id,
+        "exchange_order_id":  payload.get("exchange_order_id"),
+        "status":             status,
+        "tradingsymbol":      payload.get("tradingsymbol"),
+        "exchange":           payload.get("exchange"),
+        "transaction_type":   payload.get("transaction_type"),
+        "order_type":         payload.get("order_type"),
+        "product":            payload.get("product"),
+        "quantity":           payload.get("quantity"),
+        "filled_quantity":    payload.get("filled_quantity"),
+        "pending_quantity":   payload.get("pending_quantity"),
+        "cancelled_quantity": payload.get("cancelled_quantity"),
+        "price":              payload.get("price"),
+        "average_price":      payload.get("average_price"),
+        "trigger_price":      payload.get("trigger_price"),
+        "status_message":     payload.get("status_message"),
+        "order_timestamp":    timestamp,
+        "tag":                payload.get("tag"),
+    }
+    # Drop nulls for cleaner audit row
+    meta = {k: v for k, v in meta.items() if v not in (None, "", 0)}
+
+    # ── Audit log entry (shows in Activity tab) ──────────────────
+    event_name = f"zerodha_order_{status.lower() or 'update'}"
+    auth.audit(user_id or 1, event_name, request.remote_addr or "kite", meta)
+
+    # ── Trigger SSE event so dashboard refreshes immediately ─────
+    try:
+        if hasattr(app, "_broadcast_event"):
+            app._broadcast_event("zerodha_order_update", meta)
+    except Exception:
+        pass
+
+    return jsonify({"ok": True, "verified": True, "order_id": order_id}), 200
+
 
 @app.route("/api/zerodha/connect", methods=["POST"])
 @_require_auth
@@ -801,14 +987,15 @@ def api_zerodha_session():
     if not req_token:
         return jsonify({"error": "missing_fields",
                         "message": "request_token is required"}), 400
-    broker, err = _get_zerodha_broker(u["id"])
+    # Session creation — access_token is what we are about to mint, so do NOT require it
+    broker, err = _get_zerodha_broker(u["id"], require_token=False)
     if err:
         return jsonify({"error": err}), 400
     try:
         session = broker.generate_session(req_token)
         access_token   = session.get("access_token", "")
         login_time     = session.get("login_time", "")
-        expiry_ts      = (datetime.utcnow() + timedelta(hours=20)).isoformat()
+        expiry_ts      = (auth.utcnow() + timedelta(hours=20)).isoformat()
         auth.update_zerodha_access_token(u["id"], access_token, session_expiry=expiry_ts)
         auth.audit(u["id"], "zerodha_session_created", _client_ip())
         return jsonify({"ok": True, "login_time": login_time,
@@ -839,25 +1026,27 @@ def api_zerodha_callback():
     status        = request.args.get("status", "")
 
     if not request_token:
-        return redirect("/?zerodha_error=missing_token")
+        return redirect("/?zerodha_error=" + quote_plus("missing_token"))
     if status and status != "success":
-        return redirect("/?zerodha_error=" + status)
+        return redirect("/?zerodha_error=" + quote_plus(status))
 
-    broker, err = _get_zerodha_broker(u["id"])
+    # Same chicken-and-egg as /api/zerodha/session: this is the call that
+    # creates the access_token, so do not require it to be present.
+    broker, err = _get_zerodha_broker(u["id"], require_token=False)
     if err:
-        return redirect("/?zerodha_error=" + err)
+        return redirect("/?zerodha_error=" + quote_plus(str(err)))
 
     try:
         session      = broker.generate_session(request_token)
         access_token = session.get("access_token", "")
         if not access_token:
-            return redirect("/?zerodha_error=no_access_token")
-        expiry_ts = (datetime.utcnow() + timedelta(hours=20)).isoformat()
+            return redirect("/?zerodha_error=" + quote_plus("no_access_token"))
+        expiry_ts = (auth.utcnow() + timedelta(hours=20)).isoformat()
         auth.update_zerodha_access_token(u["id"], access_token, session_expiry=expiry_ts)
         auth.audit(u["id"], "zerodha_session_created", _client_ip(), {"via": "callback"})
         return redirect("/?zerodha_ok=1")
     except Exception as e:
-        return redirect("/?zerodha_error=" + str(e)[:120].replace(" ", "_"))
+        return redirect("/?zerodha_error=" + quote_plus(str(e)[:200]))
 
 @app.route("/api/zerodha/disconnect", methods=["POST"])
 @_require_auth
@@ -974,34 +1163,71 @@ def api_zerodha_place_order():
     for f in ["tradingsymbol", "transaction_type", "quantity"]:
         if not body.get(f):
             return jsonify({"error": "missing_field", "field": f}), 400
+    # Validate side, symbol, qty, price
+    side = str(body["transaction_type"]).upper()
+    if side not in ("BUY", "SELL"):
+        return jsonify({"error": "invalid_input",
+                        "message": "transaction_type must be BUY or SELL"}), 400
+    sym = str(body["tradingsymbol"]).upper().strip()
+    if not _SYMBOL_RE.match(sym):
+        return jsonify({"error": "invalid_input",
+                        "message": "tradingsymbol must be 1-20 alphanumerics"}), 400
+    try:
+        qty   = _bounded_number(body["quantity"], name="quantity",
+                                lo=_BOUNDS["qty"][0], hi=_BOUNDS["qty"][1],
+                                allow_zero=False, cast=int)
+        price = _bounded_number(body.get("price", 0), name="price",
+                                lo=_BOUNDS["price"][0], hi=_BOUNDS["price"][1],
+                                cast=float) or 0
+        trigger_price     = _bounded_number(body.get("trigger_price", 0), name="trigger_price",
+                                            lo=0, hi=_BOUNDS["price"][1], cast=float) or 0
+        squareoff         = _bounded_number(body.get("squareoff", 0), name="squareoff",
+                                            lo=0, hi=_BOUNDS["price"][1], cast=float) or 0
+        stoploss          = _bounded_number(body.get("stoploss", 0), name="stoploss",
+                                            lo=0, hi=_BOUNDS["price"][1], cast=float) or 0
+        trailing_stoploss = _bounded_number(body.get("trailing_stoploss", 0), name="trailing_stoploss",
+                                            lo=0, hi=_BOUNDS["price"][1], cast=float) or 0
+    except _ValidationError as e:
+        return jsonify({"error": "invalid_input", "message": str(e)}), 400
+    # Cross-field check: LIMIT orders require non-zero price
+    order_type = str(body.get("order_type", "MARKET")).upper()
+    if order_type in ("LIMIT", "SL") and price <= 0:
+        return jsonify({"error": "invalid_input",
+                        "message": f"{order_type} order requires price > 0"}), 400
+
     broker, err = _get_zerodha_broker(u["id"])
     if err:
         return jsonify({"error": err}), 400
     try:
         order_id = broker.place_order(
-            tradingsymbol    = body["tradingsymbol"].upper(),
-            transaction_type = body["transaction_type"].upper(),
-            quantity         = int(body["quantity"]),
-            price            = float(body.get("price", 0)),
-            trigger_price    = float(body.get("trigger_price", 0)),
-            order_type       = body.get("order_type", "MARKET").upper(),
+            tradingsymbol    = sym,
+            transaction_type = side,
+            quantity         = qty,
+            price            = price,
+            trigger_price    = trigger_price,
+            order_type       = order_type,
             product          = body.get("product", "MIS").upper(),
             exchange         = body.get("exchange", "NSE").upper(),
             variety          = body.get("variety", "regular").lower(),
             validity         = body.get("validity", "DAY").upper(),
-            squareoff        = float(body.get("squareoff", 0)),
-            stoploss         = float(body.get("stoploss", 0)),
-            trailing_stoploss= float(body.get("trailing_stoploss", 0)),
+            squareoff        = squareoff,
+            stoploss         = stoploss,
+            trailing_stoploss= trailing_stoploss,
             tag              = body.get("tag", ""),
         )
         auth.audit(u["id"], "zerodha_order_placed", _client_ip(), {
-            "symbol": body["tradingsymbol"],
-            "side":   body["transaction_type"],
-            "qty":    body["quantity"],
+            "symbol": sym, "side": side, "qty": qty, "price": price,
+            "type": order_type, "order_id": str(order_id),
         })
         return jsonify({"ok": True, "order_id": order_id})
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        # Broker rejection (insufficient margin, market closed, etc.) is a
+        # client/state error, not a server bug. Return 400 so frontend
+        # surfaces a clean toast.
+        auth.audit(u["id"], "zerodha_order_failed", _client_ip(), {
+            "symbol": sym, "side": side, "qty": qty, "error": str(e)[:200],
+        })
+        return jsonify({"error": "broker_error", "message": str(e)}), 400
 
 @app.route("/api/zerodha/order/<order_id>", methods=["DELETE"])
 @_require_auth
@@ -1257,18 +1483,48 @@ def api_set_allocation(broker: str):
         return jsonify({"error": "unknown broker"}), 400
     body = request.get_json(force=True, silent=True) or {}
     kwargs = {}
-    for field, cast in [("budget", float), ("max_positions", int),
-                        ("stop_pct", float), ("tp_pct", float), ("auto_trade", int)]:
-        if field in body:
-            try:
-                kwargs[field] = cast(body[field])
+    try:
+        for field, cast in [("budget", float), ("max_positions", int),
+                            ("stop_pct", float), ("tp_pct", float)]:
+            if field in body:
+                lo, hi = _BOUNDS[field]
+                v = _bounded_number(body[field], name=field, lo=lo, hi=hi, cast=cast)
+                if v is not None:
+                    kwargs[field] = v
+        if "auto_trade" in body:
+            try: kwargs["auto_trade"] = 1 if int(body["auto_trade"]) else 0
             except (TypeError, ValueError):
-                return jsonify({"error": f"invalid {field}"}), 400
+                raise _ValidationError("auto_trade: must be 0 or 1")
+    except _ValidationError as e:
+        return jsonify({"error": "invalid_input", "message": str(e)}), 400
+    if "trading_mode" in body:
+        kwargs["trading_mode"] = str(body["trading_mode"] or "").lower()
     if not kwargs:
         return jsonify({"error": "no fields to update"}), 400
-    db.upsert_fund_allocation(u["id"], broker, **kwargs)
+    try:
+        db.upsert_fund_allocation(u["id"], broker, **kwargs)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
     auth.audit(u["id"], f"allocation_updated_{broker}", _client_ip(), kwargs)
     return jsonify({"ok": True, "allocation": db.get_fund_allocation(u["id"], broker)})
+
+
+@app.route("/api/trading_modes", methods=["GET"])
+@_require_auth
+def api_trading_modes():
+    """Catalog of available trading modes — for UI rendering."""
+    catalog = []
+    for key, p in db.get_trading_mode_presets().items():
+        catalog.append({
+            "id":            key,
+            "label":         p.get("label", key),
+            "tagline":       p.get("tagline", ""),
+            "max_positions": p.get("max_positions"),
+            "stop_pct":      p.get("stop_pct"),
+            "tp_pct":        p.get("tp_pct"),
+            "position_pct":  p.get("position_pct"),
+        })
+    return jsonify(catalog)
 
 
 @app.route("/api/allocations/<broker>/toggle", methods=["POST"])
@@ -1285,6 +1541,48 @@ def api_toggle_auto_trade(broker: str):
     return jsonify({"ok": True, "auto_trade": new_val})
 
 
+# ── Indian bot live state (read-only) ─────────────────────────────
+INDIAN_BOT_STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                     "indian_bot_state.json")
+
+@app.route("/api/indian/state")
+@_require_auth
+def api_indian_state():
+    """
+    Return the live state of the Indian bot (Zerodha/AngelOne).
+    The bot writes indian_bot_state.json every loop iteration.
+    Frontend polls this every 8s for the Zerodha tab.
+    """
+    try:
+        if not os.path.exists(INDIAN_BOT_STATE_FILE):
+            return jsonify({
+                "running": False,
+                "broker": None,
+                "daily_pnl": 0,
+                "daily_trades": 0,
+                "watchlist": [],
+                "log": [],
+                "vix": None,
+                "allocation": {},
+                "trading_paused": False,
+                "pause_reason": "Bot has not started yet",
+                "last_scan": None,
+            })
+        with open(INDIAN_BOT_STATE_FILE, "r", encoding="utf-8") as f:
+            state = json.load(f)
+        # Best-effort merge with current allocation from DB (lets UI reflect
+        # changes the user just made without waiting for the bot to reload)
+        try:
+            u = _current_user()
+            broker = state.get("broker") or "zerodha"
+            state["allocation"] = db.get_fund_allocation(u["id"], broker)
+        except Exception:
+            pass
+        return jsonify(state)
+    except Exception as e:
+        return jsonify({"error": str(e)[:200]}), 500
+
+
 @app.route("/api/sessions")
 @_require_auth
 def api_sessions():
@@ -1298,7 +1596,10 @@ def api_sessions():
             "created_at": s["created_at"],
             "expires_at": s["expires_at"],
             "current":    (s["token"] == cur_token),
-            "token_tail": s["token"][-8:],
+            # Expose a 16-char tail so revoke matches are strong (16 hex chars
+            # = 96 bits of entropy → effectively unguessable). Frontend just
+            # echoes whatever we send back.
+            "token_tail": s["token"][-16:],
         })
     return jsonify(sessions)
 
@@ -1308,11 +1609,16 @@ def api_revoke_session():
     u = _current_user()
     body = request.get_json(force=True, silent=True) or {}
     tail = body.get("token_tail", "")
-    if not tail or len(tail) < 6:
-        return jsonify({"error": "bad_request"}), 400
+    # Require at least 16 chars and only the user's own tokens are searched.
+    # Use constant-time compare to defeat timing oracles.
+    if not tail or len(tail) < 16:
+        return jsonify({"error": "bad_request",
+                        "message": "token_tail must be at least 16 chars"}), 400
     for s in auth.list_sessions(u["id"]):
-        if s["token"].endswith(tail):
+        if secrets.compare_digest(s["token"][-len(tail):], tail):
             auth.delete_session(s["token"])
+            auth.audit(u["id"], "session_revoked", _client_ip(),
+                       {"tail": tail[-8:]})
             return jsonify({"ok": True})
     return jsonify({"error": "not_found"}), 404
 
@@ -1348,6 +1654,7 @@ def api_stream():
     )
 
 @app.route("/api/health")
+@_require_auth
 def api_health():
     # Real supervisor service names on this server
     svc_names = {
@@ -1786,6 +2093,18 @@ def disclaimer():
             return f.read()
     return "Disclaimer page missing.", 404
 
+# Allowed keys for /api/config — whitelist to prevent arbitrary writes
+# to strategy_params.json. Keep aligned with intraday_bot_v2.py DEFAULTS.
+_STRAT_ALLOWED_KEYS = {
+    "ema_fast", "ema_slow", "rsi_buy_min", "rsi_buy_max",
+    "stop_loss_pct", "take_profit_pct", "partial_tp_pct",
+    "max_positions", "budget_per_trade", "min_confidence",
+    "daily_loss_limit_pct", "vix_pause_threshold", "vix_stop_threshold",
+    "rel_vol_min", "max_drawdown_pct", "consecutive_loss_pause",
+    "consecutive_loss_cooldown_min", "risk_per_trade_pct",
+    "max_spread_pct", "ollama_model",
+}
+
 @app.route("/api/config", methods=["GET"])
 @_require_auth
 def api_config_get():
@@ -1794,11 +2113,36 @@ def api_config_get():
 @app.route("/api/config", methods=["POST"])
 @_require_auth
 def api_config_post():
-    updates = request.get_json(force=True) or {}
+    u = _current_user()
+    raw = request.get_json(force=True) or {}
+    # Whitelist + type/range validation
+    updates = {}
+    rejected = []
+    for k, v in raw.items():
+        if k not in _STRAT_ALLOWED_KEYS:
+            rejected.append(k)
+            continue
+        # Numeric fields → float; ollama_model → str
+        if k == "ollama_model":
+            updates[k] = str(v)[:64]
+        else:
+            try:
+                f = float(v)
+                # Sanity range — same as our budget bounds (negative→reject, huge→reject)
+                if f < 0 or f > 1_000_000:
+                    rejected.append(k); continue
+                updates[k] = f
+            except (TypeError, ValueError):
+                rejected.append(k); continue
+    if not updates:
+        return jsonify({"error": "no_valid_fields", "rejected": rejected}), 400
     current = read_json(STRAT_F, {})
     current.update(updates)
     write_json(STRAT_F, current)
-    return jsonify({"ok": True, "params": current})
+    auth.audit(u["id"], "config_updated", _client_ip(),
+               {"keys": list(updates.keys()), "rejected": rejected})
+    return jsonify({"ok": True, "params": current,
+                    "rejected": rejected})
 
 @app.route("/api/action", methods=["POST"])
 @_require_auth
@@ -1900,6 +2244,173 @@ def telegram_delete():
     return jsonify({"ok": True})
 
 
+# ── Per-broker credential validators + cached health aggregate ─────
+# Each /api/<broker>/validate hits the broker's cheapest "is this user
+# logged in?" endpoint. Frontend wires this to a "Re-validate" button
+# on each Profile card and to a top-of-app banner that calls
+# /api/brokers/health (cached 5 min) to surface silently-broken creds.
+
+_BROKER_HEALTH_CACHE = {"data": {}, "ts": 0, "ttl": 300}
+_BROKER_HEALTH_LOCK = threading.Lock()
+
+
+def _validate_alpaca(uid: int) -> dict:
+    creds = auth.get_alpaca_creds(uid)
+    if not creds:
+        return {"connected": False, "ok": False,
+                "error": "no_credentials", "fix": "reconnect"}
+    # DB row exists but encrypted blob decrypts to ""—master key rotation
+    # or DB tampering. Surface it as connected+broken so the banner fires.
+    if not creds.get("api_key") or not creds.get("secret_key"):
+        return {"connected": True, "ok": False,
+                "error": "credentials_corrupted",
+                "fix": "reconnect"}
+    try:
+        ok, data = auth.validate_alpaca(creds["api_key"], creds["secret_key"],
+                                        is_paper=creds["is_paper"])
+        if ok:
+            return {"connected": True, "ok": True,
+                    "account": data.get("account_number"),
+                    "status":  data.get("status"),
+                    "is_paper": creds["is_paper"]}
+        # 401 / 403 / etc. — credentials are present but rejected
+        msg = (data or {}).get("message") or (data or {}).get("error") \
+              or "stored credentials rejected"
+        return {"connected": True, "ok": False,
+                "error": str(msg)[:200], "fix": "reconnect"}
+    except Exception as e:
+        return {"connected": True, "ok": False,
+                "error": str(e)[:200], "fix": "retry_or_reconnect"}
+
+
+def _validate_angelone(uid: int) -> dict:
+    creds = auth.get_angelone_creds(uid)
+    if not creds:
+        return {"connected": False, "ok": False,
+                "error": "no_credentials", "fix": "reconnect"}
+    if not creds.get("api_key") or not creds.get("client_id"):
+        return {"connected": True, "ok": False,
+                "error": "credentials_corrupted",
+                "fix": "reconnect"}
+    try:
+        broker, err = _get_angelone_broker(uid)
+        if err:
+            return {"connected": True, "ok": False,
+                    "error": str(err)[:200], "fix": "reconnect"}
+        # ensure_logged_in() refreshes JWT if needed — same call the bot makes
+        broker.ensure_logged_in()
+        _persist_angelone_tokens(uid, broker)
+        prof = broker.get_profile() or {}
+        return {"connected": True, "ok": True,
+                "client_id": creds.get("client_id"),
+                "name":      (prof or {}).get("name", "")}
+    except Exception as e:
+        return {"connected": True, "ok": False,
+                "error": str(e)[:200], "fix": "reconnect"}
+
+
+def _validate_zerodha(uid: int) -> dict:
+    creds = auth.get_zerodha_creds(uid)
+    if not creds:
+        return {"connected": False, "ok": False,
+                "error": "no_credentials", "fix": "reconnect"}
+    if not creds.get("api_key"):
+        return {"connected": True, "ok": False,
+                "error": "credentials_corrupted",
+                "fix": "reconnect"}
+    if not creds.get("access_token"):
+        # Connected (api_key/secret saved) but no daily token yet
+        return {"connected": True, "ok": False,
+                "error": "needs_daily_login",
+                "fix": "kite_login",
+                "login_url": f"https://kite.trade/connect/login?api_key={creds['api_key']}&v=3"}
+    try:
+        broker, err = _get_zerodha_broker(uid)
+        if err:
+            return {"connected": True, "ok": False,
+                    "error": str(err)[:200], "fix": "reconnect"}
+        prof = broker.get_profile() or {}
+        return {"connected": True, "ok": True,
+                "user_id": prof.get("user_id"),
+                "name":    prof.get("user_name", ""),
+                "session_expiry": creds.get("session_expiry")}
+    except Exception as e:
+        msg = str(e)
+        # Kite's "Token is invalid or has expired" is the classic daily-expiry
+        if "expired" in msg.lower() or "invalid" in msg.lower():
+            return {"connected": True, "ok": False,
+                    "error": "session_expired", "fix": "kite_login",
+                    "login_url": f"https://kite.trade/connect/login?api_key={creds['api_key']}&v=3"}
+        return {"connected": True, "ok": False,
+                "error": msg[:200], "fix": "reconnect"}
+
+
+_BROKER_VALIDATORS = {
+    "alpaca":   _validate_alpaca,
+    "angelone": _validate_angelone,
+    "zerodha":  _validate_zerodha,
+}
+
+
+@app.route("/api/<broker>/validate", methods=["POST"])
+@_require_auth
+def api_broker_validate(broker: str):
+    """Re-test stored creds for one broker. Bypasses the health cache
+    so users get an immediate answer when they click 'Re-validate'."""
+    if broker not in _BROKER_VALIDATORS:
+        return jsonify({"error": "unknown_broker"}), 400
+    u = _current_user()
+    result = _BROKER_VALIDATORS[broker](u["id"])
+    auth.audit(u["id"], f"creds_validated_{broker}", _client_ip(),
+               {"ok": result.get("ok")})
+    # Invalidate the health cache so the banner reflects this answer next poll
+    with _BROKER_HEALTH_LOCK:
+        _BROKER_HEALTH_CACHE["data"].pop((u["id"], broker), None)
+    return jsonify(result)
+
+
+@app.route("/api/brokers/health")
+@_require_auth
+def api_brokers_health():
+    """Aggregate health of all 3 brokers for the current user. Cached
+    for 5 minutes per (user, broker) pair to keep this cheap when the
+    frontend polls. Pass ?force=1 to bypass the cache."""
+    u    = _current_user()
+    uid  = u["id"]
+    force = request.args.get("force") == "1"
+    now  = time.time()
+    out  = {}
+    to_validate = []
+    with _BROKER_HEALTH_LOCK:
+        for b in _BROKER_VALIDATORS:
+            entry = _BROKER_HEALTH_CACHE["data"].get((uid, b))
+            if (not force) and entry and (now - entry["ts"]) < _BROKER_HEALTH_CACHE["ttl"]:
+                out[b] = entry["data"]
+            else:
+                to_validate.append(b)
+    if to_validate:
+        # Run validators in parallel — broker calls are network-bound
+        with _AggPool(max_workers=len(to_validate)) as pool:
+            future_map = {pool.submit(_BROKER_VALIDATORS[b], uid): b for b in to_validate}
+            for fut in future_map:
+                b = future_map[fut]
+                try:
+                    out[b] = fut.result(timeout=15)
+                except Exception as e:
+                    out[b] = {"connected": True, "ok": False,
+                              "error": str(e)[:200], "fix": "retry"}
+        with _BROKER_HEALTH_LOCK:
+            for b in to_validate:
+                _BROKER_HEALTH_CACHE["data"][(uid, b)] = {"ts": now, "data": out[b]}
+
+    # Compact summary for the banner
+    broken = [b for b, d in out.items()
+              if d.get("connected") and not d.get("ok")]
+    return jsonify({
+        "brokers": out,
+        "broken":  broken,
+        "checked_at": auth.utcnow().isoformat() + "Z",
+    })
 
 
 # ── Bot real-money mode + panic switch (admin only) ───────────────
@@ -2080,11 +2591,18 @@ def api_aggregate_overview():
                 return ("alpaca", {"connected": False})
             hdr = {"APCA-API-KEY-ID": env_key, "APCA-API-SECRET-KEY": env_sec}
             import requests as _rq
-            acct = _rq.get(env_url + "/account", headers=hdr, timeout=8).json()
-            pos  = _rq.get(env_url + "/positions", headers=hdr, timeout=8).json()
-            ords = _rq.get(env_url + "/orders", headers=hdr,
-                           params={"status":"closed","limit":20,"direction":"desc"},
-                           timeout=8).json()
+
+            def _safe_json(url, **kw):
+                """GET, raise for non-2xx, return parsed JSON. Caller catches."""
+                r = _rq.get(url, headers=hdr, timeout=8, **kw)
+                if r.status_code >= 400:
+                    raise RuntimeError(f"alpaca {url[-32:]} HTTP {r.status_code}: {r.text[:120]}")
+                return r.json()
+
+            acct = _safe_json(env_url + "/account")
+            pos  = _safe_json(env_url + "/positions")
+            ords = _safe_json(env_url + "/orders",
+                              params={"status":"closed","limit":20,"direction":"desc"})
             mode = "live" if "paper" not in env_url.lower() else "paper"
             normalized = [{
                 "symbol": p.get("symbol"), "qty": p.get("qty"),
@@ -2141,10 +2659,22 @@ def api_aggregate_overview():
                      "avg": p.get("average_price"), "ltp": p.get("last_price"), "pnl": p.get("pnl"),
                      "exchange": p.get("exchange"), "currency": "INR"}
                     for p in (zr_pos if isinstance(zr_pos,list) else [])]
-            eq = ((zr_funds or {}).get("equity") or {}).get("available", {}) if isinstance(zr_funds, dict) else {}
+            # Zerodha cash semantics:
+            #   equity.available.live_balance = real-time cash (cash + realised PnL today)
+            #   equity.available.cash         = deposited cash (static)
+            #   equity.net                    = available margin for new trades
+            zr_eq    = (zr_funds or {}).get("equity") or {} if isinstance(zr_funds, dict) else {}
+            zr_avail = zr_eq.get("available") or {}
+            zr_util  = zr_eq.get("utilised")  or {}
+            available_cash = zr_avail.get("live_balance")
+            if available_cash in (None, ""):
+                available_cash = zr_avail.get("cash")
             return ("zerodha", {
                 "connected": True,
-                "available_cash": (eq.get("cash") if isinstance(eq, dict) else None),
+                "available_cash":   available_cash,
+                "available_margin": zr_eq.get("net"),
+                "used_margin":      zr_util.get("debits"),
+                "opening_balance":  zr_avail.get("opening_balance"),
                 "currency": "INR", "positions": norm,
                 "recent_orders": [{"sym": o.get("tradingsymbol"), "side": o.get("transaction_type"),
                                    "qty": o.get("quantity"), "px": o.get("price"),

@@ -258,9 +258,34 @@ class ZerodhaBroker:
         exchange: str = "NSE",
         product: str = "MIS",
     ) -> str:
+        """
+        Close a position. Uses LIMIT at LTP +/- 0.5% to satisfy Zerodha's
+        no-pure-market-orders policy while still guaranteeing fill.
+        BUY  close (covering SHORT): LIMIT at LTP * 1.005
+        SELL close (closing LONG):   LIMIT at LTP * 0.995
+        """
+        # Fetch current LTP
+        try:
+            ltp_data = self.get_ltp([f"{exchange}:{tradingsymbol}"])
+            ltp = float(ltp_data.get(f"{exchange}:{tradingsymbol}", {}).get("last_price", 0))
+        except Exception:
+            ltp = 0
+        side = transaction_type.upper()
+        if ltp > 0:
+            limit_price = round(ltp * (1.005 if side == "BUY" else 0.995), 1)
+            return self.place_order(
+                tradingsymbol=tradingsymbol,
+                transaction_type=side,
+                quantity=quantity,
+                order_type="LIMIT",
+                price=limit_price,
+                product=product,
+                exchange=exchange,
+            )
+        # Fallback: market_protection=5% lets MARKET orders go through
         return self.place_order(
             tradingsymbol=tradingsymbol,
-            transaction_type=transaction_type,
+            transaction_type=side,
             quantity=quantity,
             order_type="MARKET",
             product=product,

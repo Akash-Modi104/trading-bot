@@ -12,6 +12,7 @@ import json, os, time, requests
 import numpy as np
 from datetime import datetime, date, time as dtime
 import pytz
+import safe_io
 from telegram_alerts import (alert_buy, alert_sell, alert_daily_loss,
                               alert_vix, alert_regime, alert_eod, alert_startup)
 
@@ -149,8 +150,7 @@ _state = {
 
 def save_state():
     try:
-        with open(STATE_FILE, "w") as f:
-            json.dump(_state, f, indent=2, default=str)
+        safe_io.write_json_atomic(STATE_FILE, _state, indent=2)
     except Exception as e:
         print(f"  [WARN] save_state failed: {e}")
 
@@ -333,10 +333,7 @@ def load_log():
         except: return []
 
 def append_log(entry):
-    log = load_log()
-    log.append(entry)
-    with open(LOG_FILE, "w") as f:
-        json.dump(log[-5000:], f, indent=2)
+    safe_io.append_json_list_atomic(LOG_FILE, entry, max_entries=5000)
 
 def load_picks():
     if not os.path.exists(PICKS_FILE): return []
@@ -514,8 +511,7 @@ def append_equity_snapshot(equity):
               "ts": now_et().isoformat()})
     h = h[-180:]  # keep ~6 months
     try:
-        with open(EQUITY_HIST_F, "w") as f:
-            json.dump(h, f, indent=2)
+        safe_io.write_json_atomic(EQUITY_HIST_F, h, indent=2)
     except Exception as e:
         print(f"  [WARN] append_equity_snapshot failed: {e}")
 
@@ -562,8 +558,7 @@ POSITIONS_F = os.path.join(BASE_DIR, "positions_state.json")
 
 def save_positions():
     try:
-        with open(POSITIONS_F, "w") as f:
-            json.dump(open_positions, f, indent=2, default=str)
+        safe_io.write_json_atomic(POSITIONS_F, open_positions, indent=2)
     except Exception as e:
         print(f"  [WARN] save_positions failed: {e}")
 

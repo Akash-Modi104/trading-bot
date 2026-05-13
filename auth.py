@@ -6,16 +6,42 @@ import json
 import secrets
 import bcrypt
 import requests
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from cryptography.fernet import Fernet, InvalidToken
 
 import db
 
+
+def utcnow():
+    """Return tz-naive UTC datetime — drop-in replacement for the
+    deprecated utcnow(). Preserves existing isoformat output
+    so it stays compatible with already-stored DB strings."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ENV_FILE = os.path.join(BASE_DIR, ".env")
 
-# ── Fernet master key (auto-generated on first run, persisted to .env) ──
+# ── Fernet master key — read directly from .env, never auto-rotate ──
+# Bulletproof: any process that imports auth (api_server, indian_bot,
+# ad-hoc scripts, telegram_alerts) reads the same key from disk.
+# Auto-generation only happens on FIRST RUN (no key in env AND no key in .env).
+def _read_key_from_env_file():
+    """Parse .env directly — bypass os.environ which may not be loaded."""
+    try:
+        if not os.path.exists(ENV_FILE):
+            return ""
+        with open(ENV_FILE) as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith("MASTER_ENCRYPTION_KEY="):
+                    return line.split("=", 1)[1].strip()
+    except Exception:
+        pass
+    return ""
+
+
 def _load_or_create_master_key():
+    # 1) Fast path: os.environ
     key = os.environ.get("MASTER_ENCRYPTION_KEY", "").strip()
     if key:
         try:
@@ -23,21 +49,28 @@ def _load_or_create_master_key():
             return key
         except Exception:
             pass
-    # Generate and persist
+    # 2) Bulletproof fallback: read .env directly
+    key = _read_key_from_env_file()
+    if key:
+        try:
+            Fernet(key.encode())
+            os.environ["MASTER_ENCRYPTION_KEY"] = key
+            return key
+        except Exception:
+            pass
+    # 3) Genuinely missing — first run only
     new_key = Fernet.generate_key().decode()
     try:
-        # Append to .env so subsequent restarts pick it up
         existing = ""
         if os.path.exists(ENV_FILE):
-            with open(ENV_FILE) as f:
-                existing = f.read()
-        # Replace existing line if any, else append
+            existing = open(ENV_FILE).read()
         lines = [l for l in existing.split("\n") if not l.startswith("MASTER_ENCRYPTION_KEY=")]
         lines.append(f"MASTER_ENCRYPTION_KEY={new_key}")
         with open(ENV_FILE, "w") as f:
             f.write("\n".join(l for l in lines if l.strip()) + "\n")
-    except Exception:
-        pass
+        print("[auth] Generated new MASTER_ENCRYPTION_KEY (first run). Persisted to .env.", flush=True)
+    except Exception as e:
+        print(f"[auth] WARNING: could not persist master key: {e}", flush=True)
     os.environ["MASTER_ENCRYPTION_KEY"] = new_key
     return new_key
 
@@ -59,11 +92,15 @@ def encrypt(s: str) -> bytes:
     return _fernet.encrypt(s.encode())
 
 def decrypt(b) -> str:
+    if b is None or b == "" or b == b"":
+        return ""
     if isinstance(b, str):
         b = b.encode()
+    if not isinstance(b, (bytes, bytearray)):
+        return ""
     try:
         return _fernet.decrypt(b).decode()
-    except InvalidToken:
+    except (InvalidToken, ValueError, TypeError):
         return ""
 
 # ── User CRUD ────────────────────────────────────────────────────
@@ -109,7 +146,7 @@ def change_password(uid: int, new_password: str):
 # ── Sessions ──────────────────────────────────────────────────────
 def create_session(user_id: int, ip: str = "", ua: str = "", days: int = 30) -> str:
     token = secrets.token_urlsafe(32)
-    expires = (datetime.utcnow() + timedelta(days=days)).isoformat()
+    expires = (utcnow() + timedelta(days=days)).isoformat()
     db.execute(
         "INSERT INTO user_sessions(token,user_id,ip,user_agent,expires_at) VALUES (?,?,?,?,?)",
         (token, user_id, ip, ua[:500], expires),
@@ -126,7 +163,7 @@ def get_user_by_session(token: str):
     if not s:
         return None
     try:
-        if datetime.fromisoformat(s["expires_at"]) < datetime.utcnow():
+        if datetime.fromisoformat(s["expires_at"]) < utcnow():
             return None
     except Exception:
         return None
@@ -147,7 +184,7 @@ def list_sessions(user_id: int):
 def cleanup_expired_sessions():
     db.execute(
         "DELETE FROM user_sessions WHERE expires_at < ?",
-        (datetime.utcnow().isoformat(),),
+        (utcnow().isoformat(),),
     )
 
 # ── Login rate limiting ──────────────────────────────────────────
@@ -158,7 +195,7 @@ def record_login_attempt(ip: str, email: str, success: bool):
     )
 
 def is_rate_limited(ip: str, window_min: int = 15, max_attempts: int = 5) -> bool:
-    cutoff = (datetime.utcnow() - timedelta(minutes=window_min)).isoformat()
+    cutoff = (utcnow() - timedelta(minutes=window_min)).isoformat()
     row = db.query_one(
         "SELECT COUNT(*) AS n FROM login_attempts "
         "WHERE ip=? AND success=0 AND created_at > ?",
@@ -168,8 +205,12 @@ def is_rate_limited(ip: str, window_min: int = 15, max_attempts: int = 5) -> boo
 
 # ── Audit ────────────────────────────────────────────────────────
 def audit(user_id, event: str, ip: str = "", meta=""):
-    if isinstance(meta, dict):
-        meta = json.dumps(meta)
+    if isinstance(meta, (dict, list, tuple)):
+        meta = json.dumps(meta, default=str)
+    elif meta is None:
+        meta = ""
+    elif not isinstance(meta, (str, bytes, int, float)):
+        meta = str(meta)
     db.execute(
         "INSERT INTO audit_log(user_id, event, ip, meta) VALUES (?,?,?,?)",
         (user_id, event, ip, meta),
@@ -209,7 +250,7 @@ def save_alpaca_creds(user_id: int, api_key: str, secret_key: str,
            VALUES (?,?,?,?,?,?,?)""",
         (user_id, encrypt(api_key), encrypt(secret_key), base_url,
          1 if is_paper else 0, account_number,
-         datetime.utcnow().isoformat()),
+         utcnow().isoformat()),
     )
 
 def get_alpaca_creds(user_id: int):
@@ -275,7 +316,7 @@ def save_angelone_creds(user_id: int, api_key: str, client_id: str,
             encrypt(jwt_token) if jwt_token else b"",
             encrypt(refresh_token) if refresh_token else b"",
             logged_in_at or "",
-            datetime.utcnow().isoformat(),
+            utcnow().isoformat(),
         ),
     )
 
@@ -309,7 +350,7 @@ def get_angelone_status(user_id: int) -> dict:
 def update_angelone_tokens(user_id: int, jwt_token: str, refresh_token: str,
                             logged_in_at: str = ""):
     """Persist refreshed tokens without touching the core credentials."""
-    ts = logged_in_at or datetime.utcnow().isoformat()
+    ts = logged_in_at or utcnow().isoformat()
     db.execute(
         """UPDATE user_angelone_creds
            SET jwt_token_enc=?, refresh_token_enc=?, logged_in_at=?
@@ -337,7 +378,7 @@ def save_zerodha_creds(user_id: int, api_key: str, api_secret: str,
             encrypt(access_token) if access_token else b"",
             encrypt(request_token) if request_token else b"",
             session_expiry or "",
-            datetime.utcnow().isoformat(),
+            utcnow().isoformat(),
         ),
     )
 
@@ -345,9 +386,14 @@ def get_zerodha_creds(user_id: int):
     r = db.query_one("SELECT * FROM user_zerodha_creds WHERE user_id=?", (user_id,))
     if not r:
         return None
+    api_key    = decrypt(r["api_key_enc"]) if r["api_key_enc"] else ""
+    api_secret = decrypt(r["api_secret_enc"]) if r["api_secret_enc"] else ""
+    # If key decrypts to empty the Fernet key has rotated — treat as not connected
+    if not api_key:
+        return None
     return {
-        "api_key":       decrypt(r["api_key_enc"]),
-        "api_secret":    decrypt(r["api_secret_enc"]),
+        "api_key":       api_key,
+        "api_secret":    api_secret,
         "access_token":  decrypt(r["access_token_enc"]) if r["access_token_enc"] else "",
         "request_token": decrypt(r["request_token_enc"]) if r["request_token_enc"] else "",
         "session_expiry": r["session_expiry"],

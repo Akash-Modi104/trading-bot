@@ -8,6 +8,7 @@ import json, os, time, re, requests, sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 import pytz, schedule
+import safe_io
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -411,30 +412,29 @@ def run_scan(force=False):
             pick_map[sym] = pick
     merged = sorted(pick_map.values(), key=lambda x: -x["confidence"])[:10]
 
-    with open(PICKS_FILE, "w") as f:
-        json.dump(merged, f, indent=2)
+    safe_io.write_json_atomic(PICKS_FILE, merged, indent=2)
 
     elapsed = round(time.time() - t0, 1)
     log(f"Wrote {len(merged)} picks ({len(picks)} new, {len(existing_picks)} existing) in {elapsed}s")
     # Persist scan stats so dashboard can show health (target: <60s)
     try:
         stats_f = os.path.join(BASE_DIR, "scan_stats.json")
-        with open(stats_f, "w") as sf:
-            json.dump({
-                "last_scan": now_et().isoformat(),
-                "duration_sec": elapsed,
-                "picks": len(picks),
-                "watchlist_size": len(watchlist),
-                "model": _active_model(),
-                "scan_type": scan_type,
-            }, sf, indent=2)
+        safe_io.write_json_atomic(stats_f, {
+            "last_scan": now_et().isoformat(),
+            "duration_sec": elapsed,
+            "picks": len(picks),
+            "watchlist_size": len(watchlist),
+            "model": _active_model(),
+            "scan_type": scan_type,
+        }, indent=2)
     except Exception:
         pass
     for p in picks:
         log(f"  {p['symbol']:6s} conf={p['confidence']} | {p['reason'][:60]}")
 
-    with open(NEG_NEWS_F, "w") as f:
-        json.dump({"date": today, "tickers": list(neg_tickers.keys()), "reasons": neg_tickers}, f, indent=2)
+    safe_io.write_json_atomic(NEG_NEWS_F,
+        {"date": today, "tickers": list(neg_tickers.keys()), "reasons": neg_tickers},
+        indent=2)
     if neg_tickers:
         log(f"Kill-switch: {list(neg_tickers.keys())}")
 

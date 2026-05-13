@@ -22,6 +22,7 @@ Configuration:
   INDIAN_BOT_DAILY_LOSS_LIMIT  — max daily drawdown % (default 3.0)
 """
 
+import _force_ipv4_kite  # Force IPv4 for kite.trade per NSE IP whitelist
 import json
 import os
 import time
@@ -35,12 +36,14 @@ from brokers import get_broker
 from brokers.angelone import AngelOneBroker, AngelOneError
 from brokers.zerodha import ZerodhaBroker
 from telegram_alerts import alert_buy, alert_sell, alert_daily_loss, alert_eod, alert_startup
+import safe_io
 
 # ── Paths ──────────────────────────────────────────────────────
 BASE_DIR       = os.path.dirname(os.path.abspath(__file__))
 LOG_FILE       = os.path.join(BASE_DIR, "indian_trade_log.json")
 STATE_FILE     = os.path.join(BASE_DIR, "indian_bot_state.json")
 POSITIONS_F    = os.path.join(BASE_DIR, "indian_positions_state.json")
+NEG_NEWS_F     = os.path.join(BASE_DIR, "negative_news_in.json")  # written by news_scanner_indian.py
 
 # ── Timezone ───────────────────────────────────────────────────
 IST = pytz.timezone("Asia/Kolkata")
@@ -76,9 +79,16 @@ def _load_allocation(broker_name: str) -> dict:
         return {}
 
 
+_LAST_MODE_LOGGED = None  # avoid spamming the log when mode is unchanged
+
 def _apply_allocation(broker_name: str):
-    """Override module-level config with DB allocation settings if set."""
-    global BUDGET_PER_TRADE, MAX_POSITIONS, STOP_PCT, TP_PCT
+    """
+    Override module-level config from DB allocation settings.
+    get_fund_allocation() already merges in trading-mode preset values
+    (ruthless/balanced/slow_gainer), so by the time we read max_positions,
+    stop_pct, tp_pct here they reflect the active mode.
+    """
+    global BUDGET_PER_TRADE, MAX_POSITIONS, STOP_PCT, TP_PCT, _LAST_MODE_LOGGED
     alloc = _load_allocation(broker_name)
     if alloc.get("budget", 0) > 0:
         BUDGET_PER_TRADE = alloc["budget"]
@@ -88,6 +98,17 @@ def _apply_allocation(broker_name: str):
         STOP_PCT = alloc["stop_pct"]
     if alloc.get("tp_pct", 0) > 0:
         TP_PCT = alloc["tp_pct"]
+    # Surface the active mode in the state file (so the dashboard can show it)
+    # and log the change once whenever it flips.
+    mode = (alloc.get("trading_mode") or "balanced").lower()
+    _state["trading_mode"] = mode
+    _state["mode_label"]   = alloc.get("mode_label",   mode.title())
+    _state["mode_tagline"] = alloc.get("mode_tagline", "")
+    if mode != _LAST_MODE_LOGGED:
+        print(f"[mode] {broker_name} switched to '{mode}' "
+              f"(max_pos={MAX_POSITIONS}, stop={STOP_PCT}%, tp={TP_PCT}%, "
+              f"budget=₹{BUDGET_PER_TRADE:,.0f})", flush=True)
+        _LAST_MODE_LOGGED = mode
 
 
 def _is_auto_trade_enabled(broker_name: str) -> bool:
@@ -101,14 +122,29 @@ def _is_auto_trade_enabled(broker_name: str) -> bool:
         # If DB is unavailable, respect env var
         return os.environ.get("INDIAN_BOT_AUTO_TRADE", "0") == "1"
 
-# ── Nifty 50 watchlist (NSE trading symbols) ──────────────────
+# ── NIFTY 50 watchlist (NSE trading symbols) ──────────────────
+# Full NIFTY 50 constituents — high-volume large-caps suitable for intraday.
+# HDFC merged into HDFCBANK (2023) so removed from list.
 WATCHLIST = [
-    "RELIANCE", "TCS", "HDFCBANK", "ICICIBANK", "INFY",
-    "HINDUNILVR", "HDFC", "SBIN", "BAJFINANCE", "BHARTIARTL",
-    "WIPRO", "KOTAKBANK", "LT", "AXISBANK", "ASIANPAINT",
-    "MARUTI", "TITAN", "ULTRACEMCO", "SUNPHARMA", "NTPC",
-    "ONGC", "TATAMOTORS", "POWERGRID", "TATASTEEL", "ADANIENT",
-    "ADANIPORTS", "TECHM", "HCLTECH", "DRREDDY", "DIVISLAB",
+    # IT
+    "TCS", "INFY", "WIPRO", "HCLTECH", "TECHM", "LTIM",
+    # Banking & Financial
+    "HDFCBANK", "ICICIBANK", "SBIN", "KOTAKBANK", "AXISBANK",
+    "BAJFINANCE", "BAJAJFINSV", "INDUSINDBK", "SBILIFE", "HDFCLIFE", "SHRIRAMFIN",
+    # Energy / Oil & Gas
+    "RELIANCE", "ONGC", "COALINDIA", "BPCL",
+    # Auto
+    "MARUTI", "TATAMOTORS", "M&M", "BAJAJ-AUTO", "HEROMOTOCO", "EICHERMOT",
+    # Consumer / FMCG
+    "HINDUNILVR", "ITC", "NESTLEIND", "BRITANNIA", "TATACONSUM", "TITAN", "ASIANPAINT",
+    # Pharma
+    "SUNPHARMA", "DRREDDY", "DIVISLAB", "CIPLA", "APOLLOHOSP",
+    # Metals & Materials
+    "TATASTEEL", "JSWSTEEL", "HINDALCO", "ULTRACEMCO", "GRASIM",
+    # Telecom / Power / Infra
+    "BHARTIARTL", "NTPC", "POWERGRID", "LT",
+    # Adani
+    "ADANIENT", "ADANIPORTS",
 ]
 
 # Approximate NSE symbol tokens for Angel One (used for candle data)
@@ -136,7 +172,7 @@ _state = {
     "trading_paused":  False,
     "pause_reason":    "",
     "positions":       [],
-    "watchlist":       WATCHLIST[:15],
+    "watchlist":       list(WATCHLIST),
     "last_scan":       None,
     "equity":          0.0,
     "log":             [],
@@ -147,8 +183,7 @@ open_positions: dict = {}   # sym → {qty, entry, stop, trail_hi, tp, partial_t
 
 def save_state():
     try:
-        with open(STATE_FILE, "w") as f:
-            json.dump(_state, f, indent=2, default=str)
+        safe_io.write_json_atomic(STATE_FILE, _state, indent=2)
     except Exception as e:
         print(f"  [WARN] save_state failed: {e}")
 
@@ -176,16 +211,136 @@ def load_log() -> list:
 
 
 def append_log(entry: dict):
-    log = load_log()
-    log.append(entry)
-    with open(LOG_FILE, "w") as f:
-        json.dump(log[-5000:], f, indent=2, default=str)
+    safe_io.append_json_list_atomic(LOG_FILE, entry, max_entries=5000)
+
+
+def _broker_open_positions(broker) -> dict:
+    """Return {symbol: {qty, avg_price, exchange}} for whatever the broker
+    actually has open right now. Normalises across Zerodha + Angel One."""
+    out = {}
+    try:
+        if isinstance(broker, ZerodhaBroker):
+            raw = broker.get_positions() or {}
+            day = raw.get("day") if isinstance(raw, dict) else None
+            net = raw.get("net") if isinstance(raw, dict) else None
+            for p in (net or day or []):
+                qty = int(p.get("quantity") or 0)
+                if qty == 0:
+                    continue
+                out[p.get("tradingsymbol", "")] = {
+                    "qty":       qty,
+                    "avg_price": float(p.get("average_price") or 0),
+                    "exchange":  p.get("exchange") or "NSE",
+                }
+        elif isinstance(broker, AngelOneBroker):
+            for p in (broker.get_positions() or []):
+                qty = int(p.get("netqty") or 0)
+                if qty == 0:
+                    continue
+                out[p.get("tradingsymbol", "")] = {
+                    "qty":       qty,
+                    "avg_price": float(p.get("avgnetprice") or 0),
+                    "exchange":  p.get("exchange") or "NSE",
+                }
+    except Exception as e:
+        log_event(f"  could not fetch broker positions: {e}")
+    return out
+
+
+def _reconcile_positions_with_broker(broker):
+    """
+    Reconcile in-memory `open_positions` (tracked by bot) with the broker's
+    actual open positions. Three resolutions:
+
+      1. tracked but not at broker  → drop from tracking (broker closed it
+                                       while bot was down — likely manual
+                                       or by another process). Logged.
+      2. at broker but not tracked  → adopt with sentinel stop/tp values
+                                       so check_exits() will manage it.
+                                       Logged loudly so the operator knows.
+      3. tracked AND at broker      → keep tracked metadata (entry, stop,
+                                       trail_hi) but resync qty/avg_price
+                                       to broker truth.
+    """
+    broker_pos = _broker_open_positions(broker)
+    tracked    = set(open_positions.keys())
+    actual     = set(broker_pos.keys())
+    only_tracked = tracked - actual
+    only_actual  = actual - tracked
+    both         = tracked & actual
+
+    for sym in only_tracked:
+        log_event(f"  reconcile: {sym} tracked but not at broker — dropping")
+        open_positions.pop(sym, None)
+
+    for sym in only_actual:
+        bp = broker_pos[sym]
+        log_event(f"  reconcile: {sym} held at broker but not tracked "
+                  f"(qty={bp['qty']} avg=₹{bp['avg_price']:.2f}) — adopting")
+        # Conservative fallback stop/tp (configured pcts vs broker entry)
+        entry = bp["avg_price"] or 0
+        open_positions[sym] = {
+            "qty":       bp["qty"],
+            "entry":     entry,
+            "stop":      entry * (1 - STOP_PCT / 100) if entry > 0 else 0,
+            "tp":        entry * (1 + TP_PCT  / 100) if entry > 0 else 0,
+            "trail_hi":  entry,
+            "exchange":  bp.get("exchange", "NSE"),
+            "gtt_id":    None,        # no associated bracket — bot will exit on signal
+            "adopted":   True,
+            "adopted_at": now_ist().isoformat(),
+        }
+
+    for sym in both:
+        bp = broker_pos[sym]
+        # Resync just the parts that should always reflect broker truth.
+        open_positions[sym]["qty"]       = bp["qty"]
+        open_positions[sym]["entry"]     = open_positions[sym].get("entry") or bp["avg_price"]
+        if not open_positions[sym].get("exchange"):
+            open_positions[sym]["exchange"] = bp.get("exchange", "NSE")
+
+    if only_tracked or only_actual:
+        save_positions()
+    log_event(f"  reconciliation OK — broker={len(actual)} tracked={len(tracked)} "
+              f"adopted={len(only_actual)} dropped={len(only_tracked)}")
+
+
+def _safe_cancel_gtt(broker, gtt_id, symbol: str = "?", retries: int = 3):
+    """Cancel a Zerodha GTT with bounded retries. Failed cancellations are
+    a real-money risk: a stale GTT can sell phantom quantity tomorrow.
+    Logs loudly on every attempt and writes a dedicated 'gtt_orphan' log
+    if all retries fail so the operator can clean up at Kite manually.
+    """
+    last_err = None
+    for attempt in range(1, retries + 1):
+        try:
+            broker.delete_gtt(gtt_id)
+            log_event(f"GTT {gtt_id} ({symbol}) cancelled OK")
+            return True
+        except Exception as e:
+            last_err = e
+            log_event(f"GTT cancel attempt {attempt}/{retries} for "
+                      f"{gtt_id} ({symbol}) failed: {e}")
+            time.sleep(0.5 * attempt)  # tiny backoff
+    # All retries exhausted — append to an orphan log the operator can audit
+    try:
+        orphan_path = os.path.join(BASE_DIR, "gtt_orphans.json")
+        safe_io.append_json_list_atomic(orphan_path, {
+            "ts":      now_ist().isoformat(),
+            "gtt_id":  gtt_id,
+            "symbol":  symbol,
+            "error":   str(last_err)[:300],
+        }, max_entries=1000)
+    except Exception as e:
+        log_event(f"  could not record orphan GTT: {e}")
+    log_event(f"!! GTT {gtt_id} ({symbol}) NOT CANCELLED — "
+              f"check Kite GTT page and clear it manually !!")
+    return False
 
 
 def save_positions():
     try:
-        with open(POSITIONS_F, "w") as f:
-            json.dump(open_positions, f, indent=2, default=str)
+        safe_io.write_json_atomic(POSITIONS_F, open_positions, indent=2)
     except Exception as e:
         print(f"  [WARN] save_positions failed: {e}")
 
@@ -219,11 +374,13 @@ def eod_time() -> bool:
 # ── Candle data from Angel One ─────────────────────────────────
 
 def _angel_candles(broker: AngelOneBroker, symbol: str, interval: str = "FIVE_MINUTE", bars: int = 80) -> list:
+    """5-day lookback for warmup so indicators are valid at market open."""
+    from datetime import timedelta
     token = SYMBOL_TOKENS.get(symbol)
     if not token:
         return []
     now = now_ist()
-    from_dt = now.replace(hour=9, minute=0, second=0, microsecond=0)
+    from_dt = (now - timedelta(days=5)).replace(hour=9, minute=15, second=0, microsecond=0)
     from_str = from_dt.strftime("%Y-%m-%d %H:%M")
     to_str   = now.strftime("%Y-%m-%d %H:%M")
     try:
@@ -238,9 +395,92 @@ def _angel_candles(broker: AngelOneBroker, symbol: str, interval: str = "FIVE_MI
     return result[-bars:]
 
 
+# Dynamic instrument-token cache for Zerodha (filled lazily)
+_ZRD_TOKEN_CACHE: dict = {}
+
+
+# Global flag set when access_token is rejected — main loop checks this
+# and re-instantiates the broker to pick up fresh creds from DB.
+_ZRD_TOKEN_STALE = False
+
+
+def _is_auth_error(exc: Exception) -> bool:
+    s = str(exc).lower()
+    return ("access_token" in s or "api_key" in s
+            or "tokenexception" in s or "permissionexception" in s
+            or "session" in s and "invalid" in s)
+
+
+def _zerodha_get_token(broker: ZerodhaBroker, symbol: str) -> str:
+    """Resolve Zerodha NSE instrument token for a trading symbol, cached."""
+    global _ZRD_TOKEN_STALE
+    if symbol in _ZRD_TOKEN_CACHE:
+        return _ZRD_TOKEN_CACHE[symbol]
+    try:
+        ltp = broker.get_ltp([f"NSE:{symbol}"])
+        info = (ltp or {}).get(f"NSE:{symbol}") or {}
+        tok = info.get("instrument_token")
+        if tok:
+            _ZRD_TOKEN_CACHE[symbol] = str(tok)
+            return str(tok)
+    except Exception as e:
+        if _is_auth_error(e):
+            _ZRD_TOKEN_STALE = True   # signal main loop to refresh broker
+            # Only log once per stale cycle to avoid log spam
+            if not getattr(_zerodha_get_token, "_logged_stale", False):
+                log_event(f"Zerodha access_token stale — will refresh from DB")
+                _zerodha_get_token._logged_stale = True
+        else:
+            log_event(f"token lookup failed {symbol}: {str(e)[:80]}")
+    return ""
+
+
+def _zerodha_candles(broker: ZerodhaBroker, symbol: str, interval: str = "5minute", bars: int = 80) -> list:
+    """
+    Fetch candles with 5-day lookback so indicators (EMA/RSI/VWAP) are
+    immediately valid at market open instead of waiting 2 hours for
+    today's candles to accumulate.
+    """
+    from datetime import timedelta
+    token = _zerodha_get_token(broker, symbol)
+    if not token:
+        return []
+    now = now_ist()
+    # Lookback 5 days so we always have >=80 bars (handles weekends/holidays)
+    from_dt = (now - timedelta(days=5)).replace(hour=9, minute=15, second=0, microsecond=0)
+    try:
+        raw = broker.get_candles(
+            token, interval,
+            from_dt.strftime("%Y-%m-%d %H:%M:%S"),
+            now.strftime("%Y-%m-%d %H:%M:%S"),
+        )
+    except Exception as e:
+        log_event(f"zerodha candles {symbol}: {str(e)[:80]}")
+        return []
+    result = []
+    for c in (raw or []):
+        if len(c) >= 6:
+            result.append({"t": c[0], "o": c[1], "h": c[2], "l": c[3], "c": c[4], "v": c[5]})
+    return result[-bars:]
+
+
+def _norm_positions(raw):
+    """Normalize broker.get_positions() to a flat list of dicts.
+    Zerodha returns {"net":[...], "day":[...]}, AngelOne returns a list."""
+    if raw is None:
+        return []
+    if isinstance(raw, dict):
+        return raw.get("net") or raw.get("positions") or []
+    if isinstance(raw, list):
+        return raw
+    return []
+
+
 def get_bars(broker, symbol: str, bars: int = 80) -> list:
     if isinstance(broker, AngelOneBroker):
         return _angel_candles(broker, symbol, "FIVE_MINUTE", bars)
+    if isinstance(broker, ZerodhaBroker):
+        return _zerodha_candles(broker, symbol, "5minute", bars)
     return []
 
 
@@ -343,17 +583,28 @@ def ema_cross(closes, fast=9, slow=21):
 INDIA_VIX_PAUSE = float(os.environ.get("INDIA_VIX_PAUSE", 20.0))
 INDIA_VIX_HALT  = float(os.environ.get("INDIA_VIX_HALT",  25.0))
 
-_vix_cache = {"value": None, "ts": 0}
+# Cache + consecutive-failure counter. Once we've failed N times in a row
+# AND have no fresh cached value, switch to fail-CLOSED (block new entries)
+# rather than fail-open. Letting the bot trade through unknown volatility
+# is the riskier choice.
+_vix_cache = {"value": None, "ts": 0, "consecutive_failures": 0}
+INDIA_VIX_FAIL_CLOSED_AFTER = 3   # consecutive fetch failures
+INDIA_VIX_CACHE_MAX_AGE     = 1800  # 30 min — older cache = treat as stale
 
 
-def get_india_vix() -> float:
+def get_india_vix() -> tuple:
     """
-    Fetch India VIX from NSE. Cached for 5 minutes to avoid hammering NSE.
-    Falls back to 0.0 (fail-open) if NSE is unreachable.
+    Fetch India VIX from NSE. Cached for 5 minutes to avoid hammering.
+
+    Returns (value: float|None, status: str). Status is one of:
+      'fresh'  — fresh fetch
+      'cached' — using cached value (≤30 min old)
+      'stale'  — cached value too old to trust
+      'down'   — no value available; fetcher has failed N+ times
     """
     now_ts = time.time()
     if _vix_cache["value"] is not None and now_ts - _vix_cache["ts"] < 300:
-        return _vix_cache["value"]
+        return _vix_cache["value"], "cached"
     try:
         resp = requests.get(
             "https://www.nseindia.com/api/allIndices",
@@ -370,25 +621,41 @@ def get_india_vix() -> float:
                 vix = float(item.get("last", 0))
                 _vix_cache["value"] = vix
                 _vix_cache["ts"] = now_ts
-                return vix
+                _vix_cache["consecutive_failures"] = 0
+                return vix, "fresh"
+        # Endpoint returned but no INDIA VIX row found
+        _vix_cache["consecutive_failures"] += 1
     except Exception as e:
-        log_event(f"India VIX fetch failed: {e} — using cached/default")
-    return _vix_cache["value"] or 0.0
+        _vix_cache["consecutive_failures"] += 1
+        log_event(f"India VIX fetch failed ({_vix_cache['consecutive_failures']}x): {e}")
+
+    # Fall through to cache (if young enough) or signal "down"
+    cached = _vix_cache["value"]
+    if cached is not None and (now_ts - _vix_cache["ts"]) < INDIA_VIX_CACHE_MAX_AGE:
+        return cached, "stale"
+    if _vix_cache["consecutive_failures"] >= INDIA_VIX_FAIL_CLOSED_AFTER:
+        return None, "down"
+    return None, "down"  # no cache, no live — also treat as down
 
 
 def india_vix_ok() -> tuple:
     """
-    Returns (can_enter: bool, vix_value: float, reason: str).
-    can_enter=True means VIX is within acceptable range.
+    Returns (can_enter: bool, vix_value: float|None, reason: str).
+    Fail-CLOSED: if VIX is unavailable for several consecutive attempts,
+    block new entries — trading blind through volatility is too risky.
     """
-    vix = get_india_vix()
-    if vix <= 0:
-        return True, vix, "VIX unavailable — fail open"
+    vix, status = get_india_vix()
+    if status == "down":
+        return False, vix, ("India VIX unavailable — pausing entries "
+                            f"(failed {_vix_cache['consecutive_failures']}x)")
+    if vix is None:
+        return False, vix, "India VIX unavailable"
     if vix >= INDIA_VIX_HALT:
         return False, vix, f"India VIX={vix:.1f} ≥ HALT {INDIA_VIX_HALT} — no new entries"
     if vix >= INDIA_VIX_PAUSE:
         return False, vix, f"India VIX={vix:.1f} ≥ PAUSE {INDIA_VIX_PAUSE} — reducing risk"
-    return True, vix, f"India VIX={vix:.1f} OK"
+    suffix = "" if status == "fresh" else f" ({status})"
+    return True, vix, f"India VIX={vix:.1f} OK{suffix}"
 
 
 # ── NIFTY trend filter (replaces SPY) ────────────────────────
@@ -538,13 +805,100 @@ def update_trailing(sym: str, current_price: float):
 
 def check_exits_indian(broker, p_list: list):
     """p_list: list of position dicts from broker.get_positions()"""
+    # DEBUG: log every call so we can verify exit loop is running
+    log_event(f"[check_exits] called: {len(p_list)} broker positions, {len(open_positions)} tracked")
     pos_map = {}
     for p in p_list:
         sym = p.get("tradingsymbol") or p.get("symbol", "")
         if sym:
             pos_map[sym] = p
 
+    # News kill-switch: emergency exit if breaking negative news.
+    # CRITICAL: iterate over BROKER positions (source of truth) not just
+    # open_positions dict (can be empty due to reconciliation drift).
+    _bad_news = load_negative_news()
+    if _bad_news:
+        for _bp in p_list:
+            _bsym = (_bp.get("tradingsymbol") or _bp.get("symbol", "")).upper()
+            _bqty = int(_bp.get("quantity") or _bp.get("netqty") or 0)
+            if _bsym in _bad_news and _bqty != 0:
+                log_event(f"NEWS KILL {_bsym}: forcing exit — negative news (broker qty={_bqty})")
+                try:
+                    _side = "SELL" if _bqty > 0 else "BUY"
+                    if isinstance(broker, ZerodhaBroker):
+                        _oid = broker.close_position(
+                            tradingsymbol=_bsym,
+                            quantity=abs(_bqty),
+                            transaction_type=_side,
+                            exchange=_bp.get("exchange", "NSE"),
+                            product=_bp.get("product", "MIS"),
+                        )
+                        log_event(f"  NEWS KILL {_bsym} order placed → {_oid}")
+                        # Cancel its GTT bracket if we have one tracked
+                        _gtt = (open_positions.get(_bsym) or {}).get("gtt_id")
+                        if _gtt:
+                            try:
+                                broker.delete_gtt(int(_gtt))
+                                log_event(f"  NEWS KILL {_bsym} GTT {_gtt} cancelled")
+                            except Exception:
+                                pass
+                    elif isinstance(broker, AngelOneBroker):
+                        broker.square_off_all_positions()
+                    alert_sell(_bsym, abs(_bqty), float(_bp.get("average_price") or 0), 0, "news_kill_switch")
+                    append_log({
+                        "time":   now_ist().isoformat(),
+                        "sym":    _bsym,
+                        "action": "sell",
+                        "qty":    abs(_bqty),
+                        "reason": "news_kill_switch",
+                        "broker": _state.get("broker", "indian"),
+                        "currency": "INR",
+                    })
+                    open_positions.pop(_bsym, None)
+                    save_positions()
+                except Exception as _e:
+                    log_event(f"  NEWS KILL {_bsym} FAILED: {_e}")
+
     for sym, pos in list(open_positions.items()):
+        # News kill already handled above — skip duplicate trigger
+        if sym.upper() in _bad_news:
+            log_event(f"NEWS KILL {sym}: forcing exit — negative news")
+            try:
+                _pos_qty = abs(int(pos.get("qty", 0)))
+                if _pos_qty > 0 and isinstance(broker, ZerodhaBroker):
+                    _oid = broker.close_position(
+                        tradingsymbol=sym,
+                        quantity=_pos_qty,
+                        transaction_type="SELL",
+                        exchange="NSE",
+                        product="MIS",
+                    )
+                    log_event(f"  NEWS KILL {sym} order placed → {_oid}")
+                    # Cancel its GTT bracket so it doesn't double-fire
+                    _gtt = pos.get("gtt_id")
+                    if _gtt:
+                        try:
+                            broker.delete_gtt(int(_gtt))
+                            log_event(f"  NEWS KILL {sym} GTT {_gtt} cancelled")
+                        except Exception:
+                            pass
+                elif _pos_qty > 0 and isinstance(broker, AngelOneBroker):
+                    broker.square_off_all_positions()  # AngelOne side
+                alert_sell(sym, _pos_qty, pos.get("entry", 0), 0, "news_kill_switch")
+                append_log({
+                    "time":   now_ist().isoformat(),
+                    "sym":    sym,
+                    "action": "sell",
+                    "qty":    _pos_qty,
+                    "reason": "news_kill_switch",
+                    "broker": _state.get("broker", "indian"),
+                    "currency": "INR",
+                })
+                open_positions.pop(sym, None)
+                save_positions()
+                continue
+            except Exception as _e:
+                log_event(f"  NEWS KILL {sym} FAILED: {_e}")
         bp = pos_map.get(sym)
         if not bp:
             continue
@@ -588,13 +942,13 @@ def check_exits_indian(broker, p_list: list):
                         exchange="NSE",
                         product="MIS",
                     )
-                    # Cancel the outstanding GTT so it doesn't fire again
+                    # Cancel the outstanding GTT so it doesn't fire again.
+                    # Critical — a stale GTT will re-sell tomorrow on a phantom
+                    # quantity (or worse, open a short). Retry up to 3x and
+                    # surface failures so they're investigated, not silenced.
                     gtt_id = pos.get("gtt_id")
                     if gtt_id:
-                        try:
-                            broker.delete_gtt(gtt_id)
-                        except Exception:
-                            pass
+                        _safe_cancel_gtt(broker, gtt_id, sym)
                 else:
                     broker.close_position(sym)
                 open_positions.pop(sym, None)
@@ -617,9 +971,46 @@ def check_exits_indian(broker, p_list: list):
                 log_event(f"  EXIT {sym} FAILED: {e}")
 
 
+# ── News kill-switch ──────────────────────────────────────────
+
+def _log_pos_size(where: str):
+    log_event(f"[POS] {where}: open_positions={len(open_positions)} keys={list(open_positions.keys())[:5]}")
+
+def load_negative_news() -> set:
+    """Returns set of tickers with breaking negative news today.
+    Populated by news_scanner_indian.py running on cron/supervisor.
+    File format: {"date": "YYYY-MM-DD", "tickers": ["XYZ", ...], "sources": {...}}"""
+    if not os.path.exists(NEG_NEWS_F):
+        return set()
+    try:
+        with open(NEG_NEWS_F) as f:
+            d = json.load(f)
+        today = now_ist().strftime("%Y-%m-%d")
+        if d.get("date") == today:
+            return set(t.upper() for t in d.get("tickers", []))
+    except Exception as e:
+        log_event(f"negative_news load failed: {e}")
+    return set()
+
+
 # ── Entry execution ───────────────────────────────────────────
 
 def execute_buy(broker, symbol: str, qty: int, price: float, stop: float, tp: float, score: int, reasons: dict):
+    # News kill-switch: never enter if there's breaking negative news
+    if symbol.upper() in load_negative_news():
+        log_event(f"NEWS BLOCK {symbol}: skipping entry — negative news headline detected")
+        return False
+
+    # Last-line defense: re-check broker state right before placing order.
+    # This catches races where another scan already filled a position.
+    try:
+        _hold = _broker_open_positions(broker)
+        if symbol in _hold:
+            log_event(f"SKIP {symbol}: already held by broker (qty={_hold[symbol]['qty']})")
+            return False
+    except Exception:
+        pass
+
     log_event(f"BUY {qty}x {symbol} @ ₹{price:.2f} | stop=₹{stop:.2f} tp=₹{tp:.2f} score={score}")
     try:
         if isinstance(broker, AngelOneBroker):
@@ -632,6 +1023,21 @@ def execute_buy(broker, symbol: str, qty: int, price: float, stop: float, tp: fl
                 order_type="MARKET",
                 product_type="INTRADAY",
                 exchange="NSE",
+            )
+        elif isinstance(broker, ZerodhaBroker):
+            # Zerodha requires LIMIT orders (MARKET orders need market_protection
+            # which gets converted to AMO outside trading hours). LIMIT at 0.5%
+            # above signal price gives near-instant fill while avoiding slippage.
+            limit_price = round(price * 1.005, 1)
+            order_id = broker.place_order(
+                tradingsymbol=symbol,
+                transaction_type="BUY",
+                quantity=qty,
+                order_type="LIMIT",
+                price=limit_price,
+                product="MIS",
+                exchange="NSE",
+                tag="indianbot",
             )
         else:
             res = broker.place_order(symbol, qty, "buy")
@@ -697,8 +1103,22 @@ def square_off_all(broker):
             log_event(f"Square-off: {ok} closed, {len(bad)} failed")
             for b in bad:
                 log_event(f"  FAIL {b.get('symbol','?')}: {b.get('error','?')}")
+        elif isinstance(broker, ZerodhaBroker):
+            # Cancel any GTTs first so they don't trigger after we manually close.
+            # If a cancellation fails the GTT will fire later — log loudly so
+            # the operator notices and can clean up manually.
+            for sym, pos in list(open_positions.items()):
+                gtt_id = pos.get("gtt_id")
+                if gtt_id:
+                    _safe_cancel_gtt(broker, gtt_id, sym)
+            results = broker.square_off_all_positions()
+            log_event(f"Zerodha square-off: {len(results)} orders submitted")
         else:
-            broker.close_all_positions()
+            # Generic fallback if available
+            if hasattr(broker, "close_all_positions"):
+                broker.close_all_positions()
+            elif hasattr(broker, "square_off_all_positions"):
+                broker.square_off_all_positions()
     except Exception as e:
         log_event(f"Square-off error: {e}")
     open_positions.clear()
@@ -708,19 +1128,55 @@ def square_off_all(broker):
 # ── Main loop ─────────────────────────────────────────────────
 
 def run():
-    broker_name = os.environ.get("BROKER", "angelone")
+    broker_name = os.environ.get("BROKER", "zerodha")
+    user_id     = int(os.environ.get("BOT_USER_ID", 1))
 
     # Apply DB fund allocation overrides (budget, positions, stop/tp %)
     _apply_allocation(broker_name)
 
-    # Guard: do not start if auto_trade is disabled in DB
-    if not _is_auto_trade_enabled(broker_name):
-        print(f"[INDIAN BOT] auto_trade is OFF for {broker_name}. "
-              "Enable it via the dashboard → Allocations before the bot will trade.",
-              flush=True)
-        return
+    # Wait until: (a) auto_trade is enabled AND (b) credentials are available.
+    # This makes the bot resilient: it sits idle until the user enables it
+    # via the dashboard, then starts trading. No human restart needed.
+    _print_waiting = True
+    while True:
+        if not _is_auto_trade_enabled(broker_name):
+            if _print_waiting:
+                print(f"[INDIAN BOT] Waiting — auto_trade is OFF for {broker_name}. "
+                      "Toggle it ON in dashboard → Overview.", flush=True)
+                _print_waiting = False
+            time.sleep(20)
+            continue
+        try:
+            broker = get_broker(broker_name, user_id=user_id)
+            break  # creds OK, auto_trade ON — proceed
+        except Exception as _ce:
+            if _print_waiting:
+                print(f"[INDIAN BOT] Waiting on credentials: {_ce}", flush=True)
+                _print_waiting = False
+            time.sleep(20)
+            continue
 
-    broker = get_broker(broker_name)
+    # Token refresh helper - called each loop iteration if creds went stale
+    def _refresh_broker_if_stale(current_broker):
+        global _ZRD_TOKEN_STALE
+        if not _ZRD_TOKEN_STALE:
+            return current_broker
+        log_event(f"[REFRESH] starting broker refresh — open_positions size BEFORE: {len(open_positions)}")
+        try:
+            new_broker = get_broker(broker_name, user_id=user_id)
+            log_event(f"[REFRESH] new broker created — open_positions size AFTER get_broker: {len(open_positions)}")
+            # Clear token cache (instrument tokens may differ across sessions)
+            _ZRD_TOKEN_CACHE.clear()
+            # Reset logged flag
+            if hasattr(_zerodha_get_token, "_logged_stale"):
+                _zerodha_get_token._logged_stale = False
+            _ZRD_TOKEN_STALE = False
+            log_event("Zerodha broker refreshed with fresh DB credentials")
+            return new_broker
+        except Exception as e:
+            log_event(f"Broker refresh failed: {str(e)[:120]} — will retry next cycle")
+            return current_broker
+
     _state["broker"] = broker_name
     _state["started"] = now_ist().isoformat()
     _state["allocation"] = {
@@ -728,6 +1184,7 @@ def run():
         "max_positions":    MAX_POSITIONS,
         "stop_pct":         STOP_PCT,
         "tp_pct":           TP_PCT,
+        "trading_mode":     _state.get("trading_mode", "balanced"),
     }
 
     # Ensure login for Angel One
@@ -747,17 +1204,31 @@ def run():
         open_positions.update(persisted)
         log_event(f"Restored {len(persisted)} tracked positions from disk")
 
+    # ── Startup reconciliation: broker is the source of truth ───────────
+    # If the bot crashed mid-trade, the disk view of positions can drift
+    # from what the broker actually holds. Re-anchor against the broker
+    # before resuming so we never re-enter a symbol or miss an exit.
+    try:
+        _reconcile_positions_with_broker(broker)
+    except Exception as e:
+        log_event(f"  startup reconciliation FAILED ({e}) — "
+                  f"continuing with disk view; manual check recommended")
+
     print("=" * 60)
     print(f"  INDIAN INTRADAY BOT  |  {now_ist().strftime('%Y-%m-%d')}")
-    print(f"  Broker: {broker.name}  |  Equity: ₹{start_equity:,.2f}")
+    print(f"  Broker: {broker_name}  |  Equity: ₹{start_equity:,.2f}")
     print("=" * 60)
 
     alert_startup(start_equity, start_equity, len(WATCHLIST))
 
     while True:
         now = now_ist()
+        # Surface market state to the dashboard so the auto-trade pill can
+        # explain why the bot isn't trading even when it's "ON".
+        _state["market_open"] = market_open_ist()
+        _state["now_ist"]     = now.strftime("%Y-%m-%d %H:%M:%S")
 
-        if not market_open_ist():
+        if not _state["market_open"]:
             log_event("Market closed — sleeping 60s")
             save_state()
             time.sleep(60)
@@ -792,7 +1263,7 @@ def run():
                 _state["pause_reason"] = f"Daily loss {daily_pnl:.2f}%"
             # Still monitor exits
             try:
-                positions = broker.get_positions()
+                positions = _norm_positions(broker.get_positions())
                 check_exits_indian(broker, positions)
             except Exception as e:
                 log_event(f"Exit check error: {e}")
@@ -823,7 +1294,7 @@ def run():
 
         # ── Check exits ────────────────────────────────────
         try:
-            positions = broker.get_positions()
+            positions = _norm_positions(broker.get_positions())
         except Exception as e:
             log_event(f"get_positions error: {e}")
             positions = []
@@ -836,16 +1307,50 @@ def run():
             time.sleep(60)
             continue
 
-        cur_count = len(open_positions)
+        # ── Source-of-truth slot accounting: USE BROKER, not in-memory ──
+        broker_held = _broker_open_positions(broker)   # dict sym → {qty, avg_price, ...}
+        held_syms   = set(broker_held.keys())
+        cur_count   = len(held_syms)
+        log_event(f"[scan] broker positions: {cur_count}/{MAX_POSITIONS}  "
+                  f"held: {sorted(held_syms) if held_syms else '(none)'}")
+
         if cur_count >= MAX_POSITIONS or not nifty_up:
             log_event(f"Slots full ({cur_count}/{MAX_POSITIONS}) or NIFTY bearish — no new buys")
             save_state()
             time.sleep(60)
             continue
 
+        # ── Pre-trade margin check ───────────────────────────────────────
+        # Query Zerodha for available equity margin before scoring symbols.
+        # If we don't have enough for even one budget-sized trade, skip.
+        avail_margin = 0.0
+        try:
+            if isinstance(broker, ZerodhaBroker):
+                _funds = broker.get_funds() or {}
+                _eq    = _funds.get("equity", {}) if isinstance(_funds, dict) else {}
+                _avail = _eq.get("available", {}) if isinstance(_eq, dict) else {}
+                avail_margin = float(_avail.get("live_balance") or _avail.get("cash") or 0)
+            elif isinstance(broker, AngelOneBroker):
+                _funds = broker.get_funds() or {}
+                avail_margin = float(_funds.get("availablecash") or _funds.get("net") or 0)
+        except Exception as e:
+            log_event(f"[scan] margin fetch failed: {e} — assuming 0")
+            avail_margin = 0.0
+
+        # Need at least 30% of one trade's required margin (MIS ≈ 5x leverage)
+        # Rough estimate: budget * 0.20 (5x leverage)
+        _min_needed = BUDGET_PER_TRADE * 0.20
+        log_event(f"[scan] available margin: Rs{avail_margin:,.2f}  min needed: Rs{_min_needed:,.2f}")
+        if avail_margin < _min_needed:
+            log_event(f"Insufficient margin (Rs{avail_margin:,.0f} < Rs{_min_needed:,.0f}) — skipping new entries")
+            save_state()
+            time.sleep(60)
+            continue
+
         candidates = []
         for sym in WATCHLIST:
-            if sym in open_positions:
+            # SKIP if we already hold this symbol (broker is source of truth)
+            if sym in held_syms:
                 continue
             sc, reasons, bars = score_stock(broker, sym)
             log_event(f"{sym:12s} score={sc:3d}  {list(reasons.keys())[:3]}")
@@ -855,7 +1360,13 @@ def run():
         candidates.sort(reverse=True)
         slots = MAX_POSITIONS - cur_count
 
-        for sc, sym, reasons, bars in candidates[:slots]:
+        # Cap how many BUYs we issue per scan cycle (avoid spam)
+        # If we have ample margin, take all slots. If margin is tight, take 1.
+        _max_per_cycle = max(1, min(slots, int(avail_margin // _min_needed)))
+        log_event(f"[scan] candidates={len(candidates)}  slots={slots}  "
+                  f"max_this_cycle={_max_per_cycle}")
+
+        for sc, sym, reasons, bars in candidates[:_max_per_cycle]:
             if not bars:
                 continue
             price = bars[-1]["c"]

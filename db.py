@@ -108,6 +108,7 @@ CREATE TABLE IF NOT EXISTS bot_fund_allocations (
     stop_pct        REAL    DEFAULT 0,  -- 0 = use bot default
     tp_pct          REAL    DEFAULT 0,  -- 0 = use bot default
     auto_trade      INTEGER DEFAULT 0,  -- 1 = fully autonomous
+    trading_mode    TEXT    DEFAULT 'balanced',  -- 'ruthless'|'balanced'|'slow_gainer'|'custom'
     created_at      TEXT    DEFAULT CURRENT_TIMESTAMP,
     updated_at      TEXT    DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(user_id, broker),
@@ -131,9 +132,16 @@ def conn():
         c.close()
 
 def init():
-    """Create tables if they don't exist."""
+    """Create tables if they don't exist + run idempotent schema migrations."""
     with conn() as c:
         c.executescript(SCHEMA)
+        # Migration: add trading_mode column to existing bot_fund_allocations
+        # tables (CREATE TABLE IF NOT EXISTS won't add columns to an existing table).
+        try:
+            c.execute("ALTER TABLE bot_fund_allocations "
+                      "ADD COLUMN trading_mode TEXT DEFAULT 'balanced'")
+        except sqlite3.OperationalError:
+            pass  # already added — that's the only expected error here
 
 def query_one(sql, params=()):
     with conn() as c:
@@ -151,15 +159,87 @@ def execute(sql, params=()):
 
 # ── Fund allocation helpers ────────────────────────────────────────
 
+# Trading-mode presets: a single user-facing dial that controls how
+# aggressive the bot trades. The mode overrides max_positions/stop_pct/tp_pct
+# at runtime — the DB still stores per-broker overrides which the user can
+# return to via mode='custom'.
+TRADING_MODE_PRESETS = {
+    "ruthless": {
+        "label": "Ruthless",
+        "tagline": "Hunger for profit — high risk, high reward",
+        "max_positions": 5,
+        "stop_pct":      2.5,
+        "tp_pct":        5.0,
+        "min_confidence": 55,   # entry signal threshold (lower = more trades)
+        "position_pct":   100,  # % of (budget / max_positions) per trade
+    },
+    "balanced": {
+        "label": "Balanced",
+        "tagline": "Medium risk — solid steady gains",
+        "max_positions": 3,
+        "stop_pct":      1.5,
+        "tp_pct":        3.0,
+        "min_confidence": 65,
+        "position_pct":   80,
+    },
+    "slow_gainer": {
+        "label": "Slow Gainer",
+        "tagline": "Low risk — only the surest setups",
+        "max_positions": 2,
+        "stop_pct":      1.0,
+        "tp_pct":        2.0,
+        "min_confidence": 75,
+        "position_pct":   60,
+    },
+    "custom": {
+        "label": "Custom",
+        "tagline": "Use your own parameters",
+        # No overrides — bot uses stored per-broker fields directly.
+    },
+}
+
+
+def get_trading_mode_presets() -> dict:
+    """Return the catalog of trading modes (for UI rendering)."""
+    return TRADING_MODE_PRESETS
+
+
+def _apply_mode_overrides(alloc: dict) -> dict:
+    """If trading_mode is set to a known preset, override the runtime
+    parameters with the preset values. The 'custom' mode (or unset) falls
+    through to whatever the user has stored in the row."""
+    mode = (alloc.get("trading_mode") or "balanced").lower()
+    preset = TRADING_MODE_PRESETS.get(mode)
+    if not preset or mode == "custom":
+        return alloc
+    # Mode overrides risk parameters; budget + auto_trade stay user-controlled.
+    out = dict(alloc)
+    for k in ("max_positions", "stop_pct", "tp_pct", "min_confidence", "position_pct"):
+        if k in preset:
+            out[k] = preset[k]
+    out["mode_label"]   = preset.get("label", mode)
+    out["mode_tagline"] = preset.get("tagline", "")
+    return out
+
+
 def get_fund_allocation(user_id: int, broker: str) -> dict:
     row = query_one(
         "SELECT * FROM bot_fund_allocations WHERE user_id=? AND broker=?",
         (user_id, broker),
     )
     if not row:
-        return {"broker": broker, "budget": 0, "max_positions": 0,
-                "stop_pct": 0, "tp_pct": 0, "auto_trade": 0}
-    return dict(row)
+        # Sensible per-broker defaults — user can override via /api/allocations.
+        # Indian brokers default to ₹5,000/day; Alpaca paper to $100/day.
+        defaults = {
+            "zerodha":  {"budget": 5000.0},
+            "angelone": {"budget": 5000.0},
+            "alpaca":   {"budget":  100.0},
+        }
+        d = defaults.get(broker, {"budget": 0})
+        base = {"broker": broker, "auto_trade": 0, "trading_mode": "balanced",
+                "max_positions": 0, "stop_pct": 0, "tp_pct": 0, **d}
+        return _apply_mode_overrides(base)
+    return _apply_mode_overrides(dict(row))
 
 
 def get_all_fund_allocations(user_id: int) -> list:
@@ -167,14 +247,22 @@ def get_all_fund_allocations(user_id: int) -> list:
         "SELECT * FROM bot_fund_allocations WHERE user_id=? ORDER BY broker",
         (user_id,),
     )
-    return [dict(r) for r in rows]
+    return [_apply_mode_overrides(dict(r)) for r in rows]
 
 
 def upsert_fund_allocation(user_id: int, broker: str, **kwargs) -> None:
-    from datetime import datetime
-    allowed = {"budget", "max_positions", "stop_pct", "tp_pct", "auto_trade"}
+    from datetime import datetime, timezone
+    allowed = {"budget", "max_positions", "stop_pct", "tp_pct",
+               "auto_trade", "trading_mode"}
     fields  = {k: v for k, v in kwargs.items() if k in allowed}
-    fields["updated_at"] = datetime.utcnow().isoformat()
+    # Validate trading_mode against the catalog
+    if "trading_mode" in fields:
+        m = (fields["trading_mode"] or "").lower()
+        if m not in TRADING_MODE_PRESETS:
+            raise ValueError(f"unknown trading_mode '{m}' "
+                             f"(allowed: {','.join(TRADING_MODE_PRESETS)})")
+        fields["trading_mode"] = m
+    fields["updated_at"] = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
     with conn() as c:
         row = c.execute(
             "SELECT id FROM bot_fund_allocations WHERE user_id=? AND broker=?",

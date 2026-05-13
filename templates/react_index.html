@@ -1213,10 +1213,15 @@
       const [alloc,   setAlloc]   = useState(null);
       const [editing, setEditing] = useState(false);
       const [form,    setForm]    = useState({});
+      const [botState, setBotState] = useState(null);
 
       // Status derived from health
       const status = health?.services?.['indian-bot'] || 'unknown';
       const running = status === 'running';
+      // Live bot state (market_open, paused, mode) — polled while card is visible
+      const marketOpen = botState?.market_open;
+      const tradingPaused = !!botState?.trading_paused;
+      const pauseReason   = botState?.pause_reason || '';
 
       useEffect(() => {
         fetch('/api/allocations/zerodha')
@@ -1228,6 +1233,10 @@
             tp_pct:       d.tp_pct       || '',
           }); })
           .catch(() => {});
+        const refresh = () => fetch('/api/indian/state').then(r => r.json()).then(setBotState).catch(() => {});
+        refresh();
+        const id = setInterval(refresh, 10000);
+        return () => clearInterval(id);
       }, []);
 
       const act = async (action) => {
@@ -1324,7 +1333,13 @@
               <div>
                 <div style={{fontSize:12,fontWeight:600}}>Auto-Trade</div>
                 <div style={{fontSize:11,color:'var(--muted)'}}>
-                  {alloc?.auto_trade ? 'Bot will enter trades autonomously' : 'Bot will not open new positions'}
+                  {alloc?.auto_trade
+                    ? (tradingPaused
+                        ? `Paused — ${pauseReason || 'risk gate triggered'}`
+                        : (marketOpen === false
+                            ? 'Outside market hours — trading resumes 09:15 IST'
+                            : 'Bot will enter trades autonomously'))
+                    : 'Bot will not open new positions'}
                 </div>
               </div>
               <button onClick={toggleAutoTrade} disabled={busy==='toggle'}
@@ -1334,6 +1349,53 @@
                   ? <span className="spin" style={{width:11,height:11,border:'2px solid currentColor',borderTopColor:'transparent',borderRadius:'50%',display:'inline-block'}} />
                   : alloc?.auto_trade ? 'ON' : 'OFF'}
               </button>
+            </div>
+
+            {/* Trading Mode selector — 3 preset cards */}
+            <div style={{marginBottom:12}}>
+              <div style={{fontSize:11,color:'var(--muted)',fontWeight:600,letterSpacing:'.05em',textTransform:'uppercase',marginBottom:6}}>
+                Trading Mode
+              </div>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:6}}>
+                {[
+                  {id:'ruthless',    icon:'🔥', name:'Ruthless',    sub:'High risk · Hunger for profit', color:'#ef4444'},
+                  {id:'balanced',    icon:'⚖️', name:'Balanced',    sub:'Medium risk · Steady gains',    color:'#3b82f6'},
+                  {id:'slow_gainer', icon:'🐢', name:'Slow Gainer', sub:'Low risk · Sure-shot setups',   color:'#10b981'},
+                ].map(m => {
+                  const active = (alloc?.trading_mode || 'balanced') === m.id;
+                  return (
+                    <button key={m.id} disabled={busy==='mode_'+m.id}
+                      onClick={async () => {
+                        setBusy('mode_'+m.id);
+                        try {
+                          const r = await fetch('/api/allocations/zerodha', {
+                            method:'POST', headers:{'Content-Type':'application/json'},
+                            body: JSON.stringify({ trading_mode: m.id }),
+                          });
+                          const d = await r.json();
+                          if (d.ok) {
+                            setAlloc(d.allocation);
+                            setMsg({ok:true, text:`✓ Switched to ${m.name}`});
+                          } else {
+                            setMsg({ok:false, text:d.error || 'Mode change failed'});
+                          }
+                        } catch { setMsg({ok:false, text:'Request failed'}); }
+                        finally { setBusy(null); setTimeout(()=>setMsg(null), 3000); }
+                      }}
+                      style={{
+                        padding:'10px 6px',
+                        background: active ? `${m.color}22` : 'rgba(15,23,42,.5)',
+                        border: `1.5px solid ${active ? m.color : 'rgba(99,179,237,.15)'}`,
+                        borderRadius:7, cursor:'pointer', textAlign:'center',
+                        transition:'all .15s', color: active ? m.color : 'var(--text)',
+                      }}>
+                      <div style={{fontSize:16,marginBottom:3}}>{m.icon}</div>
+                      <div style={{fontSize:11,fontWeight:700}}>{m.name}</div>
+                      <div style={{fontSize:9,color:'var(--muted)',marginTop:2,lineHeight:1.2}}>{m.sub}</div>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
 
             {/* Allocation summary / edit */}
@@ -1662,7 +1724,14 @@
       };
 
       const saveTelegram = async () => {
-        if (!tgChatId.trim()) { toast.push('Chat ID is required', 'error'); return; }
+        const cid = tgChatId.trim();
+        if (!cid) { toast.push('Chat ID is required', 'error'); return; }
+        // Telegram chat_id is a numeric ID; group/channel chats are negative
+        // ("-100..."). Reject obvious typos before hitting the API.
+        if (!/^-?\d{6,}$/.test(cid)) {
+          toast.push('Chat ID must be a numeric value (e.g. 123456789 or -100123456789)', 'error');
+          return;
+        }
         if (!tgConfigured && !tgToken.trim()) { toast.push('Bot token is required for first setup', 'error'); return; }
         setTgBusy(true);
         try {
@@ -1826,6 +1895,32 @@
         onMe();
       };
 
+      // ── Generic re-validate handler for the per-card buttons ─
+      const [revalidating, setRevalidating] = useState({});  // {alpaca:bool, angelone:bool, zerodha:bool}
+      const revalidate = async (broker) => {
+        setRevalidating(s => ({...s, [broker]: true}));
+        try {
+          const r = await fetch(`/api/${broker}/validate`, { method: 'POST' });
+          const d = await r.json();
+          if (d.ok) {
+            toast.push(`${broker[0].toUpperCase()+broker.slice(1)} ✓ connection healthy`, 'success');
+          } else if (d.error === 'session_expired' || d.fix === 'kite_login') {
+            toast.push(`${broker} session expired — click "Open Kite Login"`, 'error');
+          } else if (d.error === 'no_credentials') {
+            toast.push(`${broker} not connected`, 'info');
+          } else {
+            toast.push(`${broker} ✗ ${d.error || 'connection broken'} — reconnect`, 'error');
+          }
+          onMe();  // refresh status badges
+          // Refresh the global broker-health banner immediately
+          if (typeof window._refreshBrokerHealth === 'function') window._refreshBrokerHealth();
+        } catch (e) {
+          toast.push('Re-validate request failed', 'error');
+        } finally {
+          setRevalidating(s => ({...s, [broker]: false}));
+        }
+      };
+
       const changePassword = async () => {
         if (newPw.length < 8) { toast.push('New password must be 8+ chars', 'error'); return; }
         const r = await fetch('/api/change_password', {
@@ -1900,7 +1995,7 @@
           </div>
 
           {/* Alpaca connection */}
-          <div className="card">
+          <div className="card" data-broker-card="alpaca">
             <div className="card-hdr">
               <span className="card-title">🔌 Alpaca Account</span>
               {alp.connected && (
@@ -1923,6 +2018,10 @@
                     </div>
                   </div>
                   <div style={{display:'flex',gap:8,justifyContent:'flex-end'}}>
+                    <button className="btn btn-ghost" disabled={revalidating.alpaca}
+                            onClick={() => revalidate('alpaca')}>
+                      {revalidating.alpaca ? 'Checking…' : '🔍 Re-validate'}
+                    </button>
                     <button className="btn btn-red" onClick={disconnectAlpaca}>Disconnect</button>
                   </div>
                 </div>
@@ -1977,7 +2076,7 @@
                          borderRadius:6,padding:'9px 12px',color:'var(--text)',fontSize:13,fontFamily:'JetBrains Mono'};
             const lbl = {fontSize:11,color:'var(--muted)',fontWeight:700,letterSpacing:'.06em',textTransform:'uppercase',marginTop:12,display:'block'};
             return (
-              <div className="card">
+              <div className="card" data-broker-card="angelone">
                 <div className="card-hdr">
                   <span className="card-title">🏦 Angel One (SmartAPI)</span>
                   {ao.connected && <Badge color="#f97316">CONNECTED</Badge>}
@@ -1997,7 +2096,13 @@
                       </div>
                       <div style={{display:'flex',gap:8,justifyContent:'space-between',alignItems:'center'}}>
                         <span style={{fontSize:12,color:'var(--muted)'}}>Trading on NSE · BSE · NFO · MCX</span>
-                        <button className="btn btn-red" onClick={disconnectAngelOne}>Disconnect</button>
+                        <div style={{display:'flex',gap:8}}>
+                          <button className="btn btn-ghost" disabled={revalidating.angelone}
+                                  onClick={() => revalidate('angelone')}>
+                            {revalidating.angelone ? 'Checking…' : '🔍 Re-validate'}
+                          </button>
+                          <button className="btn btn-red" onClick={disconnectAngelOne}>Disconnect</button>
+                        </div>
                       </div>
                     </div>
                   ) : (
@@ -2033,7 +2138,7 @@
                          borderRadius:6,padding:'9px 12px',color:'var(--text)',fontSize:13,fontFamily:'JetBrains Mono'};
             const lbl = {fontSize:11,color:'var(--muted)',fontWeight:700,letterSpacing:'.06em',textTransform:'uppercase',marginTop:12,display:'block'};
             return (
-              <div className="card">
+              <div className="card" data-broker-card="zerodha">
                 <div className="card-hdr">
                   <span className="card-title">📈 Zerodha (Kite API)</span>
                   {zrd.connected && (
@@ -2062,6 +2167,10 @@
                         </a>
                       </div>
                       <div style={{display:'flex',gap:8,justifyContent:'flex-end'}}>
+                        <button className="btn btn-ghost" disabled={revalidating.zerodha}
+                                onClick={() => revalidate('zerodha')}>
+                          {revalidating.zerodha ? 'Checking…' : '🔍 Re-validate'}
+                        </button>
                         <button className="btn btn-red" onClick={disconnectZerodha}>Disconnect</button>
                       </div>
                     </div>
@@ -3862,7 +3971,7 @@
             body: JSON.stringify(params),
           });
           const d = await r.json();
-          if (!r.ok) throw new Error(d.error || 'Order failed');
+          if (!r.ok) throw new Error(d.message || d.error || 'Order failed');
           toast.push(`Order placed: ${d.order_id}`, 'success');
           setTimeout(() => load('orders'), 1500);
         } catch(e) { toast.push(e.message, 'error'); }
@@ -3874,7 +3983,7 @@
         try {
           const r = await fetch(`/api/angelone/order/${orderId}?variety=${variety||'NORMAL'}`, { method:'DELETE' });
           const d = await r.json();
-          if (!r.ok) throw new Error(d.error || 'Cancel failed');
+          if (!r.ok) throw new Error(d.message || d.error || 'Cancel failed');
           toast.push('Order cancelled', 'info');
           load('orders');
         } catch(e) { toast.push(e.message, 'error'); }
@@ -3886,7 +3995,7 @@
         try {
           const r = await fetch('/api/angelone/squareoff', { method:'POST' });
           const d = await r.json();
-          if (!r.ok) throw new Error(d.error || 'Failed');
+          if (!r.ok) throw new Error(d.message || d.error || 'Failed');
           const ok  = (d.results||[]).filter(x=>x.ok).length;
           const bad = (d.results||[]).filter(x=>!x.ok).length;
           toast.push(`Square off: ${ok} closed${bad?', '+bad+' failed':''}`, ok?'success':'error');
@@ -4108,7 +4217,7 @@
             body: JSON.stringify({ request_token: reqToken }),
           });
           const d = await r.json();
-          if (!r.ok) throw new Error(d.error || 'Session failed');
+          if (!r.ok) throw new Error(d.message || d.error || 'Session failed');
           toast.push('Zerodha session established!', 'success');
           setReqToken('');
           window.location.reload();
@@ -4124,7 +4233,7 @@
             body: JSON.stringify({...params, product: params.product || 'MIS'}),
           });
           const d = await r.json();
-          if (!r.ok) throw new Error(d.error || 'Order failed');
+          if (!r.ok) throw new Error(d.message || d.error || 'Order failed');
           toast.push(`Order placed: ${d.order_id}`, 'success');
           setTimeout(() => load('orders'), 1500);
         } catch(e) { toast.push(e.message, 'error'); }
@@ -4136,7 +4245,7 @@
         try {
           const r = await fetch(`/api/zerodha/order/${orderId}?variety=${variety||'regular'}`, { method:'DELETE' });
           const d = await r.json();
-          if (!r.ok) throw new Error(d.error || 'Cancel failed');
+          if (!r.ok) throw new Error(d.message || d.error || 'Cancel failed');
           toast.push('Order cancelled', 'info');
           load('orders');
         } catch(e) { toast.push(e.message, 'error'); }
@@ -4148,7 +4257,7 @@
         try {
           const r = await fetch('/api/zerodha/squareoff', { method:'POST' });
           const d = await r.json();
-          if (!r.ok) throw new Error(d.error || 'Failed');
+          if (!r.ok) throw new Error(d.message || d.error || 'Failed');
           const ok  = (d.results||[]).filter(x=>x.ok).length;
           const bad = (d.results||[]).filter(x=>!x.ok).length;
           toast.push(`Square off: ${ok} closed${bad?', '+bad+' failed':''}`, ok?'success':'error');
@@ -4395,6 +4504,24 @@
         window.history.replaceState({}, '', window.location.pathname + window.location.hash);
       }, [loadMe]);
 
+      /* ── Broker health (banner for silently-broken credentials) ───── */
+      const [brokerHealth, setBrokerHealth] = useState(null);
+      const [healthDismissed, setHealthDismissed] = useState({});
+      useEffect(() => {
+        const refresh = (force = false) => fetch('/api/brokers/health' + (force ? '?force=1' : ''))
+          .then(r => r.ok ? r.json() : null)
+          .then(d => d && setBrokerHealth(d))
+          .catch(() => {});
+        refresh();
+        // Poll every 5 minutes — backend caches each broker for 5 min so this is cheap
+        const id = setInterval(() => refresh(false), 300000);
+        // Also re-check when window regains focus (after user reconnects from another tab)
+        const onFocus = () => refresh(true);
+        window.addEventListener('focus', onFocus);
+        window._refreshBrokerHealth = () => refresh(true);
+        return () => { clearInterval(id); window.removeEventListener('focus', onFocus); window._refreshBrokerHealth = null; };
+      }, []);
+
       /* Expose setTab globally so broker tabs can redirect to profile */
       useEffect(() => { window._setTab = setTab; return () => { window._setTab = null; }; }, [setTab]);
 
@@ -4589,9 +4716,62 @@
       };
       const mktOpen = isMarketOpen();
 
+      const visibleBroken = (brokerHealth?.broken || [])
+        .filter(b => !healthDismissed[b]);
+      const goFixBroker = (b) => {
+        setTab('profile');
+        setTimeout(() => {
+          const el = document.querySelector(`[data-broker-card="${b}"]`);
+          if (el) el.scrollIntoView({behavior:'smooth', block:'center'});
+        }, 60);
+      };
+
       return (
         <div>
           <BotModeBanner me={me} />
+          {visibleBroken.length > 0 && (
+            <div style={{
+              padding:'10px 18px', background:'rgba(245,158,11,.14)',
+              borderBottom:'1px solid rgba(245,158,11,.35)',
+              fontSize:13, color:'#f59e0b', display:'flex',
+              alignItems:'center', gap:14, justifyContent:'center',
+              flexWrap:'wrap',
+            }}>
+              <span style={{fontWeight:700}}>⚠️ Connection issue:</span>
+              {visibleBroken.map(b => {
+                const d = brokerHealth.brokers[b] || {};
+                const label = b === 'angelone' ? 'Angel One' :
+                              b[0].toUpperCase() + b.slice(1);
+                const isKite = d.fix === 'kite_login';
+                return (
+                  <span key={b} style={{display:'inline-flex',alignItems:'center',gap:6}}>
+                    <b>{label}</b>
+                    <span style={{color:'rgba(245,158,11,.85)',fontSize:12}}>
+                      — {d.error === 'session_expired' ? 'session expired (daily login needed)'
+                          : d.error === 'no_credentials' ? 'not connected'
+                          : d.error === 'credentials_corrupted' ? 'stored keys are unreadable — reconnect'
+                          : (d.error || 'connection broken')}
+                    </span>
+                    {isKite && d.login_url ? (
+                      <a href={d.login_url} className="btn btn-blue" style={{padding:'2px 10px',fontSize:11,textDecoration:'none'}}>
+                        Re-login →
+                      </a>
+                    ) : (
+                      <button className="btn btn-ghost" style={{padding:'2px 10px',fontSize:11}}
+                              onClick={() => goFixBroker(b)}>
+                        Fix in Profile →
+                      </button>
+                    )}
+                    <button onClick={() => setHealthDismissed(s => ({...s, [b]: true}))}
+                            title="Dismiss until next refresh"
+                            style={{background:'transparent',border:'none',cursor:'pointer',color:'inherit',opacity:.6,fontSize:13}}>
+                      ✕
+                    </button>
+                  </span>
+                );
+              })}
+            </div>
+          )}
           <div className="shell">
 
           {/* ── Sidebar ─────────────────────────────────────────── */}
