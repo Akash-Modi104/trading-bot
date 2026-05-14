@@ -1104,6 +1104,186 @@
       );
     };
 
+    const inr = v => {
+      const n = Number(v);
+      if (!isFinite(n)) return '—';
+      return (n < 0 ? '-₹' : '₹') + Math.abs(n).toLocaleString('en-IN', {maximumFractionDigits:2});
+    };
+
+    const IndianNetPnlCard = () => {
+      const [data, setData] = useState(null);
+      const [err, setErr] = useState(null);
+      const load = useCallback(() => {
+        fetch('/api/indian/net_pnl')
+          .then(r => r.ok ? r.json() : r.json().then(e => Promise.reject(e)))
+          .then(d => { setData(d); setErr(null); })
+          .catch(e => setErr(e?.message || e?.error || 'P&L unavailable'));
+      }, []);
+      useEffect(() => { load(); const id = setInterval(load, 30000); return () => clearInterval(id); }, [load]);
+      const net = Number(data?.net_pnl || 0);
+      return (
+        <div className="card">
+          <div className="card-hdr" style={{justifyContent:'space-between'}}>
+            <span className="card-title">Zerodha Net P&amp;L</span>
+            <button className="btn ghost" style={{padding:'3px 9px',fontSize:11}} onClick={load}>Refresh</button>
+          </div>
+          {err
+            ? <div className="empty" style={{padding:18,color:'var(--down)'}}>{err}</div>
+            : <div style={{padding:16,display:'grid',gridTemplateColumns:'repeat(2,minmax(0,1fr))',gap:10}}>
+                <div>
+                  <div className="eyebrow">Net Today</div>
+                  <div className="mono" style={{fontSize:24,fontWeight:800,color:net>=0?'var(--up)':'var(--down)'}}>{inr(net)}</div>
+                </div>
+                <div>
+                  <div className="eyebrow">Charges</div>
+                  <div className="mono" style={{fontSize:20,fontWeight:800,color:'var(--warn)'}}>{inr(data?.estimated_charges || 0)}</div>
+                </div>
+                <div>
+                  <div className="eyebrow">Gross</div>
+                  <div className="mono" style={{fontSize:16,fontWeight:700}}>{inr(data?.gross_pnl || 0)}</div>
+                </div>
+                <div>
+                  <div className="eyebrow">Round Trips</div>
+                  <div className="mono" style={{fontSize:16,fontWeight:700}}>{data?.closed_count ?? 0}</div>
+                </div>
+              </div>
+          }
+        </div>
+      );
+    };
+
+    const IndianScannerBoard = ({ compact=false } = {}) => {
+      const [data, setData] = useState(null);
+      const [err, setErr] = useState(null);
+      const load = useCallback(() => {
+        fetch('/api/indian/scanner')
+          .then(r => r.ok ? r.json() : r.json().then(e => Promise.reject(e)))
+          .then(d => { setData(d); setErr(null); })
+          .catch(e => setErr(e?.message || e?.error || 'Scanner unavailable'));
+      }, []);
+      useEffect(() => { load(); const id = setInterval(load, 10000); return () => clearInterval(id); }, [load]);
+      const rows = data?.rows || [];
+      const counts = rows.reduce((m, r) => ({...m, [r.status]:(m[r.status]||0)+1}), {});
+      const shown = compact ? rows.slice(0, 10) : rows.slice(0, 30);
+      const statusColor = s => ({
+        bought:'var(--up)', candidate:'var(--accent)', order_failed:'var(--down)',
+        no_cash:'var(--warn)', wait_volume:'var(--warn)', wait_score:'var(--ink-3)',
+        held:'var(--purple)', sector_full:'var(--ink-4)',
+      }[s] || 'var(--ink-3)');
+      return (
+        <div className="card">
+          <div className="card-hdr" style={{justifyContent:'space-between'}}>
+            <span className="card-title">Live Scanner</span>
+            <div style={{display:'flex',gap:6,alignItems:'center',flexWrap:'wrap',justifyContent:'flex-end'}}>
+              <Badge color="#10b981">{counts.candidate || 0} candidates</Badge>
+              <Badge color="#f59e0b">{counts.no_cash || 0} no cash</Badge>
+              <button className="btn ghost" style={{padding:'3px 9px',fontSize:11}} onClick={load}>Refresh</button>
+            </div>
+          </div>
+          {err && <div className="empty" style={{padding:18,color:'var(--down)'}}>{err}</div>}
+          {!err && rows.length === 0 && <div className="empty" style={{padding:28}}>{data?.meta?.pause_reason || 'Scanner will populate on the next bot scan'}</div>}
+          {rows.length > 0 && (
+            <div style={{overflowX:'auto'}}>
+              <table className="tbl">
+                <thead>
+                  <tr>
+                    <th>Symbol</th><th>Score</th><th>Status</th><th>Price</th><th>Qty</th><th>Stop</th><th>Target</th><th>Why</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {shown.map((r, i) => (
+                    <tr key={`${r.symbol}-${i}`}>
+                      <td className="mono" style={{fontWeight:800}}>{r.symbol}</td>
+                      <td className="mono">{r.score ?? 0}/{r.min_confidence ?? '—'}</td>
+                      <td><span style={{color:statusColor(r.status),fontWeight:800}}>{String(r.status || '').replaceAll('_',' ')}</span></td>
+                      <td className="mono">{r.price ? inr(r.price) : '—'}</td>
+                      <td className="mono">{r.qty_preview ?? 0}</td>
+                      <td className="mono">{r.stop ? inr(r.stop) : '—'}</td>
+                      <td className="mono">{r.target ? inr(r.target) : '—'}</td>
+                      <td style={{maxWidth:360,color:'var(--ink-3)',fontSize:12}}>
+                        {r.note || Object.values(r.reasons || {}).slice(0,2).join(' · ') || '—'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {!compact && data?.meta && (
+                <div style={{padding:'10px 14px',borderTop:'1px solid var(--line-soft)',fontSize:12,color:'var(--ink-3)',display:'flex',gap:14,flexWrap:'wrap'}}>
+                  <span>Margin: <b className="mono">{inr(data.meta.available_margin || 0)}</b></span>
+                  <span>Per trade: <b className="mono">{inr(data.meta.budget_per_trade || 0)}</b></span>
+                  <span>Slots: <b className="mono">{data.meta.open_positions ?? 0}/{data.meta.max_positions ?? '—'}</b></span>
+                  <span>Updated: <b className="mono">{data.updated_at ? new Date(data.updated_at).toLocaleTimeString('en-IN', {hour12:false}) : '—'}</b></span>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      );
+    };
+
+    const IndianBacktestLab = () => {
+      const [form, setForm] = useState({symbol:'ONGC', days:30});
+      const [data, setData] = useState(null);
+      const [busy, setBusy] = useState(false);
+      const [err, setErr] = useState(null);
+      const run = async () => {
+        setBusy(true); setErr(null);
+        try {
+          const qs = new URLSearchParams({symbol:form.symbol || 'ONGC', days:form.days || 30});
+          const r = await fetch(`/api/indian/backtest?${qs}`);
+          const d = await r.json();
+          if (!r.ok) throw new Error(d.message || d.error || 'Backtest failed');
+          setData(d);
+        } catch (e) {
+          setErr(e.message || 'Backtest failed');
+        } finally {
+          setBusy(false);
+        }
+      };
+      const s = data?.summary || {};
+      return (
+        <div className="card">
+          <div className="card-hdr" style={{justifyContent:'space-between'}}>
+            <span className="card-title">Backtest Lab</span>
+            <button className="btn primary" style={{padding:'4px 12px',fontSize:12}} disabled={busy} onClick={run}>{busy?'Running…':'Run'}</button>
+          </div>
+          <div style={{padding:16,display:'grid',gap:12}}>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 110px',gap:10}}>
+              <label style={{display:'grid',gap:5}}>
+                <span className="eyebrow">Symbol</span>
+                <input value={form.symbol} onChange={e => setForm(f => ({...f, symbol:e.target.value.toUpperCase()}))} />
+              </label>
+              <label style={{display:'grid',gap:5}}>
+                <span className="eyebrow">Days</span>
+                <input type="number" min="1" max="90" value={form.days} onChange={e => setForm(f => ({...f, days:e.target.value}))} />
+              </label>
+            </div>
+            {err && <div style={{color:'var(--down)',fontSize:12}}>{err}</div>}
+            {data && (
+              <>
+                <div style={{display:'grid',gridTemplateColumns:'repeat(4,minmax(0,1fr))',gap:8}}>
+                  {[
+                    ['Trades', s.trades],
+                    ['Win %', `${s.win_rate || 0}%`],
+                    ['Net', inr(s.net_pnl || 0)],
+                    ['Charges', inr(s.estimated_charges || 0)],
+                  ].map(([label,val]) => (
+                    <div key={label} style={{background:'var(--bg-2)',border:'1px solid var(--line-soft)',borderRadius:8,padding:'9px 10px'}}>
+                      <div className="eyebrow">{label}</div>
+                      <div className="mono" style={{fontWeight:800,marginTop:4,color:label==='Net'?(Number(s.net_pnl)>=0?'var(--up)':'var(--down)'):'var(--ink)'}}>{val}</div>
+                    </div>
+                  ))}
+                </div>
+                <div style={{fontSize:12,color:'var(--ink-3)'}}>
+                  Checked {s.checked_windows || 0} windows · score passed {s.passed_score || 0} · volume passed {s.passed_volume || 0} · no-cash skips {s.skipped_no_cash || 0}
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      );
+    };
+
     /* ── Activity log ────────────────────────────────────────── */
     const Log = ({ rows = [] }) => {
       const tagClass = (m) => {
@@ -1735,6 +1915,14 @@
               <Metric label="Entry Score" value={minConf ? `${minConf}+` : '—'} sub="Minimum signal score before a buy is allowed" />
               <Metric label="Stop / Target" value={`${stopPct || '—'}% / ${tpPct || '—'}%`} sub="Initial stop-loss and take-profit" />
               <Metric label="Auto-Trade" value={alloc?.auto_trade ? 'ON' : 'OFF'} sub={botState?.pause_reason || (botState?.market_open === false ? 'Outside market hours' : 'Ready when market and signal checks pass')} />
+            </div>
+          </div>
+
+          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(min(360px,100%),1fr))',gap:16}}>
+            <IndianScannerBoard />
+            <div style={{display:'grid',gap:16}}>
+              <IndianNetPnlCard />
+              <IndianBacktestLab />
             </div>
           </div>
 
@@ -3503,25 +3691,38 @@
     );
 
     /* ── Broker analytics tab (non-Alpaca) ───────────────────── */
-    const BrokerAnalyticsTab = ({ broker }) => (
-      <div className="fadein">
-        <div className="card" style={{maxWidth:640,margin:'0 auto'}}>
-          <div className="card-hdr"><span className="card-title">📈 Analytics — {BROKER_LABELS[broker]}</span></div>
-          <div style={{padding:32,textAlign:'center'}}>
-            <div style={{fontSize:36,marginBottom:12}}>📊</div>
-            <div style={{fontSize:15,fontWeight:600,marginBottom:8}}>Analytics computed from Alpaca bot logs</div>
-            <div style={{fontSize:13,color:'var(--ink-3)',maxWidth:420,margin:'0 auto',lineHeight:1.6}}>
-              Sharpe ratio, Sortino, Max Drawdown and signal attribution are derived from the Alpaca bot's trade log.
-              For {BROKER_LABELS[broker]} trade history, use the <b>History</b> or <b>Combined</b> tabs.
+    const BrokerAnalyticsTab = ({ broker }) => {
+      if (broker === 'zerodha' || broker === 'indian') {
+        return (
+          <div className="fadein" style={{display:'grid',gap:16}}>
+            <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(min(360px,100%),1fr))',gap:16}}>
+              <IndianNetPnlCard />
+              <IndianBacktestLab />
             </div>
-            <div style={{marginTop:20,display:'flex',gap:10,justifyContent:'center',flexWrap:'wrap'}}>
-              <button className="btn primary" onClick={() => window._setTab?.('history')}>📅 View History</button>
-              <button className="btn ghost" onClick={() => window._setTab?.('combined')}>🌐 Combined Trades</button>
+            <IndianScannerBoard />
+          </div>
+        );
+      }
+      return (
+        <div className="fadein">
+          <div className="card" style={{maxWidth:640,margin:'0 auto'}}>
+            <div className="card-hdr"><span className="card-title">📈 Analytics — {BROKER_LABELS[broker]}</span></div>
+            <div style={{padding:32,textAlign:'center'}}>
+              <div style={{fontSize:36,marginBottom:12}}>📊</div>
+              <div style={{fontSize:15,fontWeight:600,marginBottom:8}}>Analytics computed from Alpaca bot logs</div>
+              <div style={{fontSize:13,color:'var(--ink-3)',maxWidth:420,margin:'0 auto',lineHeight:1.6}}>
+                Sharpe ratio, Sortino, Max Drawdown and signal attribution are derived from the Alpaca bot's trade log.
+                For {BROKER_LABELS[broker]} trade history, use the <b>History</b> or <b>Combined</b> tabs.
+              </div>
+              <div style={{marginTop:20,display:'flex',gap:10,justifyContent:'center',flexWrap:'wrap'}}>
+                <button className="btn primary" onClick={() => window._setTab?.('history')}>📅 View History</button>
+                <button className="btn ghost" onClick={() => window._setTab?.('combined')}>🌐 Combined Trades</button>
+              </div>
             </div>
           </div>
         </div>
-      </div>
-    );
+      );
+    };
 
     /* ── Zerodha Overview (mirrors Alpaca layout) ─────────────── */
     const ZerodhaOverview = ({ aggData, loading, health }) => {
@@ -3665,6 +3866,11 @@
               }
             </div>
             <IndianBotControls health={health} />
+          </div>
+
+          <div style={{marginTop:16,display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(min(360px,100%),1fr))',gap:16}}>
+            <IndianScannerBoard compact />
+            <IndianNetPnlCard />
           </div>
 
           {/* Row 3: Watchlist + Activity Log (mirrors Alpaca: Picks + Trades) */}

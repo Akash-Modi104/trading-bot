@@ -46,6 +46,7 @@ LOG_FILE       = os.path.join(BASE_DIR, "indian_trade_log.json")
 STATE_FILE     = os.path.join(BASE_DIR, "indian_bot_state.json")
 POSITIONS_F    = os.path.join(BASE_DIR, "indian_positions_state.json")
 NEG_NEWS_F     = os.path.join(BASE_DIR, "negative_news_in.json")  # written by news_scanner_indian.py
+SCANNER_F      = os.path.join(BASE_DIR, "indian_scanner.json")
 
 # ── Timezone ───────────────────────────────────────────────────
 IST = pytz.timezone("Asia/Kolkata")
@@ -328,6 +329,20 @@ def load_log() -> list:
 
 def append_log(entry: dict):
     safe_io.append_json_list_atomic(LOG_FILE, entry, max_entries=5000)
+
+
+def _write_scanner(rows: list, meta: dict):
+    payload = {
+        "updated_at": now_ist().isoformat(),
+        "rows": rows[:80],
+        "meta": meta,
+    }
+    _state["scanner"] = payload["rows"]
+    _state["scanner_meta"] = payload["meta"]
+    try:
+        safe_io.write_json_atomic(SCANNER_F, payload, indent=2)
+    except Exception as e:
+        log_event(f"scanner write failed: {e}")
 
 
 def _broker_open_positions(broker) -> dict:
@@ -1314,6 +1329,10 @@ def execute_buy(broker, symbol: str, qty: int, price: float, stop: float, tp: fl
             "tp":    tp,
             "score": score,
             "reasons": reasons,
+            "trading_mode": _state.get("trading_mode", "balanced"),
+            "stop_pct": STOP_PCT,
+            "tp_pct": TP_PCT,
+            "min_confidence": MIN_CONFIDENCE,
             "broker": _state.get("broker", "indian"),
             "currency": "INR",
         })
@@ -1654,19 +1673,80 @@ def run():
             continue
 
         candidates = []
+        scanner_rows = []
         for sym in WATCHLIST:
-            # SKIP if we already hold this symbol (broker is source of truth)
+            row = {
+                "symbol": sym,
+                "sector": pe.sector_of(sym),
+                "status": "checking",
+                "score": 0,
+                "min_confidence": MIN_CONFIDENCE,
+                "volume_surge": False,
+                "price": None,
+                "qty_preview": 0,
+                "required_margin": 0,
+                "stop": None,
+                "target": None,
+                "risk_inr": 0,
+                "target_inr": 0,
+                "reasons": {},
+                "note": "",
+            }
             if sym in held_syms:
+                row["status"] = "held"
+                row["note"] = "Already open at broker"
+                scanner_rows.append(row)
                 continue
-            # SKIP if sector concentration cap reached (max 2/sector)
+
             sec_ok, sec_reason = pe.can_add_to_sector(sym, held_syms)
             if not sec_ok:
+                row["status"] = "sector_full"
+                row["note"] = sec_reason
+                scanner_rows.append(row)
                 continue
-            sc, reasons, bars = score_stock(broker, sym)
+
+            try:
+                sc, reasons, bars = score_stock(broker, sym)
+            except Exception as e:
+                row["status"] = "data_error"
+                row["note"] = str(e)[:120]
+                scanner_rows.append(row)
+                continue
+
+            price = bars[-1]["c"] if bars else 0
+            vol_ok = pe.has_volume_surge(bars)
+            qty_preview = _max_affordable_qty(price, BUDGET_PER_TRADE, avail_margin) if price else 0
+            required_margin = _required_margin_estimate(price, qty_preview) if qty_preview > 0 else 0
+            stop = round(price * (1 - STOP_PCT / 100), 2) if price else None
+            tp = round(price * (1 + TP_PCT / 100), 2) if price else None
+            row.update({
+                "score": sc,
+                "volume_surge": bool(vol_ok),
+                "price": round(price, 2) if price else None,
+                "qty_preview": qty_preview,
+                "required_margin": round(required_margin, 2),
+                "stop": stop,
+                "target": tp,
+                "risk_inr": round((price - stop) * qty_preview, 2) if price and stop else 0,
+                "target_inr": round((tp - price) * qty_preview, 2) if price and tp else 0,
+                "reasons": reasons,
+            })
             log_event(f"{sym:12s} score={sc:3d}  {list(reasons.keys())[:3]}")
-            # Require BOTH score ≥ active mode threshold AND volume surge.
-            if sc >= MIN_CONFIDENCE and pe.has_volume_surge(bars):
-                candidates.append((sc, sym, reasons, bars))
+
+            if sc < MIN_CONFIDENCE:
+                row["status"] = "wait_score"
+                row["note"] = f"Needs score {MIN_CONFIDENCE}+"
+            elif not vol_ok:
+                row["status"] = "wait_volume"
+                row["note"] = "No 20-bar volume surge confirmation"
+            elif qty_preview <= 0:
+                row["status"] = "no_cash"
+                row["note"] = "Per-trade cap or available margin is too low"
+            else:
+                row["status"] = "candidate"
+                row["note"] = "Passed score, volume, sector, and margin preview"
+                candidates.append((sc, sym, reasons, bars, row))
+            scanner_rows.append(row)
 
         candidates.sort(reverse=True)
         slots = MAX_POSITIONS - cur_count
@@ -1679,39 +1759,74 @@ def run():
 
         remaining_margin = avail_margin
         buys_done = 0
-        for sc, sym, reasons, bars in candidates:
+        for sc, sym, reasons, bars, row in candidates:
             if buys_done >= slots:
+                row["status"] = "slot_wait"
+                row["note"] = "Position slots filled before this candidate"
                 break
             block_reason = _entry_block_reason(sym)
             if block_reason:
+                row["status"] = "cooldown"
+                row["note"] = block_reason
                 log_event(f"SKIP {sym}: {block_reason}")
                 continue
             if not bars:
+                row["status"] = "data_error"
+                row["note"] = "No candles available at execution check"
                 continue
             price = bars[-1]["c"]
             if not price or price <= 0:
+                row["status"] = "data_error"
+                row["note"] = "Bad last traded price"
                 continue
 
             qty = _max_affordable_qty(price, BUDGET_PER_TRADE, remaining_margin)
             if qty <= 0:
+                row["status"] = "no_cash"
+                row["note"] = f"Price ₹{price:.2f} exceeds per-trade/margin cap"
                 log_event(f"SKIP {sym}: price ₹{price:.2f} exceeds per-trade/margin cap")
                 continue
             required_margin = _required_margin_estimate(price, qty)
             if required_margin > remaining_margin:
+                row["status"] = "no_cash"
+                row["note"] = f"Needs about ₹{required_margin:,.0f}, available ₹{remaining_margin:,.0f}"
                 log_event(f"SKIP {sym}: needs about ₹{required_margin:,.0f}, "
                           f"available ₹{remaining_margin:,.0f}")
                 continue
             stop  = round(price * (1 - STOP_PCT / 100), 2)
             tp    = round(price * (1 + TP_PCT / 100), 2)
             if execute_buy(broker, sym, qty, price, stop, tp, sc, reasons):
+                row["status"] = "bought"
+                row["note"] = "Live buy placed and confirmed"
+                row["qty_preview"] = qty
+                row["required_margin"] = round(required_margin, 2)
                 buys_done += 1
                 remaining_margin = max(0.0, remaining_margin - required_margin)
+            else:
+                row["status"] = "order_failed"
+                row["note"] = "Signal passed, but broker order did not confirm"
 
         if candidates and buys_done == 0:
             log_event("No candidate passed cash/margin safety checks this cycle")
 
         # ── Update dashboard state ─────────────────────────
         _state["last_scan"] = now.isoformat()
+        _write_scanner(scanner_rows, {
+            "broker": broker_name,
+            "available_margin": round(avail_margin, 2),
+            "remaining_margin": round(remaining_margin, 2),
+            "budget_per_trade": round(BUDGET_PER_TRADE, 2),
+            "total_budget": round(TOTAL_BUDGET, 2),
+            "max_positions": MAX_POSITIONS,
+            "open_positions": cur_count,
+            "slots": slots,
+            "candidates": len(candidates),
+            "buys_done": buys_done,
+            "min_confidence": MIN_CONFIDENCE,
+            "stop_pct": STOP_PCT,
+            "tp_pct": TP_PCT,
+            "nifty_trend": "bull" if nifty_up else "bear",
+        })
         _state["positions"] = [
             {
                 "sym":   sym,

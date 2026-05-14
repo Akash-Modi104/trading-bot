@@ -1545,6 +1545,8 @@ def api_toggle_auto_trade(broker: str):
 # ── Indian bot live state (read-only) ─────────────────────────────
 INDIAN_BOT_STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                      "indian_bot_state.json")
+INDIAN_SCANNER_FILE = os.path.join(BASE_DIR, "indian_scanner.json")
+INDIAN_TRADE_LOG_FILE = os.path.join(BASE_DIR, "indian_trade_log.json")
 
 @app.route("/api/indian/state")
 @_require_auth
@@ -1582,6 +1584,458 @@ def api_indian_state():
         return jsonify(state)
     except Exception as e:
         return jsonify({"error": str(e)[:200]}), 500
+
+
+def _num(v, default=0.0):
+    try:
+        if v is None or v == "":
+            return default
+        return float(v)
+    except (TypeError, ValueError):
+        return default
+
+
+def _int(v, default=0):
+    try:
+        if v is None or v == "":
+            return default
+        return int(float(v))
+    except (TypeError, ValueError):
+        return default
+
+
+def _estimate_zerodha_equity_intraday_charges(buy_value: float, sell_value: float) -> dict:
+    """Approximate Zerodha equity intraday round-trip charges in INR."""
+    buy_value = max(0.0, _num(buy_value))
+    sell_value = max(0.0, _num(sell_value))
+    turnover = buy_value + sell_value
+    brokerage = (min(20.0, buy_value * 0.0003) if buy_value else 0.0) + \
+                (min(20.0, sell_value * 0.0003) if sell_value else 0.0)
+    stt = sell_value * 0.00025
+    exchange_txn = turnover * 0.0000297
+    sebi = turnover * 0.000001
+    stamp = buy_value * 0.00003
+    gst = (brokerage + exchange_txn + sebi) * 0.18
+    total = brokerage + stt + exchange_txn + sebi + stamp + gst
+    return {
+        "brokerage": round(brokerage, 2),
+        "stt": round(stt, 2),
+        "exchange_txn": round(exchange_txn, 2),
+        "sebi": round(sebi, 2),
+        "stamp": round(stamp, 2),
+        "gst": round(gst, 2),
+        "total": round(total, 2),
+    }
+
+
+def _parse_ist_datetime(value):
+    if isinstance(value, datetime):
+        dt = value
+    else:
+        s = str(value or "").strip()
+        if not s:
+            return None
+        if s.endswith("Z"):
+            s = s[:-1] + "+0000"
+        for fmt in ("%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%d %H:%M:%S%z",
+                    "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S",
+                    "%Y-%m-%d"):
+            try:
+                dt = datetime.strptime(s[:25], fmt)
+                break
+            except Exception:
+                dt = None
+        if dt is None:
+            try:
+                dt = datetime.fromisoformat(s)
+            except Exception:
+                return None
+    ist = pytz.timezone("Asia/Kolkata")
+    if dt.tzinfo is None:
+        return ist.localize(dt)
+    return dt.astimezone(ist)
+
+
+def _normalise_zerodha_candles(raw: list) -> list:
+    out = []
+    for c in raw or []:
+        try:
+            if isinstance(c, dict):
+                ts = c.get("date") or c.get("time") or c.get("timestamp")
+                o = c.get("open")
+                h = c.get("high")
+                l = c.get("low")
+                close = c.get("close")
+                v = c.get("volume", 0)
+            else:
+                ts, o, h, l, close, v = c[:6]
+            dt = _parse_ist_datetime(ts)
+            out.append({
+                "t": dt.isoformat() if dt else str(ts),
+                "dt": dt,
+                "o": _num(o),
+                "h": _num(h),
+                "l": _num(l),
+                "c": _num(close),
+                "v": _num(v),
+            })
+        except Exception:
+            continue
+    return [b for b in out if b["c"] > 0]
+
+
+def _zerodha_symbol_token(broker, symbol: str):
+    symbol = (symbol or "").upper().strip()
+    try:
+        data = broker.get_ltp([f"NSE:{symbol}"]) or {}
+        tok = data.get(f"NSE:{symbol}", {}).get("instrument_token")
+        if tok:
+            return str(tok)
+    except Exception:
+        pass
+    try:
+        for inst in broker.search_instruments(symbol, "NSE") or []:
+            if (inst.get("tradingsymbol") or "").upper() == symbol:
+                return str(inst.get("instrument_token") or "")
+    except Exception:
+        pass
+    return ""
+
+
+def _score_backtest_bars(bars: list) -> tuple[int, dict]:
+    try:
+        from indian_bot import ema_cross, rsi_val, vwap_val, macd, bollinger
+    except Exception:
+        return 0, {"error": "strategy import failed"}
+    if len(bars) < 25:
+        return 0, {"error": "not enough candles"}
+    closes = [b["c"] for b in bars]
+    current = closes[-1]
+    score = 0
+    reasons = {}
+    sig = ema_cross(closes)
+    if sig == "sell":
+        return 0, {"ema": "bearish"}
+    if sig == "buy":
+        score += 25
+        reasons["ema"] = "EMA bullish cross"
+    else:
+        score += 8
+        reasons["ema"] = "EMA holding"
+    rsi = rsi_val(closes)
+    if rsi > 82 or rsi < 30:
+        return 0, {"skip": f"RSI {rsi:.0f} extreme"}
+    if 45 <= rsi <= 75:
+        score += 15
+        reasons["rsi"] = f"RSI {rsi:.0f}"
+    elif 35 <= rsi < 45:
+        score += 5
+    vw = vwap_val(bars)
+    if vw and current > vw:
+        score += 15
+        reasons["vwap"] = "above VWAP"
+    elif vw and current <= vw:
+        score -= 8
+    ml, sl, hist = macd(closes)
+    if ml is not None:
+        if ml > sl and hist > 0:
+            score += 10
+            reasons["macd"] = "MACD bullish"
+        elif ml < sl:
+            score -= 5
+    bb_up, bb_mid, bb_lo = bollinger(closes)
+    if bb_up and bb_lo and bb_up != bb_lo:
+        bb_pct = (current - bb_lo) / (bb_up - bb_lo)
+        if bb_pct < 0.4:
+            score += 10
+            reasons["bb"] = "BB lower-third"
+        elif bb_pct > 0.88:
+            score -= 10
+    return min(score, 100), reasons
+
+
+def _volume_surge(bars: list, threshold: float = 1.3) -> bool:
+    if len(bars) < 25:
+        return False
+    vols = [_num(b.get("v")) for b in bars[-21:-1]]
+    avg = sum(vols) / max(1, len(vols))
+    return avg > 0 and _num(bars[-1].get("v")) >= avg * threshold
+
+
+def _quality_entry_time(dt) -> bool:
+    if not dt:
+        return False
+    mins = dt.hour * 60 + dt.minute
+    return (9 * 60 + 45 <= mins < 11 * 60 + 30) or (13 * 60 <= mins < 14 * 60 + 30)
+
+
+@app.route("/api/indian/scanner")
+@_require_auth
+def api_indian_scanner():
+    payload = read_json(INDIAN_SCANNER_FILE, {})
+    state = read_json(INDIAN_BOT_STATE_FILE, {})
+    rows = payload.get("rows") or state.get("scanner") or []
+    meta = dict(payload.get("meta") or state.get("scanner_meta") or {})
+    meta.setdefault("pause_reason", state.get("pause_reason") or "")
+    meta.setdefault("market_open", state.get("market_open"))
+    meta.setdefault("now_ist", state.get("now_ist"))
+    alerts = [
+        r for r in rows
+        if r.get("status") in ("candidate", "bought", "order_failed", "no_cash")
+    ][:12]
+    return jsonify({
+        "updated_at": payload.get("updated_at") or state.get("last_scan"),
+        "rows": rows,
+        "meta": meta,
+        "alerts": alerts,
+    })
+
+
+@app.route("/api/indian/net_pnl")
+@_require_auth
+def api_indian_net_pnl():
+    u = _current_user()
+    day = request.args.get("date") or datetime.now(pytz.timezone("Asia/Kolkata")).strftime("%Y-%m-%d")
+    broker, err = _get_zerodha_broker(u["id"])
+    if err:
+        return jsonify({"error": err}), 400
+    try:
+        trades = broker.get_trades() or []
+    except Exception as e:
+        return jsonify({"error": str(e)[:200]}), 500
+
+    lots = {}
+    realized = []
+    day_trades = []
+    for t in sorted(trades, key=lambda x: str(x.get("fill_timestamp") or x.get("order_timestamp") or "")):
+        ts = t.get("fill_timestamp") or t.get("order_timestamp") or ""
+        dt = _parse_ist_datetime(ts)
+        if day and dt and dt.strftime("%Y-%m-%d") != day:
+            continue
+        sym = (t.get("tradingsymbol") or "").upper()
+        side = (t.get("transaction_type") or "").upper()
+        qty = _int(t.get("filled_quantity") or t.get("quantity"))
+        price = _num(t.get("average_price") or t.get("price"))
+        if not sym or qty <= 0 or price <= 0 or side not in ("BUY", "SELL"):
+            continue
+        day_trades.append(t)
+        if side == "BUY":
+            lots.setdefault(sym, []).append({"qty": qty, "price": price, "time": str(ts)})
+            continue
+        remaining = qty
+        while remaining > 0 and lots.get(sym):
+            lot = lots[sym][0]
+            matched = min(remaining, lot["qty"])
+            buy_value = lot["price"] * matched
+            sell_value = price * matched
+            gross = sell_value - buy_value
+            charges = _estimate_zerodha_equity_intraday_charges(buy_value, sell_value)
+            realized.append({
+                "symbol": sym,
+                "qty": matched,
+                "buy_price": round(lot["price"], 2),
+                "sell_price": round(price, 2),
+                "gross_pnl": round(gross, 2),
+                "charges": charges["total"],
+                "net_pnl": round(gross - charges["total"], 2),
+                "buy_time": lot["time"],
+                "sell_time": str(ts),
+            })
+            lot["qty"] -= matched
+            remaining -= matched
+            if lot["qty"] <= 0:
+                lots[sym].pop(0)
+
+    gross = sum(r["gross_pnl"] for r in realized)
+    charges = sum(r["charges"] for r in realized)
+    net = sum(r["net_pnl"] for r in realized)
+    return jsonify({
+        "date": day,
+        "trade_count": len(day_trades),
+        "closed_count": len(realized),
+        "gross_pnl": round(gross, 2),
+        "estimated_charges": round(charges, 2),
+        "net_pnl": round(net, 2),
+        "open_lots": {
+            sym: [{"qty": l["qty"], "price": l["price"], "time": l["time"]} for l in lots_ if l["qty"] > 0]
+            for sym, lots_ in lots.items() if any(l["qty"] > 0 for l in lots_)
+        },
+        "round_trips": realized[-100:],
+        "charge_model": "Approx Zerodha equity intraday: brokerage, STT, exchange transaction, SEBI, stamp duty, GST.",
+    })
+
+
+@app.route("/api/indian/backtest")
+@_require_auth
+def api_indian_backtest():
+    u = _current_user()
+    symbol = (request.args.get("symbol") or "ONGC").upper().strip()
+    if not _SYMBOL_RE.match(symbol):
+        return jsonify({"error": "bad_symbol"}), 400
+    days = max(1, min(90, _int(request.args.get("days"), 30)))
+    state = read_json(INDIAN_BOT_STATE_FILE, {})
+    alloc = state.get("allocation") or {}
+    stop_pct = max(0.2, min(10.0, _num(request.args.get("stop_pct"), _num(alloc.get("stop_pct"), 1.5))))
+    tp_pct = max(0.2, min(20.0, _num(request.args.get("tp_pct"), _num(alloc.get("tp_pct"), 3.0))))
+    min_conf = max(1, min(100, _int(request.args.get("min_confidence"), _int(alloc.get("min_confidence"), 65))))
+    budget = max(0, _num(request.args.get("budget"), _num(alloc.get("budget_per_trade"), 1000)))
+
+    broker, err = _get_zerodha_broker(u["id"])
+    if err:
+        return jsonify({"error": err}), 400
+    token = _zerodha_symbol_token(broker, symbol)
+    if not token:
+        return jsonify({"error": "instrument_not_found", "symbol": symbol}), 404
+
+    ist = pytz.timezone("Asia/Kolkata")
+    to_dt = datetime.now(ist)
+    from_dt = to_dt - timedelta(days=days)
+    try:
+        raw = broker.get_candles(
+            token, "5minute",
+            from_dt.strftime("%Y-%m-%d %H:%M:%S"),
+            to_dt.strftime("%Y-%m-%d %H:%M:%S"),
+        )
+    except Exception as e:
+        return jsonify({"error": str(e)[:200]}), 500
+    bars = _normalise_zerodha_candles(raw)
+
+    position = None
+    trades = []
+    equity = 0.0
+    peak = 0.0
+    max_dd = 0.0
+    checked = 0
+    passed_score = 0
+    passed_volume = 0
+    no_cash = 0
+    last_signal = None
+
+    for i in range(35, len(bars)):
+        bar = bars[i]
+        dt = bar.get("dt")
+        if position:
+            exit_price = None
+            exit_reason = ""
+            mins = dt.hour * 60 + dt.minute if dt else 0
+            if bar["l"] <= position["stop"]:
+                exit_price = position["stop"]
+                exit_reason = "stop"
+            elif bar["h"] >= position["target"]:
+                exit_price = position["target"]
+                exit_reason = "target"
+            elif mins >= 15 * 60 + 10:
+                exit_price = bar["c"]
+                exit_reason = "eod"
+            if exit_price:
+                buy_value = position["entry"] * position["qty"]
+                sell_value = exit_price * position["qty"]
+                gross = sell_value - buy_value
+                charges = _estimate_zerodha_equity_intraday_charges(buy_value, sell_value)
+                net = gross - charges["total"]
+                equity += net
+                peak = max(peak, equity)
+                max_dd = min(max_dd, equity - peak)
+                trades.append({
+                    "entry_time": position["time"],
+                    "exit_time": bar["t"],
+                    "symbol": symbol,
+                    "qty": position["qty"],
+                    "entry": round(position["entry"], 2),
+                    "exit": round(exit_price, 2),
+                    "reason": exit_reason,
+                    "score": position["score"],
+                    "gross_pnl": round(gross, 2),
+                    "charges": charges["total"],
+                    "net_pnl": round(net, 2),
+                    "signal_reasons": position["reasons"],
+                })
+                position = None
+            continue
+
+        if not _quality_entry_time(dt):
+            continue
+        window = bars[max(0, i - 80):i + 1]
+        checked += 1
+        score, reasons = _score_backtest_bars(window)
+        if score < min_conf:
+            continue
+        passed_score += 1
+        if not _volume_surge(window):
+            continue
+        passed_volume += 1
+        price = bar["c"]
+        qty = int((budget * 0.85) // price) if price > 0 else 0
+        last_signal = {"time": bar["t"], "score": score, "price": round(price, 2), "reasons": reasons}
+        if qty <= 0:
+            no_cash += 1
+            continue
+        position = {
+            "time": bar["t"],
+            "entry": price,
+            "qty": qty,
+            "stop": round(price * (1 - stop_pct / 100), 2),
+            "target": round(price * (1 + tp_pct / 100), 2),
+            "score": score,
+            "reasons": reasons,
+        }
+
+    if position and bars:
+        bar = bars[-1]
+        buy_value = position["entry"] * position["qty"]
+        sell_value = bar["c"] * position["qty"]
+        gross = sell_value - buy_value
+        charges = _estimate_zerodha_equity_intraday_charges(buy_value, sell_value)
+        net = gross - charges["total"]
+        equity += net
+        trades.append({
+            "entry_time": position["time"],
+            "exit_time": bar["t"],
+            "symbol": symbol,
+            "qty": position["qty"],
+            "entry": round(position["entry"], 2),
+            "exit": round(bar["c"], 2),
+            "reason": "range_end",
+            "score": position["score"],
+            "gross_pnl": round(gross, 2),
+            "charges": charges["total"],
+            "net_pnl": round(net, 2),
+            "signal_reasons": position["reasons"],
+        })
+
+    wins = sum(1 for t in trades if t["net_pnl"] > 0)
+    losses = sum(1 for t in trades if t["net_pnl"] <= 0)
+    gross = sum(t["gross_pnl"] for t in trades)
+    charges = sum(t["charges"] for t in trades)
+    net = sum(t["net_pnl"] for t in trades)
+    return jsonify({
+        "symbol": symbol,
+        "days": days,
+        "candles": len(bars),
+        "params": {
+            "budget": round(budget, 2),
+            "stop_pct": stop_pct,
+            "tp_pct": tp_pct,
+            "min_confidence": min_conf,
+            "margin_buffer_pct": 15,
+        },
+        "summary": {
+            "trades": len(trades),
+            "wins": wins,
+            "losses": losses,
+            "win_rate": round((wins / len(trades) * 100), 1) if trades else 0,
+            "gross_pnl": round(gross, 2),
+            "estimated_charges": round(charges, 2),
+            "net_pnl": round(net, 2),
+            "max_drawdown": round(max_dd, 2),
+            "checked_windows": checked,
+            "passed_score": passed_score,
+            "passed_volume": passed_volume,
+            "skipped_no_cash": no_cash,
+            "last_signal": last_signal,
+        },
+        "trades": trades[-100:],
+    })
 
 
 @app.route("/api/sessions")
