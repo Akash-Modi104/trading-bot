@@ -107,6 +107,8 @@ CREATE TABLE IF NOT EXISTS bot_fund_allocations (
     max_positions   INTEGER DEFAULT 0,  -- 0 = use bot default
     stop_pct        REAL    DEFAULT 0,  -- 0 = use bot default
     tp_pct          REAL    DEFAULT 0,  -- 0 = use bot default
+    min_confidence  INTEGER DEFAULT 0,  -- 0 = use bot default
+    position_pct    REAL    DEFAULT 0,  -- 0 = use bot default
     auto_trade      INTEGER DEFAULT 0,  -- 1 = fully autonomous
     trading_mode    TEXT    DEFAULT 'balanced',  -- 'ruthless'|'balanced'|'slow_gainer'|'custom'
     created_at      TEXT    DEFAULT CURRENT_TIMESTAMP,
@@ -142,6 +144,14 @@ def init():
                       "ADD COLUMN trading_mode TEXT DEFAULT 'balanced'")
         except sqlite3.OperationalError:
             pass  # already added — that's the only expected error here
+        for column, ddl in [
+            ("min_confidence", "INTEGER DEFAULT 0"),
+            ("position_pct", "REAL DEFAULT 0"),
+        ]:
+            try:
+                c.execute(f"ALTER TABLE bot_fund_allocations ADD COLUMN {column} {ddl}")
+            except sqlite3.OperationalError:
+                pass
 
 def query_one(sql, params=()):
     with conn() as c:
@@ -237,7 +247,8 @@ def get_fund_allocation(user_id: int, broker: str) -> dict:
         }
         d = defaults.get(broker, {"budget": 0})
         base = {"broker": broker, "auto_trade": 0, "trading_mode": "balanced",
-                "max_positions": 0, "stop_pct": 0, "tp_pct": 0, **d}
+                "max_positions": 0, "stop_pct": 0, "tp_pct": 0,
+                "min_confidence": 0, "position_pct": 0, **d}
         return _apply_mode_overrides(base)
     return _apply_mode_overrides(dict(row))
 
@@ -253,6 +264,7 @@ def get_all_fund_allocations(user_id: int) -> list:
 def upsert_fund_allocation(user_id: int, broker: str, **kwargs) -> None:
     from datetime import datetime, timezone
     allowed = {"budget", "max_positions", "stop_pct", "tp_pct",
+               "min_confidence", "position_pct",
                "auto_trade", "trading_mode"}
     fields  = {k: v for k, v in kwargs.items() if k in allowed}
     # Validate trading_mode against the catalog

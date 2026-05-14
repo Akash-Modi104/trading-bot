@@ -1144,6 +1144,47 @@
       );
     };
 
+    const PriceMarkerChart = ({ priceCurve, markers }) => {
+      const ref = useRef(null);
+      const chart = useRef(null);
+      const dep = JSON.stringify({priceCurve: priceCurve || [], markers: markers || []});
+      const shortTime = v => String(v || '').slice(5, 16).replace('T', ' ');
+      useEffect(() => {
+        if (!ref.current || !window.Chart) return;
+        chart.current?.destroy();
+        const prices = Array.isArray(priceCurve) ? priceCurve : [];
+        const labels = prices.map(p => p.time);
+        const close = prices.map(p => Number(p.close || 0));
+        const buys = (markers || []).filter(m => m.side === 'buy').map(m => ({x: shortTime(m.time), y: Number(m.price || 0)}));
+        const sells = (markers || []).filter(m => m.side === 'sell').map(m => ({x: shortTime(m.time), y: Number(m.price || 0)}));
+        chart.current = new window.Chart(ref.current.getContext('2d'), {
+          data:{
+            labels,
+            datasets:[
+              {type:'line',label:'Close',data:close,borderColor:'oklch(0.72 0.16 235)',backgroundColor:'oklch(0.72 0.16 235 / 0.10)',fill:true,tension:0.25,pointRadius:0,borderWidth:2},
+              {type:'scatter',label:'Buy',data:buys,pointRadius:5,pointHoverRadius:7,pointBackgroundColor:'oklch(0.74 0.16 152)',pointBorderColor:'oklch(0.74 0.16 152)'},
+              {type:'scatter',label:'Sell',data:sells,pointRadius:5,pointHoverRadius:7,pointBackgroundColor:'oklch(0.68 0.20 25)',pointBorderColor:'oklch(0.68 0.20 25)'},
+            ],
+          },
+          options:{
+            responsive:true, maintainAspectRatio:false,
+            plugins:{legend:{labels:{color:'var(--ink-3)',boxWidth:10}},tooltip:{callbacks:{label:ctx=>` ${ctx.dataset.label}: ${inr(ctx.raw?.y ?? ctx.raw)}`}}},
+            scales:{
+              x:{grid:{display:false},ticks:{color:'var(--ink-4)',font:{size:10},maxTicksLimit:8}},
+              y:{grid:{color:'rgba(148,163,184,.14)'},ticks:{color:'var(--ink-4)',font:{size:10},callback:v=>'₹'+Number(v).toFixed(0)}},
+            },
+          },
+        });
+        return () => chart.current?.destroy();
+      }, [dep]);
+      return (
+        <div style={{height:190,position:'relative'}}>
+          <canvas ref={ref} />
+          {(!priceCurve || priceCurve.length === 0) && <div className="empty" style={{position:'absolute',inset:0,padding:0,display:'flex',alignItems:'center',justifyContent:'center'}}>No candle data returned</div>}
+        </div>
+      );
+    };
+
     const IndianNetPnlCard = () => {
       const [data, setData] = useState(null);
       const [err, setErr] = useState(null);
@@ -1189,6 +1230,9 @@
     const IndianAlertsCard = () => {
       const [alerts, setAlerts] = useState([]);
       const [err, setErr] = useState(null);
+      const [busy, setBusy] = useState(null);
+      const [browserStatus, setBrowserStatus] = useState(() => ('Notification' in window ? Notification.permission : 'unsupported'));
+      const seenRef = useRef(new Set());
       const load = useCallback(() => {
         fetch('/api/indian/alerts')
           .then(r => r.ok ? r.json() : r.json().then(e => Promise.reject(e)))
@@ -1196,12 +1240,43 @@
           .catch(e => setErr(e?.message || e?.error || 'Alerts unavailable'));
       }, []);
       useEffect(() => { load(); const id = setInterval(load, 10000); return () => clearInterval(id); }, [load]);
+      useEffect(() => {
+        if (!('Notification' in window) || Notification.permission !== 'granted') return;
+        for (const a of alerts.slice(0, 5)) {
+          const id = `${a.kind}-${a.symbol || ''}-${a.title}`;
+          if (seenRef.current.has(id)) continue;
+          seenRef.current.add(id);
+          if (seenRef.current.size > 100) seenRef.current = new Set([...seenRef.current].slice(-50));
+          if (window._appReadyAt && Date.now() - window._appReadyAt > 5000) {
+            new Notification(a.title, {body:a.message, icon:'/favicon.ico'});
+          }
+        }
+      }, [alerts.length]);
+      const enableBrowser = async () => {
+        if (!('Notification' in window)) { setBrowserStatus('unsupported'); return; }
+        const p = await Notification.requestPermission();
+        setBrowserStatus(p);
+      };
+      const sendTelegram = async () => {
+        setBusy('telegram');
+        try {
+          const r = await fetch('/api/indian/alerts/telegram', {method:'POST'});
+          const d = await r.json();
+          if (!r.ok || !d.ok) throw new Error(d.error || 'Telegram send failed');
+          setErr(null);
+        } catch(e) { setErr(e.message || 'Telegram send failed'); }
+        finally { setBusy(null); }
+      };
       const color = a => a.level === 'up' ? 'var(--up)' : a.level === 'down' ? 'var(--down)' : a.level === 'warn' ? 'var(--warn)' : 'var(--accent)';
       return (
         <div className="card">
           <div className="card-hdr" style={{justifyContent:'space-between'}}>
             <span className="card-title">Action Alerts</span>
-            <button className="btn ghost" style={{padding:'3px 9px',fontSize:11}} onClick={load}>Refresh</button>
+            <div style={{display:'flex',gap:6,flexWrap:'wrap',justifyContent:'flex-end'}}>
+              <button className="btn ghost" style={{padding:'3px 9px',fontSize:11}} onClick={enableBrowser}>{browserStatus === 'granted' ? 'Browser ON' : 'Browser'}</button>
+              <button className="btn ghost" style={{padding:'3px 9px',fontSize:11}} disabled={!!busy} onClick={sendTelegram}>Telegram</button>
+              <button className="btn ghost" style={{padding:'3px 9px',fontSize:11}} onClick={load}>Refresh</button>
+            </div>
           </div>
           {err && <div className="empty" style={{padding:18,color:'var(--down)'}}>{err}</div>}
           {!err && alerts.length === 0 && <div className="empty" style={{padding:24}}>No active alerts</div>}
@@ -1251,7 +1326,7 @@
           </div>
           {err && <div style={{padding:'10px 14px',color:'var(--down)',fontSize:12}}>{err}</div>}
           <div style={{padding:16,display:'grid',gap:12}}>
-            <div style={{display:'grid',gridTemplateColumns:'repeat(3,minmax(0,1fr))',gap:8}}>
+            <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(120px,1fr))',gap:8}}>
               {[
                 ['Equity', inr(s.equity ?? st.start_cash)],
                 ['Cash', inr(s.cash ?? st.cash)],
@@ -1278,14 +1353,14 @@
     };
 
     const StrategyRankCard = ({ broker='zerodha' } = {}) => {
-      const [form, setForm] = useState({symbol:'ONGC', days:20});
+      const [form, setForm] = useState({symbols:'ONGC, RELIANCE, TCS', days:20});
       const [data, setData] = useState(null);
       const [busy, setBusy] = useState(null);
       const [err, setErr] = useState(null);
       const run = async () => {
         setBusy('run'); setErr(null);
         try {
-          const qs = new URLSearchParams({symbol:form.symbol || 'ONGC', days:form.days || 20});
+          const qs = new URLSearchParams({symbols:form.symbols || 'ONGC', days:form.days || 20});
           const r = await fetch(`/api/indian/strategy_rank?${qs}`);
           const d = await r.json();
           if (!r.ok) throw new Error(d.message || d.error || 'Ranking failed');
@@ -1312,8 +1387,8 @@
           <div style={{padding:16,display:'grid',gap:12}}>
             <div style={{display:'grid',gridTemplateColumns:'1fr 110px',gap:10}}>
               <label style={{display:'grid',gap:5}}>
-                <span className="eyebrow">Symbol</span>
-                <input value={form.symbol} onChange={e => setForm(f => ({...f, symbol:e.target.value.toUpperCase()}))} />
+                <span className="eyebrow">Symbols</span>
+                <input value={form.symbols} onChange={e => setForm(f => ({...f, symbols:e.target.value.toUpperCase()}))} />
               </label>
               <label style={{display:'grid',gap:5}}>
                 <span className="eyebrow">Days</span>
@@ -1331,7 +1406,7 @@
                         <span className="mono" style={{fontSize:11,color:'var(--ink-4)'}}>score {r.score}</span>
                       </div>
                       <div style={{fontSize:11,color:'var(--ink-3)',marginTop:4}}>
-                        {r.summary.trades} trades · {r.summary.win_rate}% win · {inr(r.summary.net_pnl)} net · DD {inr(r.summary.max_drawdown)}
+                        {r.symbols_tested || 1} symbol{(r.symbols_tested || 1)===1?'':'s'} · {r.summary.trades} trades · {r.summary.win_rate}% win · {inr(r.summary.net_pnl)} net · DD {inr(r.summary.max_drawdown)}
                       </div>
                     </div>
                     <button className="btn ghost" style={{padding:'4px 10px',fontSize:11}} disabled={!!busy} onClick={() => applyMode(r.id)}>Use</button>
@@ -1339,6 +1414,102 @@
                 ))}
               </div>
             )}
+            {data?.per_symbol?.length > 1 && (
+              <div style={{fontSize:12,color:'var(--ink-3)'}}>
+                Best by symbol: {data.per_symbol.map(p => `${p.symbol}: ${p.best?.label || '—'}`).join(' · ')}
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    };
+
+    const NoCodeStrategyBuilder = ({ broker='zerodha' } = {}) => {
+      const [form, setForm] = useState({
+        budget: 2000, max_positions: 3, stop_pct: 1.5, tp_pct: 3,
+        min_confidence: 65, position_pct: 80,
+      });
+      const [busy, setBusy] = useState(false);
+      const [msg, setMsg] = useState(null);
+      useEffect(() => {
+        fetch(`/api/allocations/${broker}`)
+          .then(r => r.json())
+          .then(d => setForm(f => ({
+            ...f,
+            budget: d.budget ?? f.budget,
+            max_positions: d.max_positions || f.max_positions,
+            stop_pct: d.stop_pct || f.stop_pct,
+            tp_pct: d.tp_pct || f.tp_pct,
+            min_confidence: d.min_confidence || f.min_confidence,
+            position_pct: d.position_pct || f.position_pct,
+          })))
+          .catch(() => {});
+      }, [broker]);
+      const set = (k, v) => setForm(f => ({...f, [k]: v}));
+      const save = async () => {
+        setBusy(true); setMsg(null);
+        try {
+          const body = {
+            trading_mode:'custom',
+            budget:Number(form.budget),
+            max_positions:Number(form.max_positions),
+            stop_pct:Number(form.stop_pct),
+            tp_pct:Number(form.tp_pct),
+            min_confidence:Number(form.min_confidence),
+            position_pct:Number(form.position_pct),
+          };
+          const r = await fetch(`/api/allocations/${broker}`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+          const d = await r.json();
+          if (!r.ok || !d.ok) throw new Error(d.message || d.error || 'Save failed');
+          setMsg({ok:true,text:'Custom strategy saved'});
+        } catch(e) { setMsg({ok:false,text:e.message || 'Save failed'}); }
+        finally { setBusy(false); }
+      };
+      const Field = ({k,label,min,max,step,suffix}) => (
+        <label style={{display:'grid',gap:6}}>
+          <span style={{display:'flex',justifyContent:'space-between',gap:8,fontSize:12,fontWeight:800,color:'var(--ink-3)'}}>
+            <span>{label}</span>
+            <span className="mono" style={{color:'var(--accent)'}}>{form[k]}{suffix || ''}</span>
+          </span>
+          <input type="range" min={min} max={max} step={step} value={form[k]} onChange={e => set(k, e.target.value)} />
+          <input type="number" min={min} max={max} step={step} value={form[k]} onChange={e => set(k, e.target.value)} />
+        </label>
+      );
+      return (
+        <div className="card">
+          <div className="card-hdr" style={{justifyContent:'space-between'}}>
+            <span className="card-title">No-Code Strategy Builder</span>
+            {msg && <span style={{fontSize:12,fontWeight:800,color:msg.ok?'var(--up)':'var(--down)'}}>{msg.text}</span>}
+          </div>
+          <div style={{padding:16,display:'grid',gap:14}}>
+            <label style={{display:'grid',gap:6}}>
+              <span style={{display:'flex',justifyContent:'space-between',gap:8,fontSize:12,fontWeight:800,color:'var(--ink-3)'}}>
+                <span>Capital</span><span className="mono" style={{color:'var(--accent)'}}>{inr(form.budget)}</span>
+              </span>
+              <input type="number" min="100" max="10000000" step="100" value={form.budget} onChange={e => set('budget', e.target.value)} />
+            </label>
+            <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(180px,1fr))',gap:12}}>
+              <Field k="max_positions" label="Slots" min="1" max="10" step="1" />
+              <Field k="min_confidence" label="Entry Score" min="40" max="90" step="1" suffix="+" />
+              <Field k="position_pct" label="Size" min="10" max="100" step="5" suffix="%" />
+              <Field k="stop_pct" label="Stop" min="0.5" max="5" step="0.1" suffix="%" />
+              <Field k="tp_pct" label="Target" min="0.5" max="10" step="0.1" suffix="%" />
+            </div>
+            <div style={{display:'grid',gridTemplateColumns:'repeat(3,minmax(0,1fr))',gap:8}}>
+              <div style={{background:'var(--bg-2)',border:'1px solid var(--line-soft)',borderRadius:8,padding:'9px 10px'}}>
+                <div className="eyebrow">Per Slot</div>
+                <div className="mono" style={{fontWeight:800,marginTop:4}}>{inr((Number(form.budget)||0) / Math.max(1, Number(form.max_positions)||1))}</div>
+              </div>
+              <div style={{background:'var(--bg-2)',border:'1px solid var(--line-soft)',borderRadius:8,padding:'9px 10px'}}>
+                <div className="eyebrow">Used / Slot</div>
+                <div className="mono" style={{fontWeight:800,marginTop:4}}>{inr(((Number(form.budget)||0) / Math.max(1, Number(form.max_positions)||1)) * (Number(form.position_pct)||0) / 100)}</div>
+              </div>
+              <div style={{background:'var(--bg-2)',border:'1px solid var(--line-soft)',borderRadius:8,padding:'9px 10px'}}>
+                <div className="eyebrow">Reward/Risk</div>
+                <div className="mono" style={{fontWeight:800,marginTop:4}}>{(Number(form.tp_pct || 0) / Math.max(0.1, Number(form.stop_pct || 1))).toFixed(1)}x</div>
+              </div>
+            </div>
+            <button className="btn success" disabled={busy} onClick={save}>{busy ? 'Saving…' : 'Save Custom Strategy'}</button>
           </div>
         </div>
       );
@@ -1469,6 +1640,7 @@
                 <div style={{fontSize:12,color:'var(--ink-3)'}}>
                   Checked {s.checked_windows || 0} windows · score passed {s.passed_score || 0} · volume passed {s.passed_volume || 0} · no-cash skips {s.skipped_no_cash || 0}
                 </div>
+                <PriceMarkerChart priceCurve={data.price_curve || []} markers={data.markers || []} />
                 <InrCurveChart curve={data.curve || []} />
                 {(data.trades || []).length > 0 && (
                   <div style={{overflowX:'auto'}}>
@@ -2031,10 +2203,12 @@
         fetch(`/api/allocations/${broker}`).then(r => r.json()).then(d => {
           setAlloc(d);
           setForm({
-            budget:        d.budget        ?? '',
-            max_positions: d.max_positions ?? '',
-            stop_pct:      d.stop_pct      ?? '',
-            tp_pct:        d.tp_pct        ?? '',
+            budget:         d.budget         ?? '',
+            max_positions:  d.max_positions  ?? '',
+            stop_pct:       d.stop_pct       ?? '',
+            tp_pct:         d.tp_pct         ?? '',
+            min_confidence: d.min_confidence ?? '',
+            position_pct:   d.position_pct   ?? '',
           });
         }).catch(() => {});
         fetch('/api/trading_modes').then(r => r.json()).then(d => setModes(Array.isArray(d) ? d : [])).catch(() => {});
@@ -2082,6 +2256,8 @@
         if (form.max_positions !== '') body.max_positions = parseInt(form.max_positions);
         if (form.stop_pct      !== '') body.stop_pct      = parseFloat(form.stop_pct);
         if (form.tp_pct        !== '') body.tp_pct        = parseFloat(form.tp_pct);
+        if (form.min_confidence !== '') body.min_confidence = parseInt(form.min_confidence);
+        if (form.position_pct   !== '') body.position_pct   = parseFloat(form.position_pct);
         body.trading_mode = 'custom';
         updateAlloc(body, 'save');
       };
@@ -2138,6 +2314,7 @@
             <div style={{display:'grid',gap:16}}>
               <IndianNetPnlCard />
               <IndianVirtualCard />
+              <NoCodeStrategyBuilder broker={broker === 'indian' ? 'zerodha' : broker} />
               <IndianBacktestLab />
               <StrategyRankCard broker={broker === 'indian' ? 'zerodha' : broker} />
             </div>
@@ -2206,6 +2383,8 @@
                       ['max_positions','Max Positions', 'number', '1'],
                       ['stop_pct','Stop Loss %', 'number', '0.1'],
                       ['tp_pct','Take Profit %', 'number', '0.1'],
+                      ['min_confidence','Entry Score', 'number', '1'],
+                      ['position_pct','Position Size %', 'number', '1'],
                     ].map(([key, label, type, step]) => (
                       <label key={key} style={{display:'grid',gap:4}}>
                         <span style={{fontSize:11,color:'var(--muted)',fontWeight:700,textTransform:'uppercase'}}>{label}</span>
@@ -3915,6 +4094,7 @@
             <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(min(360px,100%),1fr))',gap:16}}>
               <IndianNetPnlCard />
               <IndianVirtualCard />
+              <NoCodeStrategyBuilder broker={broker === 'indian' ? 'zerodha' : broker} />
               <IndianBacktestLab />
               <StrategyRankCard broker={broker === 'indian' ? 'zerodha' : broker} />
             </div>

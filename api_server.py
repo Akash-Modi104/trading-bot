@@ -141,6 +141,8 @@ _BOUNDS = {
     "max_positions":  (0, 50),
     "stop_pct":       (0, 50),
     "tp_pct":         (0, 50),
+    "min_confidence": (0, 100),
+    "position_pct":   (0, 100),
     "qty":            (1, 100_000),
     "price":          (0, 100_000),
 }
@@ -1485,7 +1487,8 @@ def api_set_allocation(broker: str):
     kwargs = {}
     try:
         for field, cast in [("budget", float), ("max_positions", int),
-                            ("stop_pct", float), ("tp_pct", float)]:
+                            ("stop_pct", float), ("tp_pct", float),
+                            ("min_confidence", int), ("position_pct", float)]:
             if field in body:
                 lo, hi = _BOUNDS[field]
                 v = _bounded_number(body[field], name=field, lo=lo, hi=hi, cast=cast)
@@ -1890,6 +1893,20 @@ def _run_indian_backtest_sim(symbol: str, bars: list, *, budget: float,
             "last_signal": last_signal,
         },
         "curve": curve,
+        "price_curve": [
+            {
+                "time": str(b.get("t", ""))[5:16].replace("T", " "),
+                "close": round(_num(b.get("c")), 2),
+            }
+            for b in bars[-300:]
+        ],
+        "markers": [
+            {"time": t["entry_time"], "price": t["entry"], "side": "buy", "symbol": symbol}
+            for t in trades[-100:]
+        ] + [
+            {"time": t["exit_time"], "price": t["exit"], "side": "sell", "symbol": symbol, "reason": t["reason"], "net_pnl": t["net_pnl"]}
+            for t in trades[-100:]
+        ],
         "trades": trades[-100:],
     }
 
@@ -2162,6 +2179,8 @@ def api_indian_backtest():
         },
         "summary": result["summary"],
         "curve": result["curve"],
+        "price_curve": result["price_curve"],
+        "markers": result["markers"],
         "trades": result["trades"],
     })
 
@@ -2170,9 +2189,14 @@ def api_indian_backtest():
 @_require_auth
 def api_indian_strategy_rank():
     u = _current_user()
-    symbol = (request.args.get("symbol") or "ONGC").upper().strip()
-    if not _SYMBOL_RE.match(symbol):
-        return jsonify({"error": "bad_symbol"}), 400
+    raw_symbols = request.args.get("symbols") or request.args.get("symbol") or "ONGC"
+    symbols = []
+    for part in re.split(r"[\s,]+", raw_symbols.upper().strip()):
+        if part and part not in symbols:
+            if not _SYMBOL_RE.match(part):
+                return jsonify({"error": "bad_symbol", "symbol": part}), 400
+            symbols.append(part)
+    symbols = symbols[:10] or ["ONGC"]
     days = max(1, min(60, _int(request.args.get("days"), 20)))
     state = read_json(INDIAN_BOT_STATE_FILE, {})
     alloc = state.get("allocation") or {}
@@ -2181,64 +2205,118 @@ def api_indian_strategy_rank():
     broker, err = _get_zerodha_broker(u["id"])
     if err:
         return jsonify({"error": err}), 400
-    token = _zerodha_symbol_token(broker, symbol)
-    if not token:
-        return jsonify({"error": "instrument_not_found", "symbol": symbol}), 404
 
     ist = pytz.timezone("Asia/Kolkata")
     to_dt = datetime.now(ist)
     from_dt = to_dt - timedelta(days=days)
-    try:
-        raw = broker.get_candles(
-            token, "5minute",
-            from_dt.strftime("%Y-%m-%d %H:%M:%S"),
-            to_dt.strftime("%Y-%m-%d %H:%M:%S"),
-        )
-    except Exception as e:
-        return jsonify({"error": str(e)[:200]}), 500
-    bars = _normalise_zerodha_candles(raw)
-
-    rows = []
-    for mode, preset in db.get_trading_mode_presets().items():
-        max_positions = max(1, _int(preset.get("max_positions"), 1))
-        position_pct = _num(preset.get("position_pct"), 100)
-        budget = base_budget * (position_pct / 100.0)
-        sim = _run_indian_backtest_sim(
-            symbol, bars,
-            budget=budget,
-            stop_pct=_num(preset.get("stop_pct"), 1.5),
-            tp_pct=_num(preset.get("tp_pct"), 3.0),
-            min_conf=_int(preset.get("min_confidence"), 65),
-        )
-        s = sim["summary"]
-        score = (
-            _num(s.get("net_pnl")) -
-            abs(_num(s.get("max_drawdown"))) * 0.35 +
-            _num(s.get("win_rate")) * 0.08 +
-            min(_int(s.get("trades")), max_positions * days) * 0.15
-        )
-        rows.append({
+    presets = db.get_trading_mode_presets()
+    aggregate = {
+        mode: {
             "id": mode,
             "label": preset.get("label", mode),
             "tagline": preset.get("tagline", ""),
-            "score": round(score, 2),
-            "params": {
-                "budget": round(budget, 2),
-                "stop_pct": preset.get("stop_pct"),
-                "tp_pct": preset.get("tp_pct"),
-                "min_confidence": preset.get("min_confidence"),
-                "max_positions": max_positions,
-                "position_pct": position_pct,
-            },
-            "summary": s,
+            "score": 0.0,
+            "symbols_tested": 0,
+            "summary": {"trades": 0, "wins": 0, "losses": 0, "gross_pnl": 0.0,
+                        "estimated_charges": 0.0, "net_pnl": 0.0, "max_drawdown": 0.0},
+            "params": {},
+        }
+        for mode, preset in presets.items()
+    }
+    per_symbol = []
+    errors = []
+
+    for symbol in symbols:
+        token = _zerodha_symbol_token(broker, symbol)
+        if not token:
+            errors.append({"symbol": symbol, "error": "instrument_not_found"})
+            continue
+        try:
+            raw = broker.get_candles(
+                token, "5minute",
+                from_dt.strftime("%Y-%m-%d %H:%M:%S"),
+                to_dt.strftime("%Y-%m-%d %H:%M:%S"),
+            )
+        except Exception as e:
+            errors.append({"symbol": symbol, "error": str(e)[:160]})
+            continue
+        bars = _normalise_zerodha_candles(raw)
+        rows = []
+        for mode, preset in presets.items():
+            max_positions = max(1, _int(preset.get("max_positions"), 1))
+            position_pct = _num(preset.get("position_pct"), 100)
+            budget = base_budget * (position_pct / 100.0)
+            sim = _run_indian_backtest_sim(
+                symbol, bars,
+                budget=budget,
+                stop_pct=_num(preset.get("stop_pct"), 1.5),
+                tp_pct=_num(preset.get("tp_pct"), 3.0),
+                min_conf=_int(preset.get("min_confidence"), 65),
+            )
+            s = sim["summary"]
+            score = (
+                _num(s.get("net_pnl")) -
+                abs(_num(s.get("max_drawdown"))) * 0.35 +
+                _num(s.get("win_rate")) * 0.08 +
+                min(_int(s.get("trades")), max_positions * days) * 0.15
+            )
+            row = {
+                "id": mode,
+                "label": preset.get("label", mode),
+                "tagline": preset.get("tagline", ""),
+                "score": round(score, 2),
+                "params": {
+                    "budget": round(budget, 2),
+                    "stop_pct": preset.get("stop_pct"),
+                    "tp_pct": preset.get("tp_pct"),
+                    "min_confidence": preset.get("min_confidence"),
+                    "max_positions": max_positions,
+                    "position_pct": position_pct,
+                },
+                "summary": s,
+            }
+            rows.append(row)
+            agg = aggregate[mode]
+            agg["score"] += score
+            agg["symbols_tested"] += 1
+            agg["params"] = row["params"]
+            for k in ("trades", "wins", "losses"):
+                agg["summary"][k] += _int(s.get(k))
+            for k in ("gross_pnl", "estimated_charges", "net_pnl"):
+                agg["summary"][k] += _num(s.get(k))
+            agg["summary"]["max_drawdown"] += _num(s.get("max_drawdown"))
+        rows.sort(key=lambda r: r["score"], reverse=True)
+        per_symbol.append({
+            "symbol": symbol,
+            "candles": len(bars),
+            "best": rows[0] if rows else None,
+            "ranking": rows,
         })
+
+    rows = []
+    for row in aggregate.values():
+        tested = max(1, row["symbols_tested"])
+        row["score"] = round(row["score"], 2)
+        row["summary"]["win_rate"] = round(
+            (row["summary"]["wins"] / row["summary"]["trades"] * 100), 1
+        ) if row["summary"]["trades"] else 0
+        row["summary"]["max_drawdown"] = round(row["summary"]["max_drawdown"], 2)
+        for k in ("gross_pnl", "estimated_charges", "net_pnl"):
+            row["summary"][k] = round(row["summary"][k], 2)
+        row["avg_score"] = round(row["score"] / tested, 2)
+        rows.append(row)
     rows.sort(key=lambda r: r["score"], reverse=True)
+    if not per_symbol:
+        return jsonify({"error": "no_symbols_ranked", "details": errors}), 400
     return jsonify({
-        "symbol": symbol,
+        "symbol": symbols[0],
+        "symbols": symbols,
         "days": days,
-        "candles": len(bars),
+        "candles": sum(p.get("candles", 0) for p in per_symbol),
         "best": rows[0] if rows else None,
         "ranking": rows,
+        "per_symbol": per_symbol,
+        "errors": errors,
     })
 
 
@@ -2251,6 +2329,37 @@ def api_indian_alerts():
         "updated_at": payload.get("updated_at") or state.get("last_scan"),
         "alerts": _scanner_alerts(payload, state),
     })
+
+
+@app.route("/api/indian/alerts/telegram", methods=["POST"])
+@_require_auth
+def api_indian_alerts_telegram():
+    u = _current_user()
+    cfg = auth.get_telegram(u["id"])
+    if not cfg or not cfg.get("enabled") or not cfg.get("bot_token") or not cfg.get("chat_id"):
+        return jsonify({"error": "telegram_not_configured"}), 400
+    payload = read_json(INDIAN_SCANNER_FILE, {})
+    state = read_json(INDIAN_BOT_STATE_FILE, {})
+    alerts = _scanner_alerts(payload, state)
+    if alerts:
+        lines = ["<b>Zerodha action alerts</b>"]
+        for a in alerts[:8]:
+            sym = f" [{a.get('symbol')}]" if a.get("symbol") else ""
+            lines.append(f"• <b>{a.get('title')}{sym}</b>\n  {a.get('message')}")
+        msg = "\n".join(lines)
+    else:
+        msg = "<b>Zerodha action alerts</b>\nNo active alerts right now."
+    try:
+        import requests as _rq
+        r = _rq.post(
+            f"https://api.telegram.org/bot{cfg['bot_token']}/sendMessage",
+            json={"chat_id": cfg["chat_id"], "text": msg, "parse_mode": "HTML"},
+            timeout=8,
+        )
+        ok = r.status_code == 200 and r.json().get("ok")
+        return jsonify({"ok": bool(ok), "sent": len(alerts), "telegram_response": r.json() if r.status_code == 200 else r.text})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 
 @app.route("/api/indian/virtual", methods=["GET", "POST"])
@@ -2974,6 +3083,9 @@ def telegram_save():
     chat_id = (body.get("chat_id") or "").strip()
     enabled = bool(body.get("enabled", True))
     events = body.get("events") or {"buy":1,"sell":1,"eod":1,"vix":1,"startup":1}
+    existing = auth.get_telegram(u["id"])
+    if not token and existing:
+        token = existing.get("bot_token") or ""
     if not token or not chat_id:
         return jsonify({"error": "bot_token and chat_id required"}), 400
     auth.save_telegram(u["id"], token, chat_id, enabled, events)
