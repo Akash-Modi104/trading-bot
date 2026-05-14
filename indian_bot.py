@@ -1603,7 +1603,9 @@ def run():
             log_event(f"Angel One login FAILED: {e}")
             raise
 
-    start_equity = get_account_equity(broker, 100000)
+    # If Zerodha's daily token is expired, account calls fail. Fall back to the
+    # configured capital ceiling instead of an arbitrary large account value.
+    start_equity = get_account_equity(broker, TOTAL_BUDGET or BUDGET_PER_TRADE)
     _state["equity"] = start_equity
 
     persisted = load_positions_from_disk()
