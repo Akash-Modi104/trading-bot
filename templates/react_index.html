@@ -3,7 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AlgoTrader Dashboard</title>
+  <title>Dilip Central Trading Desk</title>
+  <meta name="theme-color" content="#101418">
+  <link rel="icon" type="image/svg+xml" href='data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="12" fill="%23101418"/><path d="M18 43V27M32 43V17M46 43V30" stroke="%232dd4bf" stroke-width="6" stroke-linecap="round"/><path d="M14 47h36" stroke="%23f4c95d" stroke-width="4" stroke-linecap="round"/></svg>'>
 
   <!-- Chart.js -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
@@ -24,38 +26,41 @@
 
     /* ── Design tokens ──────────────────────────────────────── */
     :root {
-      --bg-0: oklch(0.16 0.012 250);
-      --bg-1: oklch(0.20 0.014 250);
-      --bg-2: oklch(0.235 0.016 250);
-      --bg-3: oklch(0.27 0.018 250);
-      --line: oklch(0.30 0.018 250);
-      --line-soft: oklch(0.24 0.014 250);
-      --ink: oklch(0.96 0.005 250);
-      --ink-2: oklch(0.78 0.012 250);
-      --ink-3: oklch(0.58 0.014 250);
-      --ink-4: oklch(0.42 0.016 250);
+      --bg-0: oklch(0.15 0.008 235);
+      --bg-1: oklch(0.19 0.010 235);
+      --bg-2: oklch(0.225 0.012 235);
+      --bg-3: oklch(0.265 0.014 235);
+      --line: oklch(0.31 0.014 235);
+      --line-soft: oklch(0.245 0.012 235);
+      --ink: oklch(0.96 0.004 235);
+      --ink-2: oklch(0.80 0.010 235);
+      --ink-3: oklch(0.60 0.012 235);
+      --ink-4: oklch(0.45 0.012 235);
       --up: oklch(0.74 0.16 152);
       --up-soft: oklch(0.30 0.06 152);
       --down: oklch(0.68 0.20 25);
       --down-soft: oklch(0.30 0.08 25);
       --warn: oklch(0.82 0.14 80);
       --warn-soft: oklch(0.32 0.06 80);
-      --accent: oklch(0.72 0.16 235);
-      --accent-soft: oklch(0.30 0.07 235);
-      --r-sm: 6px; --r: 10px; --r-lg: 14px;
+      --brand: oklch(0.76 0.13 185);
+      --brand-2: oklch(0.82 0.12 84);
+      --brand-deep: oklch(0.23 0.036 190);
+      --accent: var(--brand);
+      --accent-soft: oklch(0.29 0.050 185);
+      --r-sm: 6px; --r: 8px; --r-lg: 8px;
       --font-ui: 'Inter', system-ui, sans-serif;
       --font-mono: 'JetBrains Mono', ui-monospace, monospace;
 
       /* Legacy aliases — kept for compat with inline styles that use old var names */
-      --bg:          oklch(0.16 0.012 250);
-      --bg-card:     oklch(0.20 0.014 250);
-      --bg-hover:    oklch(0.235 0.016 250);
-      --bg-input:    oklch(0.235 0.016 250);
-      --border:      oklch(0.30 0.018 250);
-      --border-lt:   oklch(0.30 0.018 250);
-      --text:        oklch(0.96 0.005 250);
-      --muted:       oklch(0.58 0.014 250);
-      --dim:         oklch(0.42 0.016 250);
+      --bg:          var(--bg-0);
+      --bg-card:     var(--bg-1);
+      --bg-hover:    var(--bg-2);
+      --bg-input:    var(--bg-2);
+      --border:      var(--line);
+      --border-lt:   var(--line);
+      --text:        var(--ink);
+      --muted:       var(--ink-3);
+      --dim:         var(--ink-4);
       --blue:        var(--accent);
       --blue-bg:     var(--accent-soft);
       --green:       var(--up);
@@ -69,34 +74,39 @@
     }
 
     html[data-theme="light"] {
-      --bg-0: oklch(0.97 0.004 250);
-      --bg-1: oklch(1.0  0.0   250);
-      --bg-2: oklch(0.95 0.006 250);
-      --bg-3: oklch(0.92 0.008 250);
-      --line: oklch(0.88 0.008 250);
-      --line-soft: oklch(0.91 0.006 250);
-      --ink: oklch(0.15 0.010 250);
-      --ink-2: oklch(0.30 0.012 250);
-      --ink-3: oklch(0.50 0.012 250);
-      --ink-4: oklch(0.65 0.010 250);
-      --bg:          oklch(0.97 0.004 250);
-      --bg-card:     oklch(1.0  0.0   250);
-      --bg-hover:    oklch(0.95 0.006 250);
-      --bg-input:    oklch(0.95 0.006 250);
-      --border:      oklch(0.88 0.008 250);
-      --border-lt:   oklch(0.82 0.010 250);
-      --text:        oklch(0.15 0.010 250);
-      --muted:       oklch(0.50 0.012 250);
-      --dim:         oklch(0.65 0.010 250);
+      --bg-0: oklch(0.97 0.004 235);
+      --bg-1: oklch(1.0  0.0   235);
+      --bg-2: oklch(0.95 0.006 235);
+      --bg-3: oklch(0.92 0.008 235);
+      --line: oklch(0.87 0.008 235);
+      --line-soft: oklch(0.91 0.006 235);
+      --ink: oklch(0.15 0.010 235);
+      --ink-2: oklch(0.30 0.012 235);
+      --ink-3: oklch(0.50 0.012 235);
+      --ink-4: oklch(0.65 0.010 235);
+      --brand: oklch(0.54 0.12 185);
+      --brand-2: oklch(0.64 0.12 84);
+      --accent: var(--brand);
+      --accent-soft: oklch(0.93 0.035 185);
+      --bg:          var(--bg-0);
+      --bg-card:     var(--bg-1);
+      --bg-hover:    var(--bg-2);
+      --bg-input:    var(--bg-2);
+      --border:      var(--line);
+      --border-lt:   var(--line);
+      --text:        var(--ink);
+      --muted:       var(--ink-3);
+      --dim:         var(--ink-4);
     }
-    html[data-theme="light"] thead th { background: oklch(0.95 0.006 250 / 0.95); }
-    html[data-theme="light"] .sidebar { background: oklch(0.98 0.003 250) !important; }
-    html[data-theme="light"] .topbar { background: oklch(0.98 0.003 250 / 0.85) !important; }
+    html[data-theme="light"] thead th { background: oklch(0.95 0.006 235 / 0.95); }
+    html[data-theme="light"] .sidebar { background: oklch(0.98 0.003 235) !important; }
+    html[data-theme="light"] .topbar { background: oklch(0.98 0.003 235 / 0.88) !important; }
+    html[data-theme="light"] .brand-mark { color: oklch(0.12 0.010 235); }
 
     /* ── Shell layout ───────────────────────────────────────── */
     .shell {
       display: grid;
-      grid-template-columns: 220px 1fr;
+      grid-template-columns: 248px 1fr;
       min-height: 100vh;
     }
     .shell-body {
@@ -109,7 +119,8 @@
     /* ── Sidebar ────────────────────────────────────────────── */
     .sidebar {
       border-right: 1px solid var(--line-soft);
-      background: oklch(0.18 0.012 250);
+      background:
+        linear-gradient(180deg, oklch(0.18 0.012 235), oklch(0.145 0.009 235));
       padding: 18px 12px;
       display: flex;
       flex-direction: column;
@@ -122,33 +133,50 @@
     .brand {
       display: flex;
       align-items: center;
-      gap: 10px;
-      padding: 4px 10px 22px;
+      gap: 12px;
+      padding: 4px 10px 18px;
+      margin-bottom: 8px;
+      border-bottom: 1px solid var(--line-soft);
     }
     .brand-mark {
-      width: 30px;
-      height: 30px;
+      width: 38px;
+      height: 38px;
       border-radius: 8px;
-      background: linear-gradient(135deg, var(--accent), var(--up));
-      display: grid;
-      place-items: center;
-      font-family: var(--font-mono);
-      font-weight: 700;
-      font-size: 14px;
-      color: oklch(0.16 0.012 250);
+      background:
+        linear-gradient(145deg, oklch(0.20 0.036 190), oklch(0.12 0.012 235));
+      border: 1px solid oklch(0.40 0.050 190);
+      box-shadow: 0 10px 28px oklch(0 0 0 / 0.22), inset 0 1px 0 oklch(1 0 0 / 0.10);
+      display: flex;
+      align-items: end;
+      justify-content: center;
+      gap: 4px;
+      padding: 8px 7px 9px;
+      color: var(--brand);
       flex-shrink: 0;
     }
+    .brand-mark span {
+      display: block;
+      width: 4px;
+      border-radius: 3px;
+      background: currentColor;
+      box-shadow: 0 0 10px oklch(0.76 0.13 185 / 0.30);
+    }
+    .brand-mark span:nth-child(1) { height: 13px; color: var(--brand-2); }
+    .brand-mark span:nth-child(2) { height: 22px; }
+    .brand-mark span:nth-child(3) { height: 16px; color: var(--up); }
     .brand-name {
       font-weight: 700;
-      font-size: 14px;
-      letter-spacing: -0.01em;
+      font-size: 15px;
+      letter-spacing: 0;
       color: var(--ink);
+      line-height: 1.1;
     }
     .brand-sub {
       font-size: 10px;
       color: var(--ink-4);
-      letter-spacing: 0.08em;
+      letter-spacing: 0.10em;
       text-transform: uppercase;
+      margin-top: 3px;
     }
     .nav-item {
       display: flex;
@@ -159,15 +187,15 @@
       font-size: 13px;
       font-weight: 500;
       color: var(--ink-2);
-      transition: background .12s, color .12s;
+      transition: background .12s, color .12s, border-color .12s;
       width: 100%;
       text-align: left;
       background: none;
-      border: none;
+      border: 1px solid transparent;
       cursor: pointer;
     }
-    .nav-item:hover { background: var(--bg-2); color: var(--ink); }
-    .nav-item.active { background: var(--bg-2); color: var(--ink); }
+    .nav-item:hover { background: var(--bg-2); color: var(--ink); border-color: var(--line-soft); }
+    .nav-item.active { background: var(--bg-2); color: var(--ink); border-color: var(--line); }
     .nav-rail {
       width: 3px;
       height: 16px;
@@ -177,7 +205,7 @@
       margin-right: 7px;
       flex-shrink: 0;
     }
-    .nav-item.active .nav-rail { background: var(--accent); }
+    .nav-item.active .nav-rail { background: linear-gradient(180deg, var(--brand-2), var(--accent)); }
     .nav-section {
       margin-top: 14px;
       padding: 10px 12px 6px;
@@ -214,7 +242,7 @@
       justify-content: space-between;
       gap: 16px;
       padding: 12px 24px;
-      background: oklch(0.18 0.012 250 / 0.85);
+      background: oklch(0.17 0.010 235 / 0.88);
       backdrop-filter: blur(10px);
       -webkit-backdrop-filter: blur(10px);
       border-bottom: 1px solid var(--line-soft);
@@ -222,6 +250,23 @@
     }
     .topbar-left { display: flex; align-items: center; gap: 12px; min-width: 0; }
     .topbar-right { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+    .workspace-title {
+      display: flex;
+      flex-direction: column;
+      min-width: 210px;
+    }
+    .workspace-title span {
+      font-size: 10px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--brand-2);
+      font-weight: 700;
+    }
+    .workspace-title strong {
+      font-size: 14px;
+      color: var(--ink);
+      line-height: 1.25;
+    }
     .topbar-stat { display: flex; flex-direction: column; }
     .topbar-stat .lbl { font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-3); }
 
@@ -280,7 +325,7 @@
     .topbar-stat .val { font-family: var(--font-mono); font-weight: 600; font-size: 15px; color: var(--ink); }
     .topbar-divider { width: 1px; height: 28px; background: var(--line-soft); }
 
-    /* ── Search box ─────────────────────────────────────────── */
+    /* ── Header controls ────────────────────────────────────── */
     .topbar-search {
       display: flex;
       align-items: center;
@@ -293,6 +338,23 @@
       color: var(--ink-3);
       font-size: 13px;
     }
+    .theme-toggle {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 36px;
+      height: 32px;
+      background: var(--bg-2);
+      border: 1px solid var(--line);
+      border-radius: var(--r);
+      color: var(--ink);
+      cursor: pointer;
+      font-size: 15px;
+      line-height: 1;
+      transition: background .15s, border-color .15s, transform .05s;
+    }
+    .theme-toggle:hover { background: var(--bg-3); border-color: var(--accent); }
+    .theme-toggle:active { transform: translateY(1px); }
 
     /* ── Main content ───────────────────────────────────────── */
     .content {
@@ -319,6 +381,7 @@
       overflow: hidden;
       transition: border-color .15s, transform .15s;
       cursor: default;
+      box-shadow: 0 1px 0 oklch(1 0 0 / 0.04), 0 16px 36px oklch(0 0 0 / 0.12);
     }
     .kpi:hover { border-color: var(--line); transform: translateY(-2px); }
     .kpi .lbl { font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-3); font-weight: 600; }
@@ -429,6 +492,7 @@
       border: 1px solid var(--line-soft);
       border-radius: var(--r-lg);
       overflow: hidden;
+      box-shadow: 0 1px 0 oklch(1 0 0 / 0.035);
     }
     .card-hdr {
       padding: 12px 16px;
@@ -437,6 +501,7 @@
       align-items: center;
       justify-content: space-between;
       gap: 8px;
+      background: linear-gradient(180deg, oklch(1 0 0 / 0.025), transparent);
     }
     .card-title {
       font-size: 10px;
@@ -549,8 +614,11 @@
     html { font-size: 14px; }
     body {
       background: var(--bg-0);
-      background-image: radial-gradient(circle at 0 0, oklch(0.22 0.02 250) 0 1px, transparent 1px);
-      background-size: 32px 32px;
+      background-image:
+        linear-gradient(180deg, oklch(0.19 0.014 235 / 0.75), transparent 360px),
+        linear-gradient(90deg, oklch(1 0 0 / 0.025) 1px, transparent 1px),
+        linear-gradient(180deg, oklch(1 0 0 / 0.018) 1px, transparent 1px);
+      background-size: auto, 36px 36px, 36px 36px;
       color: var(--ink);
       font-family: var(--font-ui);
       line-height: 1.5;
@@ -5604,10 +5672,12 @@
           {/* ── Sidebar ─────────────────────────────────────────── */}
           <aside className="sidebar">
             <div className="brand">
-              <div className="brand-mark">A</div>
+              <div className="brand-mark" aria-label="Dilip Central Trading Desk logo">
+                <span></span><span></span><span></span>
+              </div>
               <div>
-                <div className="brand-name">AlgoTrader</div>
-                <div className="brand-sub">Dashboard</div>
+                <div className="brand-name">Dilip Central</div>
+                <div className="brand-sub">Trading Desk</div>
               </div>
             </div>
 
@@ -5659,10 +5729,9 @@
           {/* ── Top bar ─────────────────────────────────────────── */}
           <header className="topbar">
             <div className="topbar-left">
-              {/* Cosmetic search */}
-              <div className="topbar-search hide-on-mobile">
-                <span style={{fontSize:13}}>⌕</span>
-                <span>Search symbols…</span>
+              <div className="workspace-title hide-on-mobile">
+                <span>Workspace</span>
+                <strong>Dilip Central Trading Desk</strong>
               </div>
               {/* Market status */}
               <div style={{display:'flex',alignItems:'center',gap:6}}>
@@ -5703,9 +5772,7 @@
                 </button>
               )}
               {/* Theme toggle */}
-              <button onClick={cycleTheme} title="Toggle theme"
-                style={{background:'var(--bg-2)',border:'1px solid var(--line)',borderRadius:'var(--r)',
-                        padding:'6px 10px',cursor:'pointer',fontSize:15,color:'var(--ink)',lineHeight:1}}>
+              <button className="theme-toggle" onClick={cycleTheme} title="Toggle theme">
                 {themeIcon}
               </button>
               {/* Account Switcher */}
