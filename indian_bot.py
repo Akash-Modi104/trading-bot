@@ -15,7 +15,8 @@ Strategy mirrors intraday_bot_v2.py (EMA/RSI/VWAP/MACD/BB) adapted for:
 Configuration:
   BROKER=angelone  or  BROKER=zerodha   (required)
   All broker credential env vars (see brokers/__init__.py)
-  INDIAN_BOT_BUDGET_PER_TRADE  — ₹ per position (default 10000)
+  INDIAN_BOT_BUDGET_PER_TRADE  — ₹ per position when no DB allocation is set
+  DB allocation budget         — total ₹ capital ceiling, split across positions
   INDIAN_BOT_MAX_POSITIONS     — max simultaneous positions (default 3)
   INDIAN_BOT_STOP_PCT          — stop-loss % (default 1.5)
   INDIAN_BOT_TP_PCT            — take-profit % (default 3.0)
@@ -64,10 +65,20 @@ except ImportError:
                     os.environ.setdefault(_k.strip(), _v.strip())
 
 BUDGET_PER_TRADE  = float(os.environ.get("INDIAN_BOT_BUDGET_PER_TRADE", 10000))
+TOTAL_BUDGET       = float(os.environ.get("INDIAN_BOT_TOTAL_BUDGET", BUDGET_PER_TRADE))
 MAX_POSITIONS     = int(os.environ.get("INDIAN_BOT_MAX_POSITIONS", 3))
 STOP_PCT          = float(os.environ.get("INDIAN_BOT_STOP_PCT", 1.5))
 TP_PCT            = float(os.environ.get("INDIAN_BOT_TP_PCT", 3.0))
 DAILY_LOSS_LIMIT  = float(os.environ.get("INDIAN_BOT_DAILY_LOSS_LIMIT", 3.0))
+MIN_CONFIDENCE    = int(os.environ.get("INDIAN_BOT_MIN_CONFIDENCE", 65))
+POSITION_PCT      = float(os.environ.get("INDIAN_BOT_POSITION_PCT", 100))
+
+MARGIN_BUFFER_PCT = float(os.environ.get("INDIAN_BOT_MARGIN_BUFFER_PCT", 15))
+ORDER_BUFFER_INR  = float(os.environ.get("INDIAN_BOT_ORDER_BUFFER_INR", 20))
+BUY_REJECT_COOLDOWN_SEC = int(os.environ.get("INDIAN_BOT_BUY_REJECT_COOLDOWN_SEC", 600))
+
+_NO_NEW_BUYS_UNTIL = 0.0
+_SYMBOL_BUY_BLOCK_UNTIL: dict = {}
 
 
 def _load_allocation(broker_name: str) -> dict:
@@ -89,26 +100,45 @@ def _apply_allocation(broker_name: str):
     (ruthless/balanced/slow_gainer), so by the time we read max_positions,
     stop_pct, tp_pct here they reflect the active mode.
     """
-    global BUDGET_PER_TRADE, MAX_POSITIONS, STOP_PCT, TP_PCT, _LAST_MODE_LOGGED
+    global BUDGET_PER_TRADE, TOTAL_BUDGET, MAX_POSITIONS, STOP_PCT, TP_PCT
+    global MIN_CONFIDENCE, POSITION_PCT, _LAST_MODE_LOGGED
     alloc = _load_allocation(broker_name)
-    if alloc.get("budget", 0) > 0:
-        BUDGET_PER_TRADE = alloc["budget"]
     if alloc.get("max_positions", 0) > 0:
         MAX_POSITIONS = int(alloc["max_positions"])
     if alloc.get("stop_pct", 0) > 0:
         STOP_PCT = alloc["stop_pct"]
     if alloc.get("tp_pct", 0) > 0:
         TP_PCT = alloc["tp_pct"]
+    if alloc.get("min_confidence", 0) > 0:
+        MIN_CONFIDENCE = int(alloc["min_confidence"])
+    if alloc.get("position_pct", 0) > 0:
+        POSITION_PCT = float(alloc["position_pct"])
+    if alloc.get("budget", 0) > 0:
+        # DB "budget" is the user's total broker capital ceiling. Split it
+        # across the active mode's max slots; do not spend it once per symbol.
+        TOTAL_BUDGET = float(alloc["budget"])
+        BUDGET_PER_TRADE = (TOTAL_BUDGET / max(1, MAX_POSITIONS)) * (POSITION_PCT / 100.0)
     # Surface the active mode in the state file (so the dashboard can show it)
     # and log the change once whenever it flips.
     mode = (alloc.get("trading_mode") or "balanced").lower()
     _state["trading_mode"] = mode
     _state["mode_label"]   = alloc.get("mode_label",   mode.title())
     _state["mode_tagline"] = alloc.get("mode_tagline", "")
+    _state["allocation"] = {
+        "total_budget":     TOTAL_BUDGET,
+        "budget_per_trade": BUDGET_PER_TRADE,
+        "max_positions":    MAX_POSITIONS,
+        "stop_pct":         STOP_PCT,
+        "tp_pct":           TP_PCT,
+        "min_confidence":   MIN_CONFIDENCE,
+        "position_pct":     POSITION_PCT,
+        "trading_mode":     mode,
+    }
     if mode != _LAST_MODE_LOGGED:
         print(f"[mode] {broker_name} switched to '{mode}' "
               f"(max_pos={MAX_POSITIONS}, stop={STOP_PCT}%, tp={TP_PCT}%, "
-              f"budget=₹{BUDGET_PER_TRADE:,.0f})", flush=True)
+              f"total_budget=₹{TOTAL_BUDGET:,.0f}, per_trade=₹{BUDGET_PER_TRADE:,.0f}, "
+              f"min_conf={MIN_CONFIDENCE})", flush=True)
         _LAST_MODE_LOGGED = mode
 
 
@@ -199,6 +229,91 @@ def now_ist():
     return datetime.now(IST)
 
 
+def _num(value, default: float = 0.0) -> float:
+    try:
+        if value is None or value == "":
+            return default
+        return float(value)
+    except Exception:
+        return default
+
+
+def _position_qty(row: dict) -> int:
+    """Normalize broker position quantity fields."""
+    return int(_num(
+        row.get("quantity", row.get("netqty", row.get("qty", 0))),
+        0,
+    ))
+
+
+def _position_ltp(row: dict, fallback: float = 0.0) -> float:
+    return _num(
+        row.get("last_price", row.get("ltp", row.get("current_price", fallback))),
+        fallback,
+    )
+
+
+def _position_avg(row: dict, fallback: float = 0.0) -> float:
+    return _num(
+        row.get("average_price", row.get("avgnetprice", row.get("entry", fallback))),
+        fallback,
+    )
+
+
+def _available_margin(broker) -> float:
+    """Return the broker's current available margin for new entries."""
+    try:
+        funds = broker.get_funds() or {}
+        if isinstance(broker, ZerodhaBroker):
+            equity = funds.get("equity", {}) if isinstance(funds, dict) else {}
+            avail = equity.get("available", {}) if isinstance(equity, dict) else {}
+            # Zerodha's equity.net is the best match for "available margin"
+            # in rejection messages; fall back to live/cash values.
+            return _num(
+                equity.get("net")
+                or avail.get("live_balance")
+                or avail.get("cash")
+                or avail.get("opening_balance"),
+                0,
+            )
+        if isinstance(broker, AngelOneBroker):
+            return _num(funds.get("availablecash") or funds.get("net"), 0)
+    except Exception as e:
+        log_event(f"[scan] margin fetch failed: {e} — assuming 0")
+    return 0.0
+
+
+def _required_margin_estimate(price: float, qty: int) -> float:
+    """Conservative entry estimate: cash value + buffer + small order cushion."""
+    return (price * qty * (1 + MARGIN_BUFFER_PCT / 100.0)) + ORDER_BUFFER_INR
+
+
+def _max_affordable_qty(price: float, cash_limit: float, margin_limit: float) -> int:
+    if price <= 0:
+        return 0
+    limit = min(cash_limit, margin_limit)
+    unit = price * (1 + MARGIN_BUFFER_PCT / 100.0)
+    return max(0, int((limit - ORDER_BUFFER_INR) // unit))
+
+
+def _entry_block_reason(symbol: str) -> str:
+    now_ts = time.time()
+    if now_ts < _NO_NEW_BUYS_UNTIL:
+        return f"recent margin rejection — cooling off {int(_NO_NEW_BUYS_UNTIL - now_ts)}s"
+    until = _SYMBOL_BUY_BLOCK_UNTIL.get(symbol.upper(), 0)
+    if now_ts < until:
+        return f"{symbol} rejected recently — cooling off {int(until - now_ts)}s"
+    return ""
+
+
+def _record_buy_rejection(symbol: str, message: str):
+    global _NO_NEW_BUYS_UNTIL
+    now_ts = time.time()
+    _SYMBOL_BUY_BLOCK_UNTIL[symbol.upper()] = now_ts + BUY_REJECT_COOLDOWN_SEC
+    if "insufficient" in message.lower() or "margin" in message.lower() or "fund" in message.lower():
+        _NO_NEW_BUYS_UNTIL = max(_NO_NEW_BUYS_UNTIL, now_ts + BUY_REJECT_COOLDOWN_SEC)
+
+
 # ── Trade log ─────────────────────────────────────────────────
 
 def load_log() -> list:
@@ -225,22 +340,22 @@ def _broker_open_positions(broker) -> dict:
             day = raw.get("day") if isinstance(raw, dict) else None
             net = raw.get("net") if isinstance(raw, dict) else None
             for p in (net or day or []):
-                qty = int(p.get("quantity") or 0)
+                qty = _position_qty(p)
                 if qty == 0:
                     continue
                 out[p.get("tradingsymbol", "")] = {
                     "qty":       qty,
-                    "avg_price": float(p.get("average_price") or 0),
+                    "avg_price": _position_avg(p, 0),
                     "exchange":  p.get("exchange") or "NSE",
                 }
         elif isinstance(broker, AngelOneBroker):
             for p in (broker.get_positions() or []):
-                qty = int(p.get("netqty") or 0)
+                qty = _position_qty(p)
                 if qty == 0:
                     continue
                 out[p.get("tradingsymbol", "")] = {
                     "qty":       qty,
-                    "avg_price": float(p.get("avgnetprice") or 0),
+                    "avg_price": _position_avg(p, 0),
                     "exchange":  p.get("exchange") or "NSE",
                 }
     except Exception as e:
@@ -772,6 +887,9 @@ def score_stock(broker, symbol: str) -> tuple:
 # ── Daily P&L ─────────────────────────────────────────────────
 
 def calc_daily_pnl(broker, start_equity: float) -> float:
+    if isinstance(broker, ZerodhaBroker):
+        pnl = calc_daily_pnl_inr(broker)
+        return (pnl / start_equity * 100) if start_equity > 0 else 0.0
     try:
         acc = broker.get_account()
         current = float(acc.get("equity", acc.get("net", start_equity)) or start_equity)
@@ -782,7 +900,22 @@ def calc_daily_pnl(broker, start_equity: float) -> float:
         return 0.0
 
 
+def calc_daily_pnl_inr(broker) -> float:
+    """Gross intraday P&L from broker positions, before charges."""
+    try:
+        if isinstance(broker, ZerodhaBroker):
+            raw = broker.get_positions() or {}
+            rows = raw.get("day") or raw.get("net") or []
+            return sum(_num(p.get("pnl"), 0) for p in rows)
+    except Exception:
+        pass
+    return 0.0
+
+
 def get_account_equity(broker, fallback: float = 0.0) -> float:
+    if isinstance(broker, ZerodhaBroker):
+        margin = _available_margin(broker)
+        return margin if margin > 0 else fallback
     try:
         acc = broker.get_account()
         # Angel One returns net as string
@@ -804,15 +937,42 @@ def update_trailing(sym: str, current_price: float):
         open_positions[sym]["trail_hi"] = current_price
 
 
+def _adopt_position_row(row: dict) -> bool:
+    sym = (row.get("tradingsymbol") or row.get("symbol", "")).upper()
+    qty = _position_qty(row)
+    if not sym or qty == 0 or sym in open_positions:
+        return False
+    entry = _position_avg(row, _position_ltp(row, 0))
+    if entry <= 0:
+        return False
+    log_event(f"  adopt {sym}: broker has open qty={qty} avg=₹{entry:.2f}; restoring SL/TP tracking")
+    open_positions[sym] = {
+        "qty":       qty,
+        "entry":     entry,
+        "stop":      round(entry * (1 - STOP_PCT / 100), 2),
+        "trail_hi":  entry,
+        "tp":        round(entry * (1 + TP_PCT / 100), 2),
+        "exchange":  row.get("exchange", "NSE"),
+        "gtt_id":    None,
+        "adopted":   True,
+        "adopted_at": now_ist().isoformat(),
+    }
+    return True
+
+
 def check_exits_indian(broker, p_list: list):
     """p_list: list of position dicts from broker.get_positions()"""
     # DEBUG: log every call so we can verify exit loop is running
     log_event(f"[check_exits] called: {len(p_list)} broker positions, {len(open_positions)} tracked")
     pos_map = {}
+    adopted = False
     for p in p_list:
-        sym = p.get("tradingsymbol") or p.get("symbol", "")
+        sym = (p.get("tradingsymbol") or p.get("symbol", "")).upper()
         if sym:
             pos_map[sym] = p
+            adopted = _adopt_position_row(p) or adopted
+    if adopted:
+        save_positions()
 
     # News kill-switch: emergency exit if breaking negative news.
     # CRITICAL: iterate over BROKER positions (source of truth) not just
@@ -821,7 +981,7 @@ def check_exits_indian(broker, p_list: list):
     if _bad_news:
         for _bp in p_list:
             _bsym = (_bp.get("tradingsymbol") or _bp.get("symbol", "")).upper()
-            _bqty = int(_bp.get("quantity") or _bp.get("netqty") or 0)
+            _bqty = _position_qty(_bp)
             if _bsym in _bad_news and _bqty != 0:
                 log_event(f"NEWS KILL {_bsym}: forcing exit — negative news (broker qty={_bqty})")
                 try:
@@ -845,7 +1005,7 @@ def check_exits_indian(broker, p_list: list):
                                 pass
                     elif isinstance(broker, AngelOneBroker):
                         broker.square_off_all_positions()
-                    alert_sell(_bsym, abs(_bqty), float(_bp.get("average_price") or 0), 0, "news_kill_switch")
+                    alert_sell(_bsym, abs(_bqty), _position_avg(_bp, 0), 0, "news_kill_switch")
                     append_log({
                         "time":   now_ist().isoformat(),
                         "sym":    _bsym,
@@ -904,13 +1064,13 @@ def check_exits_indian(broker, p_list: list):
         if not bp:
             continue
 
-        netqty = int(bp.get("netqty", bp.get("qty", 0)) or 0)
+        netqty = _position_qty(bp)
         if netqty == 0:
             open_positions.pop(sym, None)
             continue
 
-        entry   = pos["entry"]
-        curr    = float(bp.get("ltp") or bp.get("current_price") or entry)
+        entry   = _num(pos.get("entry"), _position_avg(bp, 0))
+        curr    = _position_ltp(bp, entry)
         qty     = abs(netqty)
         pct     = (curr - entry) / entry * 100 if entry else 0
 
@@ -997,9 +1157,74 @@ def load_negative_news() -> set:
     return set()
 
 
+def _zerodha_order_snapshot(broker, order_id: str) -> dict:
+    try:
+        hist = broker.get_order_history(order_id) or []
+        if isinstance(hist, list) and hist:
+            return hist[-1]
+    except Exception:
+        pass
+    try:
+        for order in broker.get_orders() or []:
+            if str(order.get("order_id")) == str(order_id):
+                return order
+    except Exception:
+        pass
+    return {}
+
+
+def _wait_for_zerodha_fill(broker, order_id: str, symbol: str, timeout_sec: float = 8.0) -> dict:
+    """Poll a fresh Zerodha order and return fill details or an error."""
+    deadline = time.time() + timeout_sec
+    last = {}
+    while time.time() < deadline:
+        last = _zerodha_order_snapshot(broker, order_id)
+        status = (last.get("status") or "").upper()
+        filled = int(_num(last.get("filled_quantity"), 0))
+        if status == "COMPLETE" and filled > 0:
+            return {
+                "ok": True,
+                "qty": filled,
+                "price": _num(last.get("average_price"), 0),
+                "status": status,
+            }
+        if status in ("REJECTED", "CANCELLED"):
+            msg = last.get("status_message") or last.get("status_message_raw") or status
+            _record_buy_rejection(symbol, msg)
+            return {"ok": False, "status": status, "message": msg}
+        time.sleep(0.5)
+
+    status = (last.get("status") or "UNKNOWN").upper()
+    filled = int(_num(last.get("filled_quantity"), 0))
+    if filled > 0:
+        try:
+            broker.cancel_order(order_id, variety=last.get("variety", "regular"))
+        except Exception:
+            pass
+        return {
+            "ok": True,
+            "qty": filled,
+            "price": _num(last.get("average_price"), 0),
+            "status": status,
+            "partial": True,
+        }
+
+    try:
+        broker.cancel_order(order_id, variety=last.get("variety", "regular"))
+        log_event(f"  BUY {symbol} not filled quickly — cancelled pending order {order_id}")
+    except Exception as e:
+        log_event(f"  BUY {symbol} pending cancel failed: {e}")
+    return {"ok": False, "status": status, "message": "order_not_filled"}
+
+
 # ── Entry execution ───────────────────────────────────────────
 
 def execute_buy(broker, symbol: str, qty: int, price: float, stop: float, tp: float, score: int, reasons: dict):
+    block_reason = _entry_block_reason(symbol)
+    if block_reason:
+        log_event(f"SKIP {symbol}: {block_reason}")
+        return False
+
     # News kill-switch: never enter if there's breaking negative news
     if symbol.upper() in load_negative_news():
         log_event(f"NEWS BLOCK {symbol}: skipping entry — negative news headline detected")
@@ -1043,6 +1268,15 @@ def execute_buy(broker, symbol: str, qty: int, price: float, stop: float, tp: fl
                 exchange="NSE",
                 tag="indianbot",
             )
+            fill = _wait_for_zerodha_fill(broker, order_id, symbol)
+            if not fill.get("ok"):
+                log_event(f"  BUY {symbol} {fill.get('status', 'FAILED')}: {fill.get('message', '')}")
+                return False
+            qty = int(fill["qty"])
+            if fill.get("price", 0) > 0:
+                price = float(fill["price"])
+                stop = round(price * (1 - STOP_PCT / 100), 2)
+                tp = round(price * (1 + TP_PCT / 100), 2)
         else:
             res = broker.place_order(symbol, qty, "buy")
             order_id = res.get("id", "") if isinstance(res, dict) else str(res)
@@ -1179,10 +1413,13 @@ def run():
     _state["broker"] = broker_name
     _state["started"] = now_ist().isoformat()
     _state["allocation"] = {
+        "total_budget":     TOTAL_BUDGET,
         "budget_per_trade": BUDGET_PER_TRADE,
         "max_positions":    MAX_POSITIONS,
         "stop_pct":         STOP_PCT,
         "tp_pct":           TP_PCT,
+        "min_confidence":   MIN_CONFIDENCE,
+        "position_pct":     POSITION_PCT,
         "trading_mode":     _state.get("trading_mode", "balanced"),
     }
 
@@ -1289,17 +1526,26 @@ def run():
                 continue
 
         # ── Daily loss limit ───────────────────────────────
-        daily_pnl = calc_daily_pnl(broker, start_equity)
+        if isinstance(broker, ZerodhaBroker):
+            daily_pnl_inr = calc_daily_pnl_inr(broker)
+            daily_pnl = (daily_pnl_inr / start_equity * 100) if start_equity > 0 else 0.0
+        else:
+            daily_pnl = calc_daily_pnl(broker, start_equity)
+            daily_pnl_inr = (daily_pnl / 100.0) * start_equity
         _state["daily_pnl"] = daily_pnl
-        # Compute daily P&L in absolute INR (not %), cap at ₹500 default
-        daily_pnl_inr = (daily_pnl / 100.0) * start_equity
-        DAILY_LOSS_LIMIT_INR = float(os.environ.get("INDIAN_BOT_DAILY_LOSS_INR", 500))
+        _state["daily_pnl_inr"] = round(daily_pnl_inr, 2)
+        loss_limit_env = os.environ.get("INDIAN_BOT_DAILY_LOSS_INR")
+        DAILY_LOSS_LIMIT_INR = (
+            float(loss_limit_env)
+            if loss_limit_env
+            else max(25.0, start_equity * DAILY_LOSS_LIMIT / 100.0)
+        )
         if daily_pnl_inr <= -DAILY_LOSS_LIMIT_INR:
             if not _state["trading_paused"]:
-                log_event(f"Daily loss limit hit ({daily_pnl:.2f}%) — no new entries")
+                log_event(f"Daily loss limit hit (₹{daily_pnl_inr:.2f}, {daily_pnl:.2f}%) — no new entries")
                 alert_daily_loss(daily_pnl)
                 _state["trading_paused"] = True
-                _state["pause_reason"] = f"Daily loss {daily_pnl:.2f}%"
+                _state["pause_reason"] = f"Daily loss ₹{daily_pnl_inr:.2f}"
             # Still monitor exits
             try:
                 positions = _norm_positions(broker.get_positions())
@@ -1390,28 +1636,19 @@ def run():
             continue
 
         # ── Pre-trade margin check ───────────────────────────────────────
-        # Query Zerodha for available equity margin before scoring symbols.
-        # If we don't have enough for even one budget-sized trade, skip.
-        avail_margin = 0.0
-        try:
-            if isinstance(broker, ZerodhaBroker):
-                _funds = broker.get_funds() or {}
-                _eq    = _funds.get("equity", {}) if isinstance(_funds, dict) else {}
-                _avail = _eq.get("available", {}) if isinstance(_eq, dict) else {}
-                avail_margin = float(_avail.get("live_balance") or _avail.get("cash") or 0)
-            elif isinstance(broker, AngelOneBroker):
-                _funds = broker.get_funds() or {}
-                avail_margin = float(_funds.get("availablecash") or _funds.get("net") or 0)
-        except Exception as e:
-            log_event(f"[scan] margin fetch failed: {e} — assuming 0")
-            avail_margin = 0.0
-
-        # Need at least 30% of one trade's required margin (MIS ≈ 5x leverage)
-        # Rough estimate: budget * 0.20 (5x leverage)
-        _min_needed = BUDGET_PER_TRADE * 0.20
-        log_event(f"[scan] available margin: Rs{avail_margin:,.2f}  min needed: Rs{_min_needed:,.2f}")
-        if avail_margin < _min_needed:
-            log_event(f"Insufficient margin (Rs{avail_margin:,.0f} < Rs{_min_needed:,.0f}) — skipping new entries")
+        # Use actual broker-available margin and the per-trade slice of the
+        # user's total budget. Never assume MIS leverage is available.
+        avail_margin = _available_margin(broker)
+        if _entry_block_reason("*"):
+            log_event(f"No new buys: {_entry_block_reason('*')}")
+            save_state()
+            time.sleep(60)
+            continue
+        min_cash_for_scan = min(BUDGET_PER_TRADE, avail_margin)
+        log_event(f"[scan] available margin: Rs{avail_margin:,.2f}  "
+                  f"per-trade cap: Rs{BUDGET_PER_TRADE:,.2f}")
+        if min_cash_for_scan <= ORDER_BUFFER_INR:
+            log_event("Insufficient usable margin — skipping new entries")
             save_state()
             time.sleep(60)
             continue
@@ -1427,30 +1664,51 @@ def run():
                 continue
             sc, reasons, bars = score_stock(broker, sym)
             log_event(f"{sym:12s} score={sc:3d}  {list(reasons.keys())[:3]}")
-            # Require BOTH score ≥ 65 AND volume surge
-            if sc >= 65 and pe.has_volume_surge(bars):
+            # Require BOTH score ≥ active mode threshold AND volume surge.
+            if sc >= MIN_CONFIDENCE and pe.has_volume_surge(bars):
                 candidates.append((sc, sym, reasons, bars))
 
         candidates.sort(reverse=True)
         slots = MAX_POSITIONS - cur_count
 
-        # Cap how many BUYs we issue per scan cycle (avoid spam)
-        # If we have ample margin, take all slots. If margin is tight, take 1.
-        _max_per_cycle = max(1, min(slots, int(avail_margin // _min_needed)))
+        # Cap how many BUYs we issue per scan cycle; actual affordability is
+        # checked per candidate below and remaining margin is decremented.
+        _max_per_cycle = max(1, min(slots, len(candidates)))
         log_event(f"[scan] candidates={len(candidates)}  slots={slots}  "
                   f"max_this_cycle={_max_per_cycle}")
 
-        for sc, sym, reasons, bars in candidates[:_max_per_cycle]:
+        remaining_margin = avail_margin
+        buys_done = 0
+        for sc, sym, reasons, bars in candidates:
+            if buys_done >= slots:
+                break
+            block_reason = _entry_block_reason(sym)
+            if block_reason:
+                log_event(f"SKIP {sym}: {block_reason}")
+                continue
             if not bars:
                 continue
             price = bars[-1]["c"]
             if not price or price <= 0:
                 continue
 
-            qty   = max(1, int(BUDGET_PER_TRADE // price))
+            qty = _max_affordable_qty(price, BUDGET_PER_TRADE, remaining_margin)
+            if qty <= 0:
+                log_event(f"SKIP {sym}: price ₹{price:.2f} exceeds per-trade/margin cap")
+                continue
+            required_margin = _required_margin_estimate(price, qty)
+            if required_margin > remaining_margin:
+                log_event(f"SKIP {sym}: needs about ₹{required_margin:,.0f}, "
+                          f"available ₹{remaining_margin:,.0f}")
+                continue
             stop  = round(price * (1 - STOP_PCT / 100), 2)
             tp    = round(price * (1 + TP_PCT / 100), 2)
-            execute_buy(broker, sym, qty, price, stop, tp, sc, reasons)
+            if execute_buy(broker, sym, qty, price, stop, tp, sc, reasons):
+                buys_done += 1
+                remaining_margin = max(0.0, remaining_margin - required_margin)
+
+        if candidates and buys_done == 0:
+            log_event("No candidate passed cash/margin safety checks this cycle")
 
         # ── Update dashboard state ─────────────────────────
         _state["last_scan"] = now.isoformat()
@@ -1473,7 +1731,7 @@ def run():
               f"VIX={vix_val:.1f} | "
               f"DayPnL={daily_pnl:+.2f}% | "
               f"Open={len(open_positions)}/{MAX_POSITIONS} | "
-              f"Budget=₹{BUDGET_PER_TRADE:,.0f}")
+              f"Budget=₹{TOTAL_BUDGET:,.0f} total / ₹{BUDGET_PER_TRADE:,.0f} per trade")
         time.sleep(60)
 
 

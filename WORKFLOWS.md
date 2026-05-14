@@ -5,6 +5,11 @@
 - **Production server:** `root@187.127.73.203:/opt/trading-bot`
 - **Live URL:** `https://dilipcentralacademy.tech`
 
+## Deployment Rule
+- Code changes must be committed and pushed to GitHub before production deploy.
+- Production deploys must run from Git on the server (`./deploy.sh`), so `/opt/trading-bot` matches `origin/main`.
+- Do not copy code files directly to production except as an emergency rollback/repair, and if that happens, follow with a Git commit + Git deploy immediately.
+
 ## Daily Developer Loop
 ```bash
 # 1. Edit locally
