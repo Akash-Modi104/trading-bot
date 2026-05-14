@@ -1547,6 +1547,7 @@ INDIAN_BOT_STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                      "indian_bot_state.json")
 INDIAN_SCANNER_FILE = os.path.join(BASE_DIR, "indian_scanner.json")
 INDIAN_TRADE_LOG_FILE = os.path.join(BASE_DIR, "indian_trade_log.json")
+INDIAN_VIRTUAL_FILE = os.path.join(BASE_DIR, "indian_virtual_state.json")
 
 @app.route("/api/indian/state")
 @_require_auth
@@ -1769,6 +1770,250 @@ def _quality_entry_time(dt) -> bool:
     return (9 * 60 + 45 <= mins < 11 * 60 + 30) or (13 * 60 <= mins < 14 * 60 + 30)
 
 
+def _run_indian_backtest_sim(symbol: str, bars: list, *, budget: float,
+                             stop_pct: float, tp_pct: float,
+                             min_conf: int) -> dict:
+    position = None
+    trades = []
+    curve = []
+    equity = 0.0
+    peak = 0.0
+    max_dd = 0.0
+    checked = 0
+    passed_score = 0
+    passed_volume = 0
+    no_cash = 0
+    last_signal = None
+
+    def _close_position(pos, bar, exit_price, exit_reason):
+        nonlocal equity, peak, max_dd
+        buy_value = pos["entry"] * pos["qty"]
+        sell_value = exit_price * pos["qty"]
+        gross = sell_value - buy_value
+        charges = _estimate_zerodha_equity_intraday_charges(buy_value, sell_value)
+        net = gross - charges["total"]
+        equity += net
+        peak = max(peak, equity)
+        max_dd = min(max_dd, equity - peak)
+        trade = {
+            "entry_time": pos["time"],
+            "exit_time": bar["t"],
+            "symbol": symbol,
+            "qty": pos["qty"],
+            "entry": round(pos["entry"], 2),
+            "exit": round(exit_price, 2),
+            "reason": exit_reason,
+            "score": pos["score"],
+            "gross_pnl": round(gross, 2),
+            "charges": charges["total"],
+            "net_pnl": round(net, 2),
+            "running_pnl": round(equity, 2),
+            "signal_reasons": pos["reasons"],
+        }
+        trades.append(trade)
+        curve.append({
+            "time": str(bar["t"])[11:16] if len(str(bar["t"])) > 15 else str(bar["t"]),
+            "pnl": round(equity, 2),
+            "symbol": symbol,
+            "reason": exit_reason,
+        })
+
+    for i in range(35, len(bars)):
+        bar = bars[i]
+        dt = bar.get("dt")
+        if position:
+            exit_price = None
+            exit_reason = ""
+            mins = dt.hour * 60 + dt.minute if dt else 0
+            if bar["l"] <= position["stop"]:
+                exit_price = position["stop"]
+                exit_reason = "stop"
+            elif bar["h"] >= position["target"]:
+                exit_price = position["target"]
+                exit_reason = "target"
+            elif mins >= 15 * 60 + 10:
+                exit_price = bar["c"]
+                exit_reason = "eod"
+            if exit_price:
+                _close_position(position, bar, exit_price, exit_reason)
+                position = None
+            continue
+
+        if not _quality_entry_time(dt):
+            continue
+        window = bars[max(0, i - 80):i + 1]
+        checked += 1
+        score, reasons = _score_backtest_bars(window)
+        if score < min_conf:
+            continue
+        passed_score += 1
+        if not _volume_surge(window):
+            continue
+        passed_volume += 1
+        price = bar["c"]
+        qty = int((budget * 0.85) // price) if price > 0 else 0
+        last_signal = {"time": bar["t"], "score": score, "price": round(price, 2), "reasons": reasons}
+        if qty <= 0:
+            no_cash += 1
+            continue
+        position = {
+            "time": bar["t"],
+            "entry": price,
+            "qty": qty,
+            "stop": round(price * (1 - stop_pct / 100), 2),
+            "target": round(price * (1 + tp_pct / 100), 2),
+            "score": score,
+            "reasons": reasons,
+        }
+
+    if position and bars:
+        _close_position(position, bars[-1], bars[-1]["c"], "range_end")
+
+    wins = sum(1 for t in trades if t["net_pnl"] > 0)
+    gross = sum(t["gross_pnl"] for t in trades)
+    charges = sum(t["charges"] for t in trades)
+    net = sum(t["net_pnl"] for t in trades)
+    return {
+        "summary": {
+            "trades": len(trades),
+            "wins": wins,
+            "losses": len(trades) - wins,
+            "win_rate": round((wins / len(trades) * 100), 1) if trades else 0,
+            "gross_pnl": round(gross, 2),
+            "estimated_charges": round(charges, 2),
+            "net_pnl": round(net, 2),
+            "max_drawdown": round(max_dd, 2),
+            "checked_windows": checked,
+            "passed_score": passed_score,
+            "passed_volume": passed_volume,
+            "skipped_no_cash": no_cash,
+            "last_signal": last_signal,
+        },
+        "curve": curve,
+        "trades": trades[-100:],
+    }
+
+
+def _default_virtual_state():
+    now = datetime.now(pytz.timezone("Asia/Kolkata")).isoformat()
+    return {
+        "enabled": False,
+        "start_cash": 2000.0,
+        "cash": 2000.0,
+        "positions": [],
+        "trades": [],
+        "created_at": now,
+        "updated_at": now,
+    }
+
+
+def _load_virtual_state():
+    state = read_json(INDIAN_VIRTUAL_FILE, None)
+    if not isinstance(state, dict):
+        return _default_virtual_state()
+    base = _default_virtual_state()
+    base.update(state)
+    base["positions"] = state.get("positions") if isinstance(state.get("positions"), list) else []
+    base["trades"] = state.get("trades") if isinstance(state.get("trades"), list) else []
+    return base
+
+
+def _save_virtual_state(state: dict):
+    state["updated_at"] = datetime.now(pytz.timezone("Asia/Kolkata")).isoformat()
+    state["cash"] = round(_num(state.get("cash")), 2)
+    state["start_cash"] = round(_num(state.get("start_cash"), 2000), 2)
+    write_json(INDIAN_VIRTUAL_FILE, state)
+
+
+def _mark_virtual_to_market(state: dict, scanner_rows: list) -> dict:
+    price_map = {
+        (r.get("symbol") or "").upper(): _num(r.get("price"))
+        for r in scanner_rows or []
+        if _num(r.get("price")) > 0
+    }
+    unrealized = 0.0
+    for p in state.get("positions", []):
+        sym = (p.get("symbol") or "").upper()
+        last = price_map.get(sym) or _num(p.get("last_price")) or _num(p.get("entry"))
+        p["last_price"] = round(last, 2)
+        p["unrealized_pnl"] = round((last - _num(p.get("entry"))) * _int(p.get("qty")), 2)
+        unrealized += p["unrealized_pnl"]
+    realized = sum(_num(t.get("net_pnl")) for t in state.get("trades", []))
+    equity = _num(state.get("cash")) + sum(
+        _int(p.get("qty")) * _num(p.get("last_price") or p.get("entry"))
+        for p in state.get("positions", [])
+    )
+    return {
+        "cash": round(_num(state.get("cash")), 2),
+        "equity": round(equity, 2),
+        "unrealized_pnl": round(unrealized, 2),
+        "realized_pnl": round(realized, 2),
+        "total_pnl": round(equity - _num(state.get("start_cash"), 2000), 2),
+        "open_positions": len(state.get("positions", [])),
+        "closed_trades": len(state.get("trades", [])),
+    }
+
+
+def _scanner_alerts(payload: dict, state: dict = None) -> list:
+    rows = payload.get("rows") or []
+    meta = payload.get("meta") or {}
+    state = state or {}
+    alerts = []
+    if state.get("pause_reason"):
+        alerts.append({
+            "level": "warn",
+            "kind": "pause",
+            "title": "Bot paused",
+            "message": state.get("pause_reason"),
+        })
+    updated = _parse_ist_datetime(payload.get("updated_at") or state.get("last_scan"))
+    if updated:
+        age_min = (datetime.now(pytz.timezone("Asia/Kolkata")) - updated).total_seconds() / 60
+        if age_min > 20 and state.get("market_open"):
+            alerts.append({
+                "level": "warn",
+                "kind": "stale_scan",
+                "title": "Scanner is stale",
+                "message": f"Last scan was {age_min:.0f} minutes ago.",
+            })
+    for r in rows:
+        sym = r.get("symbol")
+        status = r.get("status")
+        if status == "candidate":
+            alerts.append({
+                "level": "up",
+                "kind": "buy_ready",
+                "symbol": sym,
+                "title": f"{sym} passed entry gates",
+                "message": f"Score {r.get('score')}/{r.get('min_confidence')}, qty {r.get('qty_preview')}, stop {r.get('stop')}, target {r.get('target')}.",
+            })
+        elif status == "order_failed":
+            alerts.append({
+                "level": "down",
+                "kind": "order_failed",
+                "symbol": sym,
+                "title": f"{sym} order failed",
+                "message": r.get("note") or "Broker did not confirm the order.",
+            })
+        elif status == "no_cash":
+            alerts.append({
+                "level": "warn",
+                "kind": "cash_block",
+                "symbol": sym,
+                "title": f"{sym} blocked by cash",
+                "message": r.get("note") or "Per-trade cap or available margin is too low.",
+            })
+    if meta.get("candidates", 0) == 0 and rows:
+        top = sorted(rows, key=lambda r: _num(r.get("score")), reverse=True)[:3]
+        alerts.append({
+            "level": "info",
+            "kind": "no_candidates",
+            "title": "No buy-ready symbols",
+            "message": "Top scores: " + ", ".join(f"{r.get('symbol')} {r.get('score', 0)}" for r in top),
+        })
+    return alerts[:20]
+
+
 @app.route("/api/indian/scanner")
 @_require_auth
 def api_indian_scanner():
@@ -1779,15 +2024,12 @@ def api_indian_scanner():
     meta.setdefault("pause_reason", state.get("pause_reason") or "")
     meta.setdefault("market_open", state.get("market_open"))
     meta.setdefault("now_ist", state.get("now_ist"))
-    alerts = [
-        r for r in rows
-        if r.get("status") in ("candidate", "bought", "order_failed", "no_cash")
-    ][:12]
+    payload = {**payload, "rows": rows, "meta": meta}
     return jsonify({
         "updated_at": payload.get("updated_at") or state.get("last_scan"),
         "rows": rows,
         "meta": meta,
-        "alerts": alerts,
+        "alerts": _scanner_alerts(payload, state),
     })
 
 
@@ -1900,114 +2142,13 @@ def api_indian_backtest():
         return jsonify({"error": str(e)[:200]}), 500
     bars = _normalise_zerodha_candles(raw)
 
-    position = None
-    trades = []
-    equity = 0.0
-    peak = 0.0
-    max_dd = 0.0
-    checked = 0
-    passed_score = 0
-    passed_volume = 0
-    no_cash = 0
-    last_signal = None
-
-    for i in range(35, len(bars)):
-        bar = bars[i]
-        dt = bar.get("dt")
-        if position:
-            exit_price = None
-            exit_reason = ""
-            mins = dt.hour * 60 + dt.minute if dt else 0
-            if bar["l"] <= position["stop"]:
-                exit_price = position["stop"]
-                exit_reason = "stop"
-            elif bar["h"] >= position["target"]:
-                exit_price = position["target"]
-                exit_reason = "target"
-            elif mins >= 15 * 60 + 10:
-                exit_price = bar["c"]
-                exit_reason = "eod"
-            if exit_price:
-                buy_value = position["entry"] * position["qty"]
-                sell_value = exit_price * position["qty"]
-                gross = sell_value - buy_value
-                charges = _estimate_zerodha_equity_intraday_charges(buy_value, sell_value)
-                net = gross - charges["total"]
-                equity += net
-                peak = max(peak, equity)
-                max_dd = min(max_dd, equity - peak)
-                trades.append({
-                    "entry_time": position["time"],
-                    "exit_time": bar["t"],
-                    "symbol": symbol,
-                    "qty": position["qty"],
-                    "entry": round(position["entry"], 2),
-                    "exit": round(exit_price, 2),
-                    "reason": exit_reason,
-                    "score": position["score"],
-                    "gross_pnl": round(gross, 2),
-                    "charges": charges["total"],
-                    "net_pnl": round(net, 2),
-                    "signal_reasons": position["reasons"],
-                })
-                position = None
-            continue
-
-        if not _quality_entry_time(dt):
-            continue
-        window = bars[max(0, i - 80):i + 1]
-        checked += 1
-        score, reasons = _score_backtest_bars(window)
-        if score < min_conf:
-            continue
-        passed_score += 1
-        if not _volume_surge(window):
-            continue
-        passed_volume += 1
-        price = bar["c"]
-        qty = int((budget * 0.85) // price) if price > 0 else 0
-        last_signal = {"time": bar["t"], "score": score, "price": round(price, 2), "reasons": reasons}
-        if qty <= 0:
-            no_cash += 1
-            continue
-        position = {
-            "time": bar["t"],
-            "entry": price,
-            "qty": qty,
-            "stop": round(price * (1 - stop_pct / 100), 2),
-            "target": round(price * (1 + tp_pct / 100), 2),
-            "score": score,
-            "reasons": reasons,
-        }
-
-    if position and bars:
-        bar = bars[-1]
-        buy_value = position["entry"] * position["qty"]
-        sell_value = bar["c"] * position["qty"]
-        gross = sell_value - buy_value
-        charges = _estimate_zerodha_equity_intraday_charges(buy_value, sell_value)
-        net = gross - charges["total"]
-        equity += net
-        trades.append({
-            "entry_time": position["time"],
-            "exit_time": bar["t"],
-            "symbol": symbol,
-            "qty": position["qty"],
-            "entry": round(position["entry"], 2),
-            "exit": round(bar["c"], 2),
-            "reason": "range_end",
-            "score": position["score"],
-            "gross_pnl": round(gross, 2),
-            "charges": charges["total"],
-            "net_pnl": round(net, 2),
-            "signal_reasons": position["reasons"],
-        })
-
-    wins = sum(1 for t in trades if t["net_pnl"] > 0)
-    losses = sum(1 for t in trades if t["net_pnl"] <= 0)
-    gross = sum(t["gross_pnl"] for t in trades)
-    charges = sum(t["charges"] for t in trades)
-    net = sum(t["net_pnl"] for t in trades)
+    result = _run_indian_backtest_sim(
+        symbol, bars,
+        budget=budget,
+        stop_pct=stop_pct,
+        tp_pct=tp_pct,
+        min_conf=min_conf,
+    )
     return jsonify({
         "symbol": symbol,
         "days": days,
@@ -2019,22 +2160,189 @@ def api_indian_backtest():
             "min_confidence": min_conf,
             "margin_buffer_pct": 15,
         },
-        "summary": {
-            "trades": len(trades),
-            "wins": wins,
-            "losses": losses,
-            "win_rate": round((wins / len(trades) * 100), 1) if trades else 0,
-            "gross_pnl": round(gross, 2),
-            "estimated_charges": round(charges, 2),
-            "net_pnl": round(net, 2),
-            "max_drawdown": round(max_dd, 2),
-            "checked_windows": checked,
-            "passed_score": passed_score,
-            "passed_volume": passed_volume,
-            "skipped_no_cash": no_cash,
-            "last_signal": last_signal,
-        },
-        "trades": trades[-100:],
+        "summary": result["summary"],
+        "curve": result["curve"],
+        "trades": result["trades"],
+    })
+
+
+@app.route("/api/indian/strategy_rank")
+@_require_auth
+def api_indian_strategy_rank():
+    u = _current_user()
+    symbol = (request.args.get("symbol") or "ONGC").upper().strip()
+    if not _SYMBOL_RE.match(symbol):
+        return jsonify({"error": "bad_symbol"}), 400
+    days = max(1, min(60, _int(request.args.get("days"), 20)))
+    state = read_json(INDIAN_BOT_STATE_FILE, {})
+    alloc = state.get("allocation") or {}
+    base_budget = max(0, _num(request.args.get("budget"), _num(alloc.get("budget_per_trade"), 1000)))
+
+    broker, err = _get_zerodha_broker(u["id"])
+    if err:
+        return jsonify({"error": err}), 400
+    token = _zerodha_symbol_token(broker, symbol)
+    if not token:
+        return jsonify({"error": "instrument_not_found", "symbol": symbol}), 404
+
+    ist = pytz.timezone("Asia/Kolkata")
+    to_dt = datetime.now(ist)
+    from_dt = to_dt - timedelta(days=days)
+    try:
+        raw = broker.get_candles(
+            token, "5minute",
+            from_dt.strftime("%Y-%m-%d %H:%M:%S"),
+            to_dt.strftime("%Y-%m-%d %H:%M:%S"),
+        )
+    except Exception as e:
+        return jsonify({"error": str(e)[:200]}), 500
+    bars = _normalise_zerodha_candles(raw)
+
+    rows = []
+    for mode, preset in db.get_trading_mode_presets().items():
+        max_positions = max(1, _int(preset.get("max_positions"), 1))
+        position_pct = _num(preset.get("position_pct"), 100)
+        budget = base_budget * (position_pct / 100.0)
+        sim = _run_indian_backtest_sim(
+            symbol, bars,
+            budget=budget,
+            stop_pct=_num(preset.get("stop_pct"), 1.5),
+            tp_pct=_num(preset.get("tp_pct"), 3.0),
+            min_conf=_int(preset.get("min_confidence"), 65),
+        )
+        s = sim["summary"]
+        score = (
+            _num(s.get("net_pnl")) -
+            abs(_num(s.get("max_drawdown"))) * 0.35 +
+            _num(s.get("win_rate")) * 0.08 +
+            min(_int(s.get("trades")), max_positions * days) * 0.15
+        )
+        rows.append({
+            "id": mode,
+            "label": preset.get("label", mode),
+            "tagline": preset.get("tagline", ""),
+            "score": round(score, 2),
+            "params": {
+                "budget": round(budget, 2),
+                "stop_pct": preset.get("stop_pct"),
+                "tp_pct": preset.get("tp_pct"),
+                "min_confidence": preset.get("min_confidence"),
+                "max_positions": max_positions,
+                "position_pct": position_pct,
+            },
+            "summary": s,
+        })
+    rows.sort(key=lambda r: r["score"], reverse=True)
+    return jsonify({
+        "symbol": symbol,
+        "days": days,
+        "candles": len(bars),
+        "best": rows[0] if rows else None,
+        "ranking": rows,
+    })
+
+
+@app.route("/api/indian/alerts")
+@_require_auth
+def api_indian_alerts():
+    payload = read_json(INDIAN_SCANNER_FILE, {})
+    state = read_json(INDIAN_BOT_STATE_FILE, {})
+    return jsonify({
+        "updated_at": payload.get("updated_at") or state.get("last_scan"),
+        "alerts": _scanner_alerts(payload, state),
+    })
+
+
+@app.route("/api/indian/virtual", methods=["GET", "POST"])
+@_require_auth
+def api_indian_virtual():
+    state = _load_virtual_state()
+    scanner = read_json(INDIAN_SCANNER_FILE, {})
+    scanner_rows = scanner.get("rows") or []
+
+    if request.method == "POST":
+        body = request.get_json(force=True, silent=True) or {}
+        action = (body.get("action") or "").lower()
+        now = datetime.now(pytz.timezone("Asia/Kolkata")).isoformat()
+        if action == "reset":
+            cash = max(100.0, min(10_000_000.0, _num(body.get("cash"), 2000)))
+            state = _default_virtual_state()
+            state.update({"start_cash": cash, "cash": cash, "enabled": bool(body.get("enabled", True))})
+        elif action == "toggle":
+            state["enabled"] = bool(body.get("enabled"))
+        elif action == "seed_from_scanner":
+            if not state.get("enabled"):
+                state["enabled"] = True
+            held = {(p.get("symbol") or "").upper() for p in state.get("positions", [])}
+            candidates = [
+                r for r in sorted(scanner_rows, key=lambda x: _num(x.get("score")), reverse=True)
+                if r.get("status") in ("candidate", "bought") and (r.get("symbol") or "").upper() not in held
+            ]
+            max_new = max(1, min(10, _int(body.get("limit"), 3)))
+            for r in candidates[:max_new]:
+                price = _num(r.get("price"))
+                if price <= 0:
+                    continue
+                cash = _num(state.get("cash"))
+                risk_cash = min(cash, max(0.0, _num(r.get("required_margin"), cash)))
+                qty = _int(r.get("qty_preview")) or int((risk_cash * 0.85) // price)
+                while qty > 0 and qty * price > cash:
+                    qty -= 1
+                if qty <= 0:
+                    continue
+                state["cash"] = round(cash - qty * price, 2)
+                state.setdefault("positions", []).append({
+                    "symbol": (r.get("symbol") or "").upper(),
+                    "qty": qty,
+                    "entry": round(price, 2),
+                    "last_price": round(price, 2),
+                    "stop": r.get("stop"),
+                    "target": r.get("target"),
+                    "score": r.get("score"),
+                    "opened_at": now,
+                    "mode": "scanner",
+                })
+        elif action == "close":
+            symbol = (body.get("symbol") or "").upper().strip()
+            price_map = {
+                (r.get("symbol") or "").upper(): _num(r.get("price"))
+                for r in scanner_rows if _num(r.get("price")) > 0
+            }
+            kept = []
+            for p in state.get("positions", []):
+                sym = (p.get("symbol") or "").upper()
+                if symbol and sym != symbol:
+                    kept.append(p)
+                    continue
+                exit_price = _num(body.get("price")) or price_map.get(sym) or _num(p.get("last_price")) or _num(p.get("entry"))
+                qty = _int(p.get("qty"))
+                buy_value = _num(p.get("entry")) * qty
+                sell_value = exit_price * qty
+                charges = _estimate_zerodha_equity_intraday_charges(buy_value, sell_value)
+                net = sell_value - buy_value - charges["total"]
+                state["cash"] = round(_num(state.get("cash")) + sell_value - charges["total"], 2)
+                state.setdefault("trades", []).append({
+                    "symbol": sym,
+                    "qty": qty,
+                    "entry": round(_num(p.get("entry")), 2),
+                    "exit": round(exit_price, 2),
+                    "net_pnl": round(net, 2),
+                    "charges": charges["total"],
+                    "opened_at": p.get("opened_at"),
+                    "closed_at": now,
+                    "reason": "manual",
+                })
+            state["positions"] = kept
+        else:
+            return jsonify({"error": "unknown_action"}), 400
+        state["trades"] = state.get("trades", [])[-500:]
+        _save_virtual_state(state)
+
+    summary = _mark_virtual_to_market(state, scanner_rows)
+    return jsonify({
+        "state": state,
+        "summary": summary,
+        "scanner_updated_at": scanner.get("updated_at"),
     })
 
 

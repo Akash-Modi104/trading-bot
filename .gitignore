@@ -32,6 +32,7 @@ archive/
 
 indian_bot_state.json
 indian_scanner.json
+indian_virtual_state.json
 indian_positions_state.json
 indian_trade_log.json
 negative_news_in.json

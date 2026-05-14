@@ -47,6 +47,7 @@ STATE_FILE     = os.path.join(BASE_DIR, "indian_bot_state.json")
 POSITIONS_F    = os.path.join(BASE_DIR, "indian_positions_state.json")
 NEG_NEWS_F     = os.path.join(BASE_DIR, "negative_news_in.json")  # written by news_scanner_indian.py
 SCANNER_F      = os.path.join(BASE_DIR, "indian_scanner.json")
+VIRTUAL_F      = os.path.join(BASE_DIR, "indian_virtual_state.json")
 
 # ── Timezone ───────────────────────────────────────────────────
 IST = pytz.timezone("Asia/Kolkata")
@@ -343,6 +344,157 @@ def _write_scanner(rows: list, meta: dict):
         safe_io.write_json_atomic(SCANNER_F, payload, indent=2)
     except Exception as e:
         log_event(f"scanner write failed: {e}")
+
+
+def _virtual_default_state():
+    now = now_ist().isoformat()
+    return {
+        "enabled": False,
+        "start_cash": 2000.0,
+        "cash": 2000.0,
+        "positions": [],
+        "trades": [],
+        "created_at": now,
+        "updated_at": now,
+    }
+
+
+def _virtual_charges(buy_value: float, sell_value: float) -> float:
+    turnover = max(0.0, buy_value) + max(0.0, sell_value)
+    brokerage = (min(20.0, buy_value * 0.0003) if buy_value else 0.0) + \
+                (min(20.0, sell_value * 0.0003) if sell_value else 0.0)
+    stt = sell_value * 0.00025
+    exchange_txn = turnover * 0.0000297
+    sebi = turnover * 0.000001
+    stamp = buy_value * 0.00003
+    gst = (brokerage + exchange_txn + sebi) * 0.18
+    return round(brokerage + stt + exchange_txn + sebi + stamp + gst, 2)
+
+
+def _load_virtual_state():
+    try:
+        with open(VIRTUAL_F, "r", encoding="utf-8") as f:
+            state = json.load(f)
+        if not isinstance(state, dict):
+            raise ValueError("bad virtual state")
+        base = _virtual_default_state()
+        base.update(state)
+        base["positions"] = state.get("positions") if isinstance(state.get("positions"), list) else []
+        base["trades"] = state.get("trades") if isinstance(state.get("trades"), list) else []
+        return base
+    except Exception:
+        return _virtual_default_state()
+
+
+def _save_virtual_state(state: dict):
+    state["updated_at"] = now_ist().isoformat()
+    state["cash"] = round(float(state.get("cash") or 0), 2)
+    state["start_cash"] = round(float(state.get("start_cash") or 2000), 2)
+    safe_io.write_json_atomic(VIRTUAL_F, state, indent=2)
+
+
+def _virtual_step(scanner_rows: list, max_positions: int) -> dict:
+    """Paper-trade the current scanner signals. Does not touch the broker."""
+    state = _load_virtual_state()
+    if not state.get("enabled"):
+        return {"enabled": False}
+
+    now = now_ist().isoformat()
+    price_map = {
+        (r.get("symbol") or "").upper(): float(r.get("price") or 0)
+        for r in scanner_rows or []
+        if float(r.get("price") or 0) > 0
+    }
+
+    kept = []
+    for p in state.get("positions", []):
+        sym = (p.get("symbol") or "").upper()
+        price = price_map.get(sym) or float(p.get("last_price") or p.get("entry") or 0)
+        p["last_price"] = round(price, 2)
+        qty = int(float(p.get("qty") or 0))
+        entry = float(p.get("entry") or 0)
+        stop = float(p.get("stop") or 0)
+        target = float(p.get("target") or 0)
+        reason = None
+        exit_price = price
+        if stop and price <= stop:
+            reason = "stop"
+            exit_price = stop
+        elif target and price >= target:
+            reason = "target"
+            exit_price = target
+        elif pe.pre_eod_phase() in ("soft_flat", "hard_flat", "closed"):
+            reason = "eod"
+        if reason and qty > 0:
+            buy_value = entry * qty
+            sell_value = exit_price * qty
+            charges = _virtual_charges(buy_value, sell_value)
+            net = sell_value - buy_value - charges
+            state["cash"] = float(state.get("cash") or 0) + sell_value - charges
+            state.setdefault("trades", []).append({
+                "symbol": sym,
+                "qty": qty,
+                "entry": round(entry, 2),
+                "exit": round(exit_price, 2),
+                "net_pnl": round(net, 2),
+                "charges": charges,
+                "opened_at": p.get("opened_at"),
+                "closed_at": now,
+                "reason": reason,
+            })
+        else:
+            p["unrealized_pnl"] = round((price - entry) * qty, 2)
+            kept.append(p)
+    state["positions"] = kept
+
+    held = {(p.get("symbol") or "").upper() for p in state["positions"]}
+    slots = max(0, max_positions - len(state["positions"]))
+    for r in sorted(scanner_rows or [], key=lambda x: float(x.get("score") or 0), reverse=True):
+        if slots <= 0:
+            break
+        sym = (r.get("symbol") or "").upper()
+        if r.get("status") not in ("candidate", "bought") or not sym or sym in held:
+            continue
+        price = float(r.get("price") or 0)
+        if price <= 0:
+            continue
+        cash = float(state.get("cash") or 0)
+        risk_cash = min(cash, float(r.get("required_margin") or BUDGET_PER_TRADE or cash))
+        qty = int(float(r.get("qty_preview") or 0)) or int((risk_cash * 0.85) // price)
+        while qty > 0 and qty * price > cash:
+            qty -= 1
+        if qty <= 0:
+            continue
+        state["cash"] = cash - qty * price
+        state["positions"].append({
+            "symbol": sym,
+            "qty": qty,
+            "entry": round(price, 2),
+            "last_price": round(price, 2),
+            "stop": r.get("stop"),
+            "target": r.get("target"),
+            "score": r.get("score"),
+            "opened_at": now,
+            "mode": _state.get("trading_mode", "balanced"),
+        })
+        held.add(sym)
+        slots -= 1
+
+    state["trades"] = state.get("trades", [])[-500:]
+    _save_virtual_state(state)
+    equity = float(state.get("cash") or 0) + sum(
+        int(float(p.get("qty") or 0)) * float(p.get("last_price") or p.get("entry") or 0)
+        for p in state.get("positions", [])
+    )
+    realized = sum(float(t.get("net_pnl") or 0) for t in state.get("trades", []))
+    return {
+        "enabled": True,
+        "cash": round(float(state.get("cash") or 0), 2),
+        "equity": round(equity, 2),
+        "total_pnl": round(equity - float(state.get("start_cash") or 0), 2),
+        "realized_pnl": round(realized, 2),
+        "open_positions": len(state.get("positions", [])),
+    }
 
 
 def _broker_open_positions(broker) -> dict:
@@ -1811,6 +1963,7 @@ def run():
 
         # ── Update dashboard state ─────────────────────────
         _state["last_scan"] = now.isoformat()
+        virtual_summary = _virtual_step(scanner_rows, MAX_POSITIONS)
         _write_scanner(scanner_rows, {
             "broker": broker_name,
             "available_margin": round(avail_margin, 2),
@@ -1826,6 +1979,7 @@ def run():
             "stop_pct": STOP_PCT,
             "tp_pct": TP_PCT,
             "nifty_trend": "bull" if nifty_up else "bear",
+            "virtual": virtual_summary,
         })
         _state["positions"] = [
             {

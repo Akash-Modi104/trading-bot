@@ -1110,6 +1110,40 @@
       return (n < 0 ? '-₹' : '₹') + Math.abs(n).toLocaleString('en-IN', {maximumFractionDigits:2});
     };
 
+    const InrCurveChart = ({ curve }) => {
+      const ref = useRef(null);
+      const chart = useRef(null);
+      const dep = JSON.stringify(curve || []);
+      useEffect(() => {
+        if (!ref.current || !window.Chart) return;
+        chart.current?.destroy();
+        const safe = Array.isArray(curve) ? curve : [];
+        const labels = safe.length ? safe.map(p => p.time) : ['Start', 'End'];
+        const vals = safe.length ? safe.map(p => Number(p.pnl || 0)) : [0, 0];
+        const last = vals[vals.length - 1] || 0;
+        const c = last >= 0 ? 'oklch(0.74 0.16 152)' : 'oklch(0.68 0.20 25)';
+        chart.current = new window.Chart(ref.current.getContext('2d'), {
+          type:'line',
+          data:{labels,datasets:[{data:vals,borderColor:c,backgroundColor:c.replace(')', ' / 0.12)'),fill:true,tension:0.35,pointRadius:vals.length>20?0:3,borderWidth:2}]},
+          options:{
+            responsive:true, maintainAspectRatio:false,
+            plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>' '+inr(ctx.raw)}}},
+            scales:{
+              x:{grid:{color:'rgba(148,163,184,.14)'},ticks:{color:'var(--ink-4)',font:{size:10},maxTicksLimit:8}},
+              y:{grid:{color:'rgba(148,163,184,.14)'},ticks:{color:'var(--ink-4)',font:{size:10},callback:v=>'₹'+Number(v).toFixed(0)}},
+            },
+          },
+        });
+        return () => chart.current?.destroy();
+      }, [dep]);
+      return (
+        <div style={{height:170,position:'relative'}}>
+          <canvas ref={ref} />
+          {(!curve || curve.length === 0) && <div className="empty" style={{position:'absolute',inset:0,padding:0,display:'flex',alignItems:'center',justifyContent:'center'}}>No closed trades in this test</div>}
+        </div>
+      );
+    };
+
     const IndianNetPnlCard = () => {
       const [data, setData] = useState(null);
       const [err, setErr] = useState(null);
@@ -1148,6 +1182,164 @@
                 </div>
               </div>
           }
+        </div>
+      );
+    };
+
+    const IndianAlertsCard = () => {
+      const [alerts, setAlerts] = useState([]);
+      const [err, setErr] = useState(null);
+      const load = useCallback(() => {
+        fetch('/api/indian/alerts')
+          .then(r => r.ok ? r.json() : r.json().then(e => Promise.reject(e)))
+          .then(d => { setAlerts(d.alerts || []); setErr(null); })
+          .catch(e => setErr(e?.message || e?.error || 'Alerts unavailable'));
+      }, []);
+      useEffect(() => { load(); const id = setInterval(load, 10000); return () => clearInterval(id); }, [load]);
+      const color = a => a.level === 'up' ? 'var(--up)' : a.level === 'down' ? 'var(--down)' : a.level === 'warn' ? 'var(--warn)' : 'var(--accent)';
+      return (
+        <div className="card">
+          <div className="card-hdr" style={{justifyContent:'space-between'}}>
+            <span className="card-title">Action Alerts</span>
+            <button className="btn ghost" style={{padding:'3px 9px',fontSize:11}} onClick={load}>Refresh</button>
+          </div>
+          {err && <div className="empty" style={{padding:18,color:'var(--down)'}}>{err}</div>}
+          {!err && alerts.length === 0 && <div className="empty" style={{padding:24}}>No active alerts</div>}
+          {!err && alerts.slice(0, 8).map((a, i) => (
+            <div key={i} style={{padding:'11px 14px',borderBottom:'1px solid var(--line-soft)',display:'grid',gap:4}}>
+              <div style={{display:'flex',gap:8,alignItems:'center',justifyContent:'space-between'}}>
+                <span style={{fontSize:13,fontWeight:800,color:color(a)}}>{a.title}</span>
+                {a.symbol && <span className="mono" style={{fontSize:11,color:'var(--ink-4)'}}>{a.symbol}</span>}
+              </div>
+              <div style={{fontSize:12,color:'var(--ink-3)',lineHeight:1.45}}>{a.message}</div>
+            </div>
+          ))}
+        </div>
+      );
+    };
+
+    const IndianVirtualCard = () => {
+      const [data, setData] = useState(null);
+      const [busy, setBusy] = useState(null);
+      const [err, setErr] = useState(null);
+      const load = useCallback(() => {
+        fetch('/api/indian/virtual')
+          .then(r => r.ok ? r.json() : r.json().then(e => Promise.reject(e)))
+          .then(d => { setData(d); setErr(null); })
+          .catch(e => setErr(e?.message || e?.error || 'Virtual mode unavailable'));
+      }, []);
+      useEffect(() => { load(); const id = setInterval(load, 15000); return () => clearInterval(id); }, [load]);
+      const act = async (body, key) => {
+        setBusy(key); setErr(null);
+        try {
+          const r = await fetch('/api/indian/virtual', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+          const d = await r.json();
+          if (!r.ok) throw new Error(d.message || d.error || 'Action failed');
+          setData(d);
+        } catch(e) { setErr(e.message || 'Action failed'); }
+        finally { setBusy(null); }
+      };
+      const st = data?.state || {};
+      const s = data?.summary || {};
+      const enabled = !!st.enabled;
+      const pnl = Number(s.total_pnl || 0);
+      return (
+        <div className="card">
+          <div className="card-hdr" style={{justifyContent:'space-between'}}>
+            <span className="card-title">Paper Deployment</span>
+            <span className={`pill ${enabled ? 'up' : ''}`}>{enabled ? 'ON' : 'OFF'}</span>
+          </div>
+          {err && <div style={{padding:'10px 14px',color:'var(--down)',fontSize:12}}>{err}</div>}
+          <div style={{padding:16,display:'grid',gap:12}}>
+            <div style={{display:'grid',gridTemplateColumns:'repeat(3,minmax(0,1fr))',gap:8}}>
+              {[
+                ['Equity', inr(s.equity ?? st.start_cash)],
+                ['Cash', inr(s.cash ?? st.cash)],
+                ['P&L', inr(pnl)],
+              ].map(([label,val]) => (
+                <div key={label} style={{background:'var(--bg-2)',border:'1px solid var(--line-soft)',borderRadius:8,padding:'9px 10px'}}>
+                  <div className="eyebrow">{label}</div>
+                  <div className="mono" style={{fontWeight:800,marginTop:4,color:label==='P&L'?(pnl>=0?'var(--up)':'var(--down)'):'var(--ink)'}}>{val}</div>
+                </div>
+              ))}
+            </div>
+            <div style={{display:'grid',gridTemplateColumns:'repeat(2,minmax(0,1fr))',gap:8}}>
+              <button className={`btn ${enabled?'ghost':'success'}`} disabled={!!busy} onClick={() => act({action:'toggle', enabled:!enabled}, 'toggle')}>{enabled?'Pause Paper':'Start Paper'}</button>
+              <button className="btn primary" disabled={!!busy} onClick={() => act({action:'seed_from_scanner', limit:3}, 'seed')}>Deploy Top Signals</button>
+              <button className="btn ghost" disabled={!!busy} onClick={() => act({action:'close'}, 'close')}>Close Paper</button>
+              <button className="btn ghost" disabled={!!busy} onClick={() => act({action:'reset', cash:2000, enabled:true}, 'reset')}>Reset ₹2,000</button>
+            </div>
+            <div style={{fontSize:12,color:'var(--ink-3)'}}>
+              {s.open_positions || 0} paper position{s.open_positions===1?'':'s'} · {s.closed_trades || 0} closed paper trade{s.closed_trades===1?'':'s'}
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    const StrategyRankCard = ({ broker='zerodha' } = {}) => {
+      const [form, setForm] = useState({symbol:'ONGC', days:20});
+      const [data, setData] = useState(null);
+      const [busy, setBusy] = useState(null);
+      const [err, setErr] = useState(null);
+      const run = async () => {
+        setBusy('run'); setErr(null);
+        try {
+          const qs = new URLSearchParams({symbol:form.symbol || 'ONGC', days:form.days || 20});
+          const r = await fetch(`/api/indian/strategy_rank?${qs}`);
+          const d = await r.json();
+          if (!r.ok) throw new Error(d.message || d.error || 'Ranking failed');
+          setData(d);
+        } catch(e) { setErr(e.message || 'Ranking failed'); }
+        finally { setBusy(null); }
+      };
+      const applyMode = async id => {
+        if (!id) return;
+        setBusy(id); setErr(null);
+        try {
+          const r = await fetch(`/api/allocations/${broker}`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({trading_mode:id})});
+          const d = await r.json();
+          if (!r.ok || !d.ok) throw new Error(d.message || d.error || 'Could not apply mode');
+        } catch(e) { setErr(e.message || 'Could not apply mode'); }
+        finally { setBusy(null); }
+      };
+      return (
+        <div className="card">
+          <div className="card-hdr" style={{justifyContent:'space-between'}}>
+            <span className="card-title">Strategy Ranking</span>
+            <button className="btn primary" style={{padding:'4px 12px',fontSize:12}} disabled={!!busy} onClick={run}>{busy==='run'?'Running…':'Rank'}</button>
+          </div>
+          <div style={{padding:16,display:'grid',gap:12}}>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 110px',gap:10}}>
+              <label style={{display:'grid',gap:5}}>
+                <span className="eyebrow">Symbol</span>
+                <input value={form.symbol} onChange={e => setForm(f => ({...f, symbol:e.target.value.toUpperCase()}))} />
+              </label>
+              <label style={{display:'grid',gap:5}}>
+                <span className="eyebrow">Days</span>
+                <input type="number" min="1" max="60" value={form.days} onChange={e => setForm(f => ({...f, days:e.target.value}))} />
+              </label>
+            </div>
+            {err && <div style={{fontSize:12,color:'var(--down)'}}>{err}</div>}
+            {data?.ranking?.length > 0 && (
+              <div style={{display:'grid',gap:8}}>
+                {data.ranking.map((r, i) => (
+                  <div key={r.id} style={{background:'var(--bg-2)',border:'1px solid var(--line-soft)',borderRadius:8,padding:'10px 12px',display:'grid',gridTemplateColumns:'1fr auto',gap:10,alignItems:'center'}}>
+                    <div>
+                      <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
+                        <span style={{fontWeight:900,color:i===0?'var(--up)':'var(--ink)'}}>{i+1}. {r.label}</span>
+                        <span className="mono" style={{fontSize:11,color:'var(--ink-4)'}}>score {r.score}</span>
+                      </div>
+                      <div style={{fontSize:11,color:'var(--ink-3)',marginTop:4}}>
+                        {r.summary.trades} trades · {r.summary.win_rate}% win · {inr(r.summary.net_pnl)} net · DD {inr(r.summary.max_drawdown)}
+                      </div>
+                    </div>
+                    <button className="btn ghost" style={{padding:'4px 10px',fontSize:11}} disabled={!!busy} onClick={() => applyMode(r.id)}>Use</button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       );
     };
@@ -1277,6 +1469,26 @@
                 <div style={{fontSize:12,color:'var(--ink-3)'}}>
                   Checked {s.checked_windows || 0} windows · score passed {s.passed_score || 0} · volume passed {s.passed_volume || 0} · no-cash skips {s.skipped_no_cash || 0}
                 </div>
+                <InrCurveChart curve={data.curve || []} />
+                {(data.trades || []).length > 0 && (
+                  <div style={{overflowX:'auto'}}>
+                    <table>
+                      <thead><tr><th>Exit</th><th>Reason</th><th>Qty</th><th>Entry</th><th>Exit</th><th>Net</th></tr></thead>
+                      <tbody>
+                        {(data.trades || []).slice(-5).reverse().map((t, i) => (
+                          <tr key={i}>
+                            <td className="mono">{String(t.exit_time || '').slice(11,16)}</td>
+                            <td>{t.reason}</td>
+                            <td className="mono">{t.qty}</td>
+                            <td className="mono">{inr(t.entry)}</td>
+                            <td className="mono">{inr(t.exit)}</td>
+                            <td className="mono" style={{color:Number(t.net_pnl)>=0?'var(--up)':'var(--down)'}}>{inr(t.net_pnl)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </>
             )}
           </div>
@@ -1919,10 +2131,15 @@
           </div>
 
           <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(min(360px,100%),1fr))',gap:16}}>
-            <IndianScannerBoard />
+            <div style={{display:'grid',gap:16}}>
+              <IndianScannerBoard />
+              <IndianAlertsCard />
+            </div>
             <div style={{display:'grid',gap:16}}>
               <IndianNetPnlCard />
+              <IndianVirtualCard />
               <IndianBacktestLab />
+              <StrategyRankCard broker={broker === 'indian' ? 'zerodha' : broker} />
             </div>
           </div>
 
@@ -3697,8 +3914,11 @@
           <div className="fadein" style={{display:'grid',gap:16}}>
             <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(min(360px,100%),1fr))',gap:16}}>
               <IndianNetPnlCard />
+              <IndianVirtualCard />
               <IndianBacktestLab />
+              <StrategyRankCard broker={broker === 'indian' ? 'zerodha' : broker} />
             </div>
+            <IndianAlertsCard />
             <IndianScannerBoard />
           </div>
         );
@@ -3871,6 +4091,8 @@
           <div style={{marginTop:16,display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(min(360px,100%),1fr))',gap:16}}>
             <IndianScannerBoard compact />
             <IndianNetPnlCard />
+            <IndianVirtualCard />
+            <IndianAlertsCard />
           </div>
 
           {/* Row 3: Watchlist + Activity Log (mirrors Alpaca: Picks + Trades) */}
