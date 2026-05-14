@@ -1279,6 +1279,9 @@
         if (form.max_positions!== '') body.max_positions = parseInt(form.max_positions);
         if (form.stop_pct     !== '') body.stop_pct      = parseFloat(form.stop_pct);
         if (form.tp_pct       !== '') body.tp_pct        = parseFloat(form.tp_pct);
+        const manualRisk = ['max_positions','stop_pct','tp_pct']
+          .some(k => form[k] !== '' && Number(form[k]) > 0);
+        if (manualRisk) body.trading_mode = 'custom';
         try {
           const r = await fetch('/api/allocations/zerodha', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -1597,6 +1600,222 @@
                 <div style={{fontSize:11,color:'var(--ink-4)',marginTop:5}}>{d.desc}</div>
               </div>
             ))}
+          </div>
+        </div>
+      );
+    };
+
+    const IndianStrategy = ({ broker, health }) => {
+      const [alloc, setAlloc] = useState(null);
+      const [modes, setModes] = useState([]);
+      const [botState, setBotState] = useState(null);
+      const [editing, setEditing] = useState(false);
+      const [busy, setBusy] = useState(null);
+      const [msg, setMsg] = useState(null);
+      const [form, setForm] = useState({});
+
+      const label = BROKER_LABELS[broker] || 'Indian Bot';
+      const status = health?.services?.['indian-bot'] || 'unknown';
+      const running = status === 'running';
+      const activeMode = (alloc?.trading_mode || botState?.trading_mode || 'balanced').toLowerCase();
+      const botAlloc = botState?.allocation || {};
+      const totalBudget = Number(botAlloc.total_budget ?? alloc?.budget ?? 0);
+      const perTrade = Number(botAlloc.budget_per_trade ?? 0);
+      const maxPos = Number(botAlloc.max_positions ?? alloc?.max_positions ?? 0);
+      const stopPct = Number(botAlloc.stop_pct ?? alloc?.stop_pct ?? 0);
+      const tpPct = Number(botAlloc.tp_pct ?? alloc?.tp_pct ?? 0);
+      const minConf = Number(botAlloc.min_confidence ?? alloc?.min_confidence ?? 0);
+      const positionPct = Number(botAlloc.position_pct ?? alloc?.position_pct ?? 0);
+
+      const modeFallback = [
+        {id:'ruthless', label:'Ruthless', tagline:'Higher frequency, wider risk', max_positions:5, stop_pct:2.5, tp_pct:5.0, min_confidence:55, position_pct:100},
+        {id:'balanced', label:'Balanced', tagline:'Middle risk setting', max_positions:3, stop_pct:1.5, tp_pct:3.0, min_confidence:65, position_pct:80},
+        {id:'slow_gainer', label:'Slow Gainer', tagline:'Lower frequency, tighter risk', max_positions:2, stop_pct:1.0, tp_pct:2.0, min_confidence:75, position_pct:60},
+        {id:'custom', label:'Custom', tagline:'Manual allocation values'},
+      ];
+      const modeRows = modes.length ? modes : modeFallback;
+
+      const load = () => {
+        fetch(`/api/allocations/${broker}`).then(r => r.json()).then(d => {
+          setAlloc(d);
+          setForm({
+            budget:        d.budget        ?? '',
+            max_positions: d.max_positions ?? '',
+            stop_pct:      d.stop_pct      ?? '',
+            tp_pct:        d.tp_pct        ?? '',
+          });
+        }).catch(() => {});
+        fetch('/api/trading_modes').then(r => r.json()).then(d => setModes(Array.isArray(d) ? d : [])).catch(() => {});
+        fetch('/api/indian/state').then(r => r.json()).then(setBotState).catch(() => {});
+      };
+
+      useEffect(() => {
+        load();
+        const id = setInterval(() => {
+          fetch('/api/indian/state').then(r => r.json()).then(setBotState).catch(() => {});
+        }, 10000);
+        return () => clearInterval(id);
+      }, [broker]);
+
+      const notify = (ok, text) => {
+        setMsg({ok, text});
+        setTimeout(() => setMsg(null), 3000);
+      };
+
+      const updateAlloc = async (body, done) => {
+        setBusy(done || 'save');
+        try {
+          const r = await fetch(`/api/allocations/${broker}`, {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify(body),
+          });
+          const d = await r.json();
+          if (d.ok) {
+            setAlloc(d.allocation);
+            setEditing(false);
+            notify(true, 'Saved');
+          } else {
+            notify(false, d.message || d.error || 'Save failed');
+          }
+        } catch {
+          notify(false, 'Request failed');
+        } finally {
+          setBusy(null);
+        }
+      };
+
+      const saveCustom = () => {
+        const body = {};
+        if (form.budget        !== '') body.budget        = parseFloat(form.budget);
+        if (form.max_positions !== '') body.max_positions = parseInt(form.max_positions);
+        if (form.stop_pct      !== '') body.stop_pct      = parseFloat(form.stop_pct);
+        if (form.tp_pct        !== '') body.tp_pct        = parseFloat(form.tp_pct);
+        body.trading_mode = 'custom';
+        updateAlloc(body, 'save');
+      };
+
+      const fInr = v => {
+        const n = Number(v);
+        if (!isFinite(n) || n <= 0) return '—';
+        return '₹' + n.toLocaleString('en-IN', {maximumFractionDigits:0});
+      };
+      const Metric = ({label, value, sub}) => (
+        <div style={{background:'var(--bg-2)',border:'1px solid var(--line-soft)',borderRadius:8,padding:'12px 14px'}}>
+          <div className="eyebrow" style={{marginBottom:7}}>{label}</div>
+          <div style={{fontSize:20,fontWeight:700,fontFamily:'var(--font-mono)',color:'var(--accent)'}}>{value}</div>
+          {sub && <div style={{fontSize:11,color:'var(--ink-4)',marginTop:5,lineHeight:1.4}}>{sub}</div>}
+        </div>
+      );
+      const Rule = ({title, body}) => (
+        <div style={{padding:'13px 14px',borderBottom:'1px solid var(--line-soft)'}}>
+          <div style={{fontSize:13,fontWeight:700,color:'var(--ink)',marginBottom:4}}>{title}</div>
+          <div style={{fontSize:12,color:'var(--ink-3)',lineHeight:1.55}}>{body}</div>
+        </div>
+      );
+      const inputStyle = {
+        width:'100%', background:'var(--bg-2)', border:'1px solid var(--line)',
+        borderRadius:6, color:'var(--ink)', padding:'7px 10px',
+        fontSize:13, fontFamily:'var(--font-mono)', outline:'none',
+      };
+
+      return (
+        <div className="fadein" style={{display:'grid',gap:16}}>
+          <div className="card">
+            <div className="card-hdr" style={{justifyContent:'space-between'}}>
+              <span className="card-title">Strategy — {label}</span>
+              <span className={`pill ${running ? 'up' : 'down'}`}>
+                <Dot on={running} />
+                {status.toUpperCase()}
+              </span>
+            </div>
+            <div style={{padding:16,display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(180px,1fr))',gap:12}}>
+              <Metric label="Mode" value={alloc?.mode_label || botState?.mode_label || activeMode} sub={alloc?.mode_tagline || botState?.mode_tagline} />
+              <Metric label="Total Budget" value={fInr(totalBudget)} sub="Capital ceiling for the Indian bot" />
+              <Metric label="Per Trade Cap" value={fInr(perTrade)} sub={`${positionPct || '—'}% of budget split across ${maxPos || '—'} slots`} />
+              <Metric label="Entry Score" value={minConf ? `${minConf}+` : '—'} sub="Minimum signal score before a buy is allowed" />
+              <Metric label="Stop / Target" value={`${stopPct || '—'}% / ${tpPct || '—'}%`} sub="Initial stop-loss and take-profit" />
+              <Metric label="Auto-Trade" value={alloc?.auto_trade ? 'ON' : 'OFF'} sub={botState?.pause_reason || (botState?.market_open === false ? 'Outside market hours' : 'Ready when market and signal checks pass')} />
+            </div>
+          </div>
+
+          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(min(320px,100%),1fr))',gap:16}}>
+            <div className="card">
+              <div className="card-hdr"><span className="card-title">Signal Engine</span></div>
+              <Rule title="Universe" body="NIFTY 50 large-cap symbols, using Zerodha NSE candle data where available." />
+              <Rule title="Entry Window" body="New entries are allowed after the opening noise settles and stop before the late-day square-off window." />
+              <Rule title="Score Filters" body="EMA trend, RSI range, VWAP, MACD, Bollinger position, and volume surge must combine to meet the active mode score." />
+              <Rule title="Risk Gate" body="The bot checks available Zerodha margin, symbol cooldowns, sector concentration, open position count, and daily loss before sending a buy." />
+              <Rule title="Order Handling" body="Zerodha buys are confirmed from the live order book before the bot logs or protects the position." />
+              <Rule title="Exits" body="Positions are monitored for stop-loss, take-profit, trailing/high-water protection, news kill-switch, and end-of-day square-off." />
+            </div>
+
+            <div className="card">
+              <div className="card-hdr" style={{justifyContent:'space-between'}}>
+                <span className="card-title">Controls</span>
+                {msg && <span style={{fontSize:12,fontWeight:700,color:msg.ok?'var(--up)':'var(--down)'}}>{msg.text}</span>}
+              </div>
+              <div style={{padding:16}}>
+                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:14}}>
+                  {modeRows.map(m => {
+                    const active = activeMode === m.id;
+                    return (
+                      <button key={m.id} className={`btn ${active ? 'primary' : 'ghost'}`}
+                        disabled={!!busy}
+                        style={{display:'block',textAlign:'left',padding:'10px 12px',height:'auto'}}
+                        onClick={() => updateAlloc({trading_mode:m.id}, `mode_${m.id}`)}>
+                        <div style={{fontSize:13,fontWeight:800}}>{m.label || m.id}</div>
+                        <div style={{fontSize:10,color:'var(--ink-3)',marginTop:3,lineHeight:1.35}}>
+                          {m.min_confidence ? `${m.min_confidence}+ score · ${m.max_positions} slots · ${m.stop_pct}%/${m.tp_pct}%` : (m.tagline || 'Manual values')}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <button className={`btn ${alloc?.auto_trade ? 'success' : 'ghost'}`}
+                  style={{width:'100%',marginBottom:14}}
+                  disabled={!!busy}
+                  onClick={async () => {
+                    setBusy('toggle');
+                    try {
+                      const r = await fetch(`/api/allocations/${broker}/toggle`, {method:'POST'});
+                      const d = await r.json();
+                      if (d.ok) {
+                        setAlloc(prev => ({...prev, auto_trade:d.auto_trade}));
+                        notify(true, d.auto_trade ? 'Auto-trade ON' : 'Auto-trade OFF');
+                      } else notify(false, d.error || 'Toggle failed');
+                    } catch { notify(false, 'Request failed'); }
+                    finally { setBusy(null); }
+                  }}>
+                  Auto-Trade {alloc?.auto_trade ? 'ON' : 'OFF'}
+                </button>
+
+                {!editing ? (
+                  <button className="btn ghost" style={{width:'100%'}} onClick={() => setEditing(true)}>
+                    Edit Custom Risk
+                  </button>
+                ) : (
+                  <div style={{display:'grid',gap:10}}>
+                    {[
+                      ['budget','Budget (₹)', 'number', '1'],
+                      ['max_positions','Max Positions', 'number', '1'],
+                      ['stop_pct','Stop Loss %', 'number', '0.1'],
+                      ['tp_pct','Take Profit %', 'number', '0.1'],
+                    ].map(([key, label, type, step]) => (
+                      <label key={key} style={{display:'grid',gap:4}}>
+                        <span style={{fontSize:11,color:'var(--muted)',fontWeight:700,textTransform:'uppercase'}}>{label}</span>
+                        <input style={inputStyle} type={type} step={step} min="0" value={form[key] ?? ''}
+                          onChange={e => setForm(f => ({...f, [key]: e.target.value}))} />
+                      </label>
+                    ))}
+                    <div style={{display:'flex',gap:8}}>
+                      <button className="btn success" style={{flex:1}} disabled={busy==='save'} onClick={saveCustom}>Save Custom</button>
+                      <button className="btn ghost" style={{flex:1}} onClick={() => setEditing(false)}>Cancel</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         </div>
       );
@@ -5073,21 +5292,7 @@
               <div className="fadein"><Strategy params={params} /></div>
             )}
             {tab === 'strategy' && broker !== 'alpaca' && (
-              <div className="fadein">
-                <div className="card" style={{maxWidth:640,margin:'40px auto'}}>
-                  <div className="card-hdr"><span className="card-title">📐 Strategy — {BROKER_LABELS[broker]}</span></div>
-                  <div style={{padding:32,textAlign:'center'}}>
-                    <div style={{fontSize:36,marginBottom:12}}>⚙️</div>
-                    <div style={{fontSize:15,fontWeight:600,marginBottom:8}}>Strategy parameters belong to the Alpaca bot</div>
-                    <div style={{fontSize:13,color:'var(--ink-3)',maxWidth:440,margin:'0 auto',lineHeight:1.6}}>
-                      For {BROKER_LABELS[broker]}, position sizing and risk are configured in <b>Overview → Edit Allocation</b> (budget per trade, max positions, stop %, take-profit %).
-                    </div>
-                    <div style={{marginTop:20}}>
-                      <button className="btn primary" onClick={() => window._setTab?.('overview')}>Go to Overview →</button>
-                    </div>
-                  </div>
-                </div>
-              </div>
+              <IndianStrategy broker={broker} health={health} />
             )}
 
             {/* SYSTEM */}

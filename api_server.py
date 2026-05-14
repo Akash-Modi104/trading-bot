@@ -1522,6 +1522,7 @@ def api_trading_modes():
             "max_positions": p.get("max_positions"),
             "stop_pct":      p.get("stop_pct"),
             "tp_pct":        p.get("tp_pct"),
+            "min_confidence": p.get("min_confidence"),
             "position_pct":  p.get("position_pct"),
         })
     return jsonify(catalog)
