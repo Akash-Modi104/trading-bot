@@ -557,6 +557,46 @@
     }
     .mobile-bar-btn.active { color: var(--accent); }
     .mobile-bar-btn svg, .mobile-bar-btn .mb-icon { font-size: 18px; }
+    .mobile-nav-btn {
+      display: none;
+      width: 34px;
+      height: 34px;
+      border-radius: 10px;
+      border: 1px solid var(--line);
+      background: var(--bg-2);
+      color: var(--ink);
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+    .mobile-nav-overlay {
+      position: fixed;
+      inset: 0;
+      background: oklch(0 0 0 / 0.50);
+      z-index: 60;
+      display: flex;
+      align-items: flex-end;
+    }
+    .mobile-nav-sheet {
+      width: 100%;
+      max-height: 80vh;
+      overflow-y: auto;
+      background: var(--bg-1);
+      border-top: 1px solid var(--line);
+      border-top-left-radius: 14px;
+      border-top-right-radius: 14px;
+      padding: 14px 12px calc(14px + env(safe-area-inset-bottom, 0px));
+      display: grid;
+      gap: 10px;
+    }
+    .mobile-nav-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 2px 4px 8px;
+      border-bottom: 1px solid var(--line-soft);
+    }
 
     /* ── Card ───────────────────────────────────────────────── */
     .card {
@@ -724,6 +764,7 @@
       .sidebar { display: none; }
       .shell-body { margin-left: 0; }
       .mobile-bar { display: block; }
+      .mobile-nav-btn { display: inline-flex; }
       .content { padding: 14px 12px 100px; }
       .kpis { grid-template-columns: repeat(2, 1fr); gap: 10px; }
       .row-2, .row-2-eq { grid-template-columns: 1fr !important; gap: 12px; }
@@ -6103,8 +6144,10 @@
       const [me,        setMe]        = useState(null);
       const [broker,    setBroker]    = useState(() => localStorage.getItem('sel_broker') || 'alpaca');
       const [aggData,   setAggData]   = useState(null);
+      const [mobileNavOpen, setMobileNavOpen] = useState(false);
       const lastTradeIds = useRef(new Set());
       useEffect(() => { localStorage.setItem('sel_broker', broker); }, [broker]);
+      useEffect(() => { setMobileNavOpen(false); }, [tab]);
 
       /* Aggregate data — all broker balances/positions (30s refresh) */
       useEffect(() => {
@@ -6502,6 +6545,9 @@
           {/* ── Top bar ─────────────────────────────────────────── */}
           <header className="topbar">
             <div className="topbar-left">
+              <button className="mobile-nav-btn" onClick={() => setMobileNavOpen(true)} title="Open menu">
+                <span className="msym" aria-hidden="true">menu</span>
+              </button>
               <div className="workspace-title hide-on-mobile">
                 <span>Workspace</span>
                 <strong>DCA TradeOS Pro</strong>
@@ -6569,6 +6615,28 @@
               />
             </div>
           </header>
+          {mobileNavOpen && (
+            <div className="mobile-nav-overlay" onClick={() => setMobileNavOpen(false)}>
+              <div className="mobile-nav-sheet" onClick={(e) => e.stopPropagation()}>
+                <div className="mobile-nav-head">
+                  <span style={{fontSize:12,fontWeight:700,color:'var(--ink-3)',letterSpacing:'.08em',textTransform:'uppercase'}}>Navigation</span>
+                  <button className="btn ghost" style={{padding:'5px 10px',fontSize:11}} onClick={() => setMobileNavOpen(false)}>Close</button>
+                </div>
+                {[{title:'Main', items:SIDEBAR_TABS},{title:'Brokers',items:SIDEBAR_BROKER_TABS},{title:'Config',items:SIDEBAR_BOT_TABS}].map(section => (
+                  <div key={section.title} style={{display:'grid',gap:6}}>
+                    <div className="nav-section" style={{marginTop:0,padding:'2px 4px',fontSize:10}}>{section.title}</div>
+                    {section.items.map(t => (
+                      <button key={t.id} className={`nav-item${tab===t.id?' active':''}`} onClick={() => { setTab(t.id); setMobileNavOpen(false); }}>
+                        <span className="nav-rail" />
+                        <span className="msym nav-icon" aria-hidden="true">{t.icon}</span>
+                        <span>{t.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* ── Page content ───────────────────────────────────── */}
           <main className="content">
@@ -6581,9 +6649,13 @@
                 {id:'trades',   label:'Trades',   icon:'swap_horiz'},
                 {id:'history',  label:'History',  icon:'history'},
                 {id:'reports',  label:'Reports',  icon:'description'},
-                {id:'profile',  label:'Profile',  icon:'person'},
+                {id:'_more',    label:'More',     icon:'menu'},
               ].map(t => (
-                <button key={t.id} className={`mobile-bar-btn${tab===t.id?' active':''}`} onClick={()=>setTab(t.id)}>
+                <button
+                  key={t.id}
+                  className={`mobile-bar-btn${(tab===t.id || (t.id==='_more' && mobileNavOpen))?' active':''}`}
+                  onClick={()=> t.id === '_more' ? setMobileNavOpen(true) : setTab(t.id)}
+                >
                   <span className="msym mb-icon" aria-hidden="true">{t.icon}</span>
                   {t.label}
                 </button>
