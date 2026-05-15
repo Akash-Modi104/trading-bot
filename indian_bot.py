@@ -1913,7 +1913,15 @@ def run():
                 continue
 
             price = bars[-1]["c"] if bars else 0
-            vol_ok = pe.has_volume_surge(bars)
+            vol_ok_strict = pe.has_volume_surge(bars)
+            vol_ok_soft = pe.has_volume_surge(bars, threshold=1.1)
+            strong_override = bool(
+                sc >= (MIN_CONFIDENCE + 8) and nifty_up and (_num(vix_val, 99) <= 20.0)
+            )
+            vol_ok = bool(vol_ok_strict or (strong_override and vol_ok_soft))
+            effective_min_conf = MIN_CONFIDENCE
+            if nifty_up and (_num(vix_val, 99) <= 20.0):
+                effective_min_conf = max(40, MIN_CONFIDENCE - 3)
             cash_cap = _cash_cap_for_score(sc, avail_margin) if price else 0
             qty_preview = _max_affordable_qty(price, cash_cap, avail_margin) if price else 0
             required_margin = _required_margin_estimate(price, qty_preview) if qty_preview > 0 else 0
@@ -1921,6 +1929,7 @@ def run():
             tp = round(price * (1 + TP_PCT / 100), 2) if price else None
             row.update({
                 "score": sc,
+                "min_confidence": effective_min_conf,
                 "volume_surge": bool(vol_ok),
                 "price": round(price, 2) if price else None,
                 "qty_preview": qty_preview,
@@ -1933,12 +1942,12 @@ def run():
             })
             log_event(f"{sym:12s} score={sc:3d}  {list(reasons.keys())[:3]}")
 
-            if sc < MIN_CONFIDENCE:
+            if sc < effective_min_conf:
                 row["status"] = "wait_score"
-                row["note"] = f"Needs score {MIN_CONFIDENCE}+"
+                row["note"] = f"Needs score {effective_min_conf}+"
             elif not vol_ok:
                 row["status"] = "wait_volume"
-                row["note"] = "No 20-bar volume surge confirmation"
+                row["note"] = "No usable volume confirmation"
             elif qty_preview <= 0:
                 row["status"] = "no_cash"
                 row["note"] = "Per-trade cap or available margin is too low"
