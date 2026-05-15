@@ -2108,6 +2108,34 @@ def api_indian_net_pnl():
     gross = sum(r["gross_pnl"] for r in realized)
     charges = sum(r["charges"] for r in realized)
     net = sum(r["net_pnl"] for r in realized)
+    by_symbol = {}
+    for r in realized:
+        sym = r["symbol"]
+        row = by_symbol.setdefault(sym, {
+            "symbol": sym,
+            "round_trips": 0,
+            "gross_pnl": 0.0,
+            "estimated_charges": 0.0,
+            "net_pnl": 0.0,
+            "wins": 0,
+            "losses": 0,
+        })
+        row["round_trips"] += 1
+        row["gross_pnl"] += _num(r["gross_pnl"])
+        row["estimated_charges"] += _num(r["charges"])
+        row["net_pnl"] += _num(r["net_pnl"])
+        if _num(r["net_pnl"]) >= 0:
+            row["wins"] += 1
+        else:
+            row["losses"] += 1
+    by_symbol_rows = []
+    for row in by_symbol.values():
+        row["gross_pnl"] = round(row["gross_pnl"], 2)
+        row["estimated_charges"] = round(row["estimated_charges"], 2)
+        row["net_pnl"] = round(row["net_pnl"], 2)
+        row["win_rate"] = round((row["wins"] / row["round_trips"] * 100), 1) if row["round_trips"] else 0
+        by_symbol_rows.append(row)
+    by_symbol_rows.sort(key=lambda x: x["net_pnl"], reverse=True)
     return jsonify({
         "date": day,
         "trade_count": len(day_trades),
@@ -2115,6 +2143,8 @@ def api_indian_net_pnl():
         "gross_pnl": round(gross, 2),
         "estimated_charges": round(charges, 2),
         "net_pnl": round(net, 2),
+        "charges_pct_of_gross_abs": round((charges / max(1e-9, abs(gross))) * 100, 2) if gross else 0.0,
+        "symbol_breakdown": by_symbol_rows,
         "open_lots": {
             sym: [{"qty": l["qty"], "price": l["price"], "time": l["time"]} for l in lots_ if l["qty"] > 0]
             for sym, lots_ in lots.items() if any(l["qty"] > 0 for l in lots_)

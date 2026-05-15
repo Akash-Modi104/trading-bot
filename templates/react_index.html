@@ -1289,8 +1289,111 @@
                   <div className="eyebrow">Round Trips</div>
                   <div className="mono" style={{fontSize:16,fontWeight:700}}>{data?.closed_count ?? 0}</div>
                 </div>
+                <div style={{gridColumn:'1 / -1',fontSize:11,color:'var(--ink-3)'}}>
+                  Cost drag: {Number(data?.charges_pct_of_gross_abs || 0).toFixed(2)}% of absolute gross movement
+                </div>
+                {(data?.symbol_breakdown || []).length > 0 && (
+                  <div style={{gridColumn:'1 / -1',overflowX:'auto'}}>
+                    <table>
+                      <thead>
+                        <tr><th>Symbol</th><th>Trips</th><th>Win %</th><th>Net</th><th>Charges</th></tr>
+                      </thead>
+                      <tbody>
+                        {data.symbol_breakdown.slice(0, 8).map((r, i) => (
+                          <tr key={r.symbol + i}>
+                            <td className="mono" style={{fontWeight:700}}>{r.symbol}</td>
+                            <td className="mono">{r.round_trips}</td>
+                            <td className="mono">{r.win_rate}%</td>
+                            <td className="mono" style={{color:Number(r.net_pnl)>=0?'var(--up)':'var(--down)'}}>{inr(r.net_pnl)}</td>
+                            <td className="mono">{inr(r.estimated_charges)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
           }
+        </div>
+      );
+    };
+
+    const IndianTradeStatusCard = () => {
+      const [state, setState] = useState(null);
+      const [sess, setSess] = useState(null);
+      const [err, setErr] = useState('');
+
+      const load = useCallback(async () => {
+        try {
+          const [s, z] = await Promise.all([
+            fetch('/api/indian/state').then(r => r.json()),
+            fetch('/api/zerodha/session_status').then(r => r.json()),
+          ]);
+          setState(s || {});
+          setSess(z || {});
+          setErr('');
+        } catch (e) {
+          setErr(e?.message || 'Status unavailable');
+        }
+      }, []);
+
+      useEffect(() => {
+        load();
+        const id = setInterval(load, 15000);
+        return () => clearInterval(id);
+      }, [load]);
+
+      const nowIst = state?.now_ist || '';
+      const hour = Number((nowIst.split(' ')[1] || '00:00:00').slice(0, 2));
+      const minute = Number((nowIst.split(' ')[1] || '00:00:00').slice(3, 5));
+      const inLunchChop = hour === 11 && minute >= 30 || hour === 12;
+      const nextResume = inLunchChop ? '13:00 IST' : null;
+      const needsLogin = sess?.connected === false;
+
+      const blockers = [];
+      if (state?.market_open === false) blockers.push('Market is closed');
+      if (needsLogin) blockers.push('Zerodha daily session login is required');
+      if (state?.trading_paused) blockers.push(state?.pause_reason || 'Trading is paused by risk gate');
+      if (inLunchChop) blockers.push('Lunch chop quality window active (11:30-13:00 IST)');
+
+      return (
+        <div className="card">
+          <div className="card-hdr" style={{justifyContent:'space-between'}}>
+            <span className="card-title">Trading Readiness</span>
+            <span className={`pill ${blockers.length ? 'warn' : 'up'}`}>{blockers.length ? 'Blocked' : 'Ready'}</span>
+          </div>
+          {err && <div className="empty" style={{padding:16,color:'var(--down)'}}>{err}</div>}
+          {!err && (
+            <div style={{padding:16,display:'grid',gap:10}}>
+              <div style={{display:'grid',gridTemplateColumns:'repeat(3,minmax(0,1fr))',gap:8}}>
+                <div style={{background:'var(--bg-2)',border:'1px solid var(--line-soft)',borderRadius:8,padding:'9px 10px'}}>
+                  <div className="eyebrow">Market</div>
+                  <div style={{fontWeight:700,color:state?.market_open ? 'var(--up)' : 'var(--down)'}}>{state?.market_open ? 'OPEN' : 'CLOSED'}</div>
+                </div>
+                <div style={{background:'var(--bg-2)',border:'1px solid var(--line-soft)',borderRadius:8,padding:'9px 10px'}}>
+                  <div className="eyebrow">Zerodha Session</div>
+                  <div style={{fontWeight:700,color:needsLogin ? 'var(--down)' : 'var(--up)'}}>{needsLogin ? 'RELOGIN' : 'ACTIVE'}</div>
+                </div>
+                <div style={{background:'var(--bg-2)',border:'1px solid var(--line-soft)',borderRadius:8,padding:'9px 10px'}}>
+                  <div className="eyebrow">Next Window</div>
+                  <div className="mono" style={{fontWeight:700}}>{nextResume || 'Now'}</div>
+                </div>
+              </div>
+              {blockers.length > 0 ? (
+                <div style={{fontSize:12,color:'var(--warn)',lineHeight:1.5}}>
+                  {blockers.map((b, i) => <div key={i}>• {b}</div>)}
+                </div>
+              ) : (
+                <div style={{fontSize:12,color:'var(--up)'}}>All gates are clear for new entries.</div>
+              )}
+              {needsLogin && sess?.login_url && (
+                <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+                  <a className="btn btn-blue" href={sess.login_url} target="_blank" rel="noopener">Open Kite Login</a>
+                  <button className="btn ghost" onClick={() => window._setTab?.('profile')}>Go to Profile</button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       );
     };
@@ -1480,6 +1583,27 @@
                     <button className="btn ghost" style={{padding:'4px 10px',fontSize:11}} disabled={!!busy} onClick={() => applyMode(r.id)}>Use</button>
                   </div>
                 ))}
+              </div>
+            )}
+            {data?.ranking?.length > 0 && (
+              <div style={{overflowX:'auto'}}>
+                <table>
+                  <thead>
+                    <tr><th>Mode</th><th>Score</th><th>Win %</th><th>Trades</th><th>Net</th><th>DD</th></tr>
+                  </thead>
+                  <tbody>
+                    {data.ranking.map((r, i) => (
+                      <tr key={r.id + '_cmp'}>
+                        <td style={{fontWeight:700,color:i===0?'var(--up)':'var(--ink)'}}>{r.label}</td>
+                        <td className="mono">{r.score}</td>
+                        <td className="mono">{r.summary?.win_rate ?? 0}%</td>
+                        <td className="mono">{r.summary?.trades ?? 0}</td>
+                        <td className="mono" style={{color:Number(r.summary?.net_pnl)>=0?'var(--up)':'var(--down)'}}>{inr(r.summary?.net_pnl || 0)}</td>
+                        <td className="mono">{inr(r.summary?.max_drawdown || 0)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
             {data?.per_symbol?.length > 1 && (
@@ -2380,6 +2504,7 @@
               <IndianAlertsCard />
             </div>
             <div style={{display:'grid',gap:16}}>
+              <IndianTradeStatusCard />
               <IndianNetPnlCard />
               <IndianVirtualCard />
               <NoCodeStrategyBuilder broker={broker === 'indian' ? 'zerodha' : broker} />
@@ -2476,6 +2601,13 @@
     /* ── System tab ──────────────────────────────────────────── */
     const SystemTab = ({ health, data }) => {
       const m = data?.metrics || {};
+      const [timeline, setTimeline] = useState([]);
+      useEffect(() => {
+        fetch('/api/audit_full?limit=60')
+          .then(r => r.json())
+          .then(d => setTimeline(Array.isArray(d) ? d : []))
+          .catch(() => setTimeline([]));
+      }, []);
       const rows = [
         { label:'Bot Started',    value: m.started  || '—' },
         { label:'Last Scan',      value: m.last_scan || '—' },
@@ -2496,6 +2628,16 @@
               }}>
                 <span style={{color:'var(--muted)',fontSize:13}}>{r.label}</span>
                 <span style={{fontWeight:500,fontSize:13}}>{r.value}</span>
+              </div>
+            ))}
+          </div>
+          <div className="card" style={{gridColumn:'1 / -1'}}>
+            <div className="card-hdr"><span className="card-title">Ops Timeline</span></div>
+            {timeline.length === 0 && <div className="empty">No recent audit events</div>}
+            {timeline.slice(0, 30).map((e, i) => (
+              <div key={e.id || i} style={{display:'grid',gridTemplateColumns:'165px 1fr',gap:10,padding:'9px 14px',borderBottom:'1px solid var(--line-soft)'}}>
+                <span className="mono" style={{fontSize:11,color:'var(--ink-4)'}}>{(e.at || '').replace('T',' ').slice(0,19)}</span>
+                <span style={{fontSize:12,color:'var(--ink-2)'}}>{(e.event || 'event').replaceAll('_', ' ')}</span>
               </div>
             ))}
           </div>
