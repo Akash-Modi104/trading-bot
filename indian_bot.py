@@ -694,6 +694,17 @@ def _is_auth_error(exc: Exception) -> bool:
             or "session" in s and "invalid" in s)
 
 
+def _mark_zerodha_auth_stale(reason: str):
+    global _ZRD_TOKEN_STALE
+    _ZRD_TOKEN_STALE = True
+    _state["trading_paused"] = True
+    _state["pause_reason"] = "Zerodha daily login required"
+    _state["broker_status"] = "needs_daily_login"
+    if not getattr(_mark_zerodha_auth_stale, "_logged", False):
+        log_event(f"Zerodha session invalid ({reason[:90]}) — complete daily Kite login in Profile")
+        _mark_zerodha_auth_stale._logged = True
+
+
 def _zerodha_get_token(broker: ZerodhaBroker, symbol: str) -> str:
     """Resolve Zerodha NSE instrument token for a trading symbol, cached."""
     global _ZRD_TOKEN_STALE
@@ -708,11 +719,7 @@ def _zerodha_get_token(broker: ZerodhaBroker, symbol: str) -> str:
             return str(tok)
     except Exception as e:
         if _is_auth_error(e):
-            _ZRD_TOKEN_STALE = True   # signal main loop to refresh broker
-            # Only log once per stale cycle to avoid log spam
-            if not getattr(_zerodha_get_token, "_logged_stale", False):
-                log_event(f"Zerodha access_token stale — will refresh from DB")
-                _zerodha_get_token._logged_stale = True
+            _mark_zerodha_auth_stale(str(e))
         else:
             log_event(f"token lookup failed {symbol}: {str(e)[:80]}")
     return ""
@@ -1574,7 +1581,10 @@ def run():
             # Reset logged flag
             if hasattr(_zerodha_get_token, "_logged_stale"):
                 _zerodha_get_token._logged_stale = False
+            if hasattr(_mark_zerodha_auth_stale, "_logged"):
+                _mark_zerodha_auth_stale._logged = False
             _ZRD_TOKEN_STALE = False
+            _state["broker_status"] = "checking"
             log_event("Zerodha broker refreshed with fresh DB credentials")
             return new_broker
         except Exception as e:
@@ -1697,6 +1707,21 @@ def run():
                 log_event(f"Token refresh failed: {e} — retrying in 60s")
                 time.sleep(60)
                 continue
+        elif isinstance(broker, ZerodhaBroker):
+            broker = _refresh_broker_if_stale(broker)
+            try:
+                broker.get_positions()
+                if _state.get("broker_status") == "needs_daily_login":
+                    _state["broker_status"] = "connected"
+                    _state["pause_reason"] = ""
+                    _state["trading_paused"] = False
+            except Exception as e:
+                if _is_auth_error(e):
+                    _mark_zerodha_auth_stale(str(e))
+                    save_state()
+                    time.sleep(60)
+                    continue
+                log_event(f"Zerodha health check failed: {e}")
 
         # ── Daily loss limit ───────────────────────────────
         if isinstance(broker, ZerodhaBroker):
