@@ -159,6 +159,25 @@
       height: 100vh;
       overflow-y: auto;
     }
+
+    /* Desktop: keep left navigation permanently pinned */
+    @media (min-width: 881px) {
+      .sidebar {
+        position: fixed;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        width: 272px;
+        height: 100vh;
+        z-index: 35;
+      }
+      .shell {
+        grid-template-columns: 272px minmax(0, 1fr);
+      }
+      .shell-body {
+        min-width: 0;
+      }
+    }
     .brand {
       display: flex;
       align-items: center;
