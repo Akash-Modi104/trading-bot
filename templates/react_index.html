@@ -765,7 +765,7 @@
       .shell-body { margin-left: 0; }
       .mobile-bar { display: block; }
       .mobile-nav-btn { display: inline-flex; }
-      .content { padding: 14px 12px 100px; }
+      .content { padding: 14px 12px calc(96px + env(safe-area-inset-bottom, 0px)); }
       .kpis { grid-template-columns: repeat(2, 1fr); gap: 10px; }
       .row-2, .row-2-eq { grid-template-columns: 1fr !important; gap: 12px; }
       /* Topbar — make account switcher PRIMARY on mobile */
@@ -801,6 +801,13 @@
       .card-hdr > div { flex-wrap: wrap; gap: 6px; }
       /* Strategy/allocation forms — collapse 3-col grids to single column */
       [data-mobile-stack] { grid-template-columns: 1fr !important; }
+      /* Touch targets */
+      .btn, .theme-opt, .mobile-bar-btn, .mobile-nav-btn, .acct-btn, .nav-item {
+        min-height: 44px;
+      }
+      input, select, textarea {
+        min-height: 44px;
+      }
     }
 
     /* Phone — single column */
@@ -809,7 +816,7 @@
       .topbar-stat { display: none; }
       .topbar-stat.always { display: flex; }
       .topbar-search { display: none; }
-      .content { padding: 12px 10px 100px; }
+      .content { padding: 12px 10px calc(98px + env(safe-area-inset-bottom, 0px)); }
       table { font-size: 11px; min-width: 100%; }
       thead th, tbody td { padding: 7px 8px !important; }
       canvas { max-height: 200px !important; }
@@ -6545,7 +6552,7 @@
           {/* ── Top bar ─────────────────────────────────────────── */}
           <header className="topbar">
             <div className="topbar-left">
-              <button className="mobile-nav-btn" onClick={() => setMobileNavOpen(true)} title="Open menu">
+              <button className="mobile-nav-btn" onClick={() => setMobileNavOpen(true)} title="Open menu" aria-label="Open navigation menu">
                 <span className="msym" aria-hidden="true">menu</span>
               </button>
               <div className="workspace-title hide-on-mobile">
