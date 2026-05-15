@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Dilip Central Trading Desk</title>
+  <title>DCA TradeOS Pro</title>
   <meta name="theme-color" content="#101418">
   <link rel="icon" type="image/svg+xml" href='data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="12" fill="%23101418"/><path d="M18 43V27M32 43V17M46 43V30" stroke="%232dd4bf" stroke-width="6" stroke-linecap="round"/><path d="M14 47h36" stroke="%23f4c95d" stroke-width="4" stroke-linecap="round"/></svg>'>
 
@@ -47,7 +47,7 @@
       --brand-deep: oklch(0.20 0.038 252);
       --accent: var(--brand);
       --accent-soft: oklch(0.30 0.052 252);
-      --r-sm: 6px; --r: 8px; --r-lg: 8px;
+      --r-sm: 8px; --r: 12px; --r-lg: 16px;
       --font-ui: 'Plus Jakarta Sans', system-ui, sans-serif;
       --font-mono: 'JetBrains Mono', ui-monospace, monospace;
 
@@ -106,7 +106,7 @@
     /* ── Shell layout ───────────────────────────────────────── */
     .shell {
       display: grid;
-      grid-template-columns: 248px 1fr;
+      grid-template-columns: 272px 1fr;
       min-height: 100vh;
     }
     .shell-body {
@@ -118,11 +118,12 @@
 
     /* ── Sidebar ────────────────────────────────────────────── */
     .sidebar {
-      border-right: 1px solid var(--line-soft);
+      border-right: 1px solid var(--line);
       background:
-        radial-gradient(120% 60% at 10% -10%, oklch(0.34 0.060 252 / 0.20), transparent 40%),
-        linear-gradient(180deg, oklch(0.17 0.018 258), oklch(0.125 0.014 258));
-      padding: 18px 12px;
+        radial-gradient(160% 80% at 0% -12%, oklch(0.33 0.08 252 / 0.24), transparent 50%),
+        radial-gradient(140% 90% at 100% 120%, oklch(0.35 0.06 145 / 0.14), transparent 55%),
+        linear-gradient(180deg, oklch(0.16 0.02 258), oklch(0.12 0.014 258));
+      padding: 22px 14px;
       display: flex;
       flex-direction: column;
       gap: 4px;
@@ -134,19 +135,19 @@
     .brand {
       display: flex;
       align-items: center;
-      gap: 12px;
-      padding: 4px 10px 18px;
-      margin-bottom: 8px;
-      border-bottom: 1px solid var(--line-soft);
+      gap: 14px;
+      padding: 2px 12px 20px;
+      margin-bottom: 12px;
+      border-bottom: 1px solid var(--line);
     }
     .brand-mark {
-      width: 38px;
-      height: 38px;
-      border-radius: 8px;
+      width: 42px;
+      height: 42px;
+      border-radius: 12px;
       background:
         linear-gradient(145deg, oklch(0.30 0.08 252), oklch(0.16 0.020 258));
       border: 1px solid oklch(0.54 0.12 252);
-      box-shadow: 0 16px 34px oklch(0 0 0 / 0.26), inset 0 1px 0 oklch(1 0 0 / 0.10);
+      box-shadow: 0 14px 36px oklch(0 0 0 / 0.30), inset 0 1px 0 oklch(1 0 0 / 0.14);
       display: flex;
       align-items: end;
       justify-content: center;
@@ -167,13 +168,13 @@
     .brand-mark span:nth-child(3) { height: 16px; color: var(--up); }
     .brand-name {
       font-weight: 700;
-      font-size: 15px;
+      font-size: 16px;
       letter-spacing: 0;
       color: var(--ink);
       line-height: 1.1;
     }
     .brand-sub {
-      font-size: 10px;
+      font-size: 11px;
       color: var(--ink-4);
       letter-spacing: 0.10em;
       text-transform: uppercase;
@@ -183,20 +184,25 @@
       display: flex;
       align-items: center;
       gap: 10px;
-      padding: 9px 12px;
+      padding: 10px 14px;
       border-radius: var(--r);
       font-size: 13px;
-      font-weight: 500;
+      font-weight: 600;
       color: var(--ink-2);
-      transition: background .12s, color .12s, border-color .12s;
+      transition: background .16s, color .16s, border-color .16s, box-shadow .16s;
       width: 100%;
       text-align: left;
       background: none;
       border: 1px solid transparent;
       cursor: pointer;
     }
-    .nav-item:hover { background: var(--bg-2); color: var(--ink); border-color: var(--line-soft); }
-    .nav-item.active { background: var(--bg-2); color: var(--ink); border-color: var(--line); }
+    .nav-item:hover { background: oklch(0.23 0.025 258 / 0.85); color: var(--ink); border-color: var(--line); }
+    .nav-item.active {
+      background: linear-gradient(90deg, oklch(0.30 0.06 252 / 0.28), oklch(0.28 0.05 145 / 0.18));
+      color: var(--ink);
+      border-color: oklch(0.48 0.10 252 / 0.45);
+      box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.10);
+    }
     .nav-rail {
       width: 3px;
       height: 16px;
@@ -208,8 +214,8 @@
     }
     .nav-item.active .nav-rail { background: linear-gradient(180deg, var(--brand-2), var(--accent)); }
     .nav-section {
-      margin-top: 14px;
-      padding: 10px 12px 6px;
+      margin-top: 16px;
+      padding: 10px 14px 8px;
       font-size: 10px;
       letter-spacing: 0.14em;
       text-transform: uppercase;
@@ -223,7 +229,7 @@
       display: flex;
       flex-direction: column;
       gap: 8px;
-      padding-left: 10px;
+      padding-left: 12px;
     }
     .sidebar-status-row {
       display: flex;
@@ -241,12 +247,12 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 16px;
-      padding: 12px 24px;
-      background: oklch(0.145 0.016 258 / 0.88);
+      gap: 20px;
+      padding: 14px 28px;
+      background: oklch(0.12 0.016 258 / 0.84);
       backdrop-filter: blur(10px);
       -webkit-backdrop-filter: blur(10px);
-      border-bottom: 1px solid var(--line-soft);
+      border-bottom: 1px solid var(--line);
       flex-shrink: 0;
     }
     .topbar-left { display: flex; align-items: center; gap: 12px; min-width: 0; }
@@ -254,17 +260,17 @@
     .workspace-title {
       display: flex;
       flex-direction: column;
-      min-width: 210px;
+      min-width: 240px;
     }
     .workspace-title span {
-      font-size: 10px;
+      font-size: 11px;
       letter-spacing: 0.12em;
       text-transform: uppercase;
       color: var(--brand-2);
       font-weight: 700;
     }
     .workspace-title strong {
-      font-size: 14px;
+      font-size: 16px;
       color: var(--ink);
       line-height: 1.25;
     }
@@ -275,18 +281,18 @@
     .acct-btn {
       display: flex; align-items: center; gap: 8px;
       background: var(--bg-2); border: 1px solid var(--line);
-      border-radius: var(--r); padding: 5px 10px 5px 5px;
+      border-radius: 12px; padding: 6px 12px 6px 6px;
       cursor: pointer; transition: all .15s; min-width: 150px; color: var(--ink);
     }
     .acct-btn:hover { background: var(--bg-3); border-color: var(--accent); }
     .acct-avatar {
-      width: 28px; height: 28px; border-radius: 6px; flex-shrink: 0;
+      width: 30px; height: 30px; border-radius: 8px; flex-shrink: 0;
       display: flex; align-items: center; justify-content: center;
       font-weight: 700; font-size: 11px; color: #fff; letter-spacing: .02em;
     }
     .acct-wrap { position: relative; }
     .acct-drop {
-      position: absolute; top: calc(100% + 8px); right: 0; width: 290px;
+      position: absolute; top: calc(100% + 10px); right: 0; width: 320px;
       background: var(--bg-1); border: 1px solid var(--line);
       border-radius: var(--r-lg); box-shadow: 0 18px 44px oklch(0 0 0 / 0.45);
       z-index: 200; overflow: hidden;
@@ -359,8 +365,8 @@
 
     /* ── Main content ───────────────────────────────────────── */
     .content {
-      padding: 20px 24px 80px;
-      max-width: 1480px;
+      padding: 28px 30px 90px;
+      max-width: 1680px;
       width: 100%;
       margin: 0 auto;
       flex: 1;
@@ -370,29 +376,29 @@
     .kpis {
       display: grid;
       grid-template-columns: repeat(4, 1fr);
-      gap: 14px;
-      margin-bottom: 16px;
+      gap: 16px;
+      margin-bottom: 18px;
     }
     .kpi {
       background: var(--bg-1);
       border: 1px solid var(--line-soft);
       border-radius: var(--r-lg);
-      padding: 14px 16px 12px;
+      padding: 18px 18px 16px;
       position: relative;
       overflow: hidden;
-      transition: border-color .15s, transform .15s;
+      transition: border-color .18s, transform .18s, box-shadow .18s;
       cursor: default;
       box-shadow: 0 1px 0 oklch(1 0 0 / 0.05), 0 18px 42px oklch(0 0 0 / 0.20);
     }
-    .kpi:hover { border-color: var(--line); transform: translateY(-2px); }
+    .kpi:hover { border-color: oklch(0.48 0.10 252 / 0.45); transform: translateY(-3px); box-shadow: 0 26px 44px oklch(0 0 0 / 0.26); }
     .kpi .lbl { font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-3); font-weight: 600; }
     .kpi .val { font-family: var(--font-mono); font-weight: 600; font-size: 26px; letter-spacing: -0.01em; margin-top: 6px; }
     .kpi .sub { font-size: 12px; color: var(--ink-3); margin-top: 4px; display: flex; align-items: center; gap: 6px; }
     .kpi .spark-wrap { position: absolute; right: 10px; top: 12px; width: 80px; height: 30px; opacity: 0.9; }
 
     /* ── Layout rows ────────────────────────────────────────── */
-    .row-2 { display: grid; grid-template-columns: 1.4fr 1fr; gap: 16px; margin-bottom: 16px; }
-    .row-2-eq { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+    .row-2 { display: grid; grid-template-columns: minmax(0,1.55fr) minmax(360px,1fr); gap: 18px; margin-bottom: 18px; }
+    .row-2-eq { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-bottom: 18px; }
 
     /* ── Chart header ───────────────────────────────────────── */
     .chart-h { display: flex; align-items: baseline; justify-content: space-between; padding: 14px 18px 6px; }
@@ -472,7 +478,7 @@
     .mobile-bar {
       display: none;
       position: fixed; bottom: 0; left: 0; right: 0; z-index: 40;
-      background: oklch(0.18 0.012 250 / 0.96);
+      background: oklch(0.12 0.016 258 / 0.92);
       backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
       border-top: 1px solid var(--line-soft);
       padding: 8px 4px env(safe-area-inset-bottom, 8px);
@@ -491,18 +497,18 @@
     .card {
       background: var(--bg-1);
       border: 1px solid var(--line-soft);
-      border-radius: var(--r-lg);
+      border-radius: 16px;
       overflow: hidden;
-      box-shadow: 0 1px 0 oklch(1 0 0 / 0.035);
+      box-shadow: 0 12px 32px oklch(0 0 0 / 0.20), inset 0 1px 0 oklch(1 0 0 / 0.04);
     }
     .card-hdr {
-      padding: 12px 16px;
+      padding: 14px 18px;
       border-bottom: 1px solid var(--line-soft);
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 8px;
-      background: linear-gradient(180deg, oklch(1 0 0 / 0.025), transparent);
+      background: linear-gradient(180deg, oklch(1 0 0 / 0.05), transparent 85%);
     }
     .card-title {
       font-size: 10px;
@@ -539,38 +545,38 @@
       justify-content: center;
       gap: 8px;
       padding: 9px 14px;
-      border-radius: 10px;
-      font-size: 13px;
+      border-radius: 12px;
+      font-size: 12px;
       font-weight: 600;
       border: 1px solid var(--line);
       background: var(--bg-2);
       color: var(--ink);
       font-family: var(--font-ui);
       cursor: pointer;
-      transition: background .15s, border-color .15s, transform .05s, box-shadow .15s;
+      transition: background .15s, border-color .15s, transform .05s, box-shadow .15s, color .15s;
       letter-spacing: 0.02em;
     }
-    .btn:hover { filter: brightness(1.08); transform: translateY(-1px); box-shadow: 0 8px 18px oklch(0 0 0 / 0.14); }
+    .btn:hover { filter: brightness(1.05); transform: translateY(-1px); box-shadow: 0 10px 22px oklch(0 0 0 / 0.18); }
     .btn:active { transform: translateY(0); filter: brightness(.95); }
-    .btn.primary, .btn-blue { background: var(--accent); color: oklch(0.16 0.012 250); border-color: transparent; }
+    .btn.primary, .btn-blue { background: linear-gradient(180deg, oklch(0.74 0.145 252), oklch(0.66 0.13 252)); color: oklch(0.98 0.002 255); border-color: oklch(0.55 0.1 252 / 0.5); }
     .btn.success, .btn-green { background: var(--up-soft); color: var(--up); border-color: transparent; }
     .btn.danger, .btn-red { background: var(--down-soft); color: var(--down); border-color: transparent; }
-    .btn.ghost, .btn-ghost { background: transparent; color: var(--ink-3); border-color: var(--line-soft); }
+    .btn.ghost, .btn-ghost { background: oklch(0.20 0.016 258 / 0.35); color: var(--ink-2); border-color: var(--line); }
     .btn-yellow { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
     .btn-sm { padding: 5px 10px; font-size: 12px; border-radius: var(--r-sm); }
 
     /* ── Tables ─────────────────────────────────────────────── */
     .mono { font-family: var(--font-mono); }
-    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
     thead th {
-      padding: 9px 14px;
+      padding: 11px 14px;
       text-align: left;
       color: var(--ink-4);
       font-size: 10px;
       font-weight: 700;
       letter-spacing: 0.10em;
       text-transform: uppercase;
-      background: oklch(0.15 0.016 258 / 0.92);
+      background: oklch(0.14 0.018 258 / 0.94);
       border-bottom: 1px solid var(--line-soft);
       position: sticky;
       top: 0;
@@ -578,12 +584,12 @@
       white-space: nowrap;
     }
     tbody td {
-      padding: 10px 14px;
+      padding: 11px 14px;
       border-bottom: 1px solid var(--line-soft);
       vertical-align: middle;
       color: var(--ink-2);
     }
-    tbody tr:hover td { background: var(--bg-2); }
+    tbody tr:hover td { background: oklch(0.23 0.022 258 / 0.78); }
     tbody tr:last-child td { border-bottom: none; }
 
     /* ── Inputs ─────────────────────────────────────────────── */
@@ -594,7 +600,7 @@
     textarea {
       background: var(--bg-2);
       border: 1px solid var(--line);
-      border-radius: var(--r-sm);
+      border-radius: 10px;
       color: var(--ink);
       padding: 6px 10px;
       font-size: 13px;
@@ -616,10 +622,11 @@
     body {
       background: var(--bg-0);
       background-image:
-        radial-gradient(90% 45% at 50% -12%, oklch(0.32 0.075 252 / 0.20), transparent 60%),
-        linear-gradient(180deg, oklch(0.17 0.022 258 / 0.55), transparent 380px),
-        linear-gradient(90deg, oklch(1 0 0 / 0.022) 1px, transparent 1px),
-        linear-gradient(180deg, oklch(1 0 0 / 0.015) 1px, transparent 1px);
+        radial-gradient(75% 38% at 50% -10%, oklch(0.34 0.085 252 / 0.24), transparent 62%),
+        radial-gradient(120% 80% at 92% 8%, oklch(0.30 0.065 145 / 0.09), transparent 60%),
+        linear-gradient(180deg, oklch(0.16 0.022 258 / 0.58), transparent 420px),
+        linear-gradient(90deg, oklch(1 0 0 / 0.02) 1px, transparent 1px),
+        linear-gradient(180deg, oklch(1 0 0 / 0.012) 1px, transparent 1px);
       background-size: auto, 36px 36px, 36px 36px;
       color: var(--ink);
       font-family: var(--font-ui);
@@ -6260,12 +6267,12 @@
           {/* ── Sidebar ─────────────────────────────────────────── */}
           <aside className="sidebar">
             <div className="brand">
-              <div className="brand-mark" aria-label="Dilip Central Trading Desk logo">
+              <div className="brand-mark" aria-label="DCA TradeOS Pro logo">
                 <span></span><span></span><span></span>
               </div>
               <div>
-                <div className="brand-name">Dilip Central</div>
-                <div className="brand-sub">Trading Desk</div>
+                <div className="brand-name">DCA TradeOS</div>
+                <div className="brand-sub">Pro Terminal</div>
               </div>
             </div>
 
@@ -6319,7 +6326,7 @@
             <div className="topbar-left">
               <div className="workspace-title hide-on-mobile">
                 <span>Workspace</span>
-                <strong>Dilip Central Trading Desk</strong>
+                <strong>DCA TradeOS Pro</strong>
               </div>
               {/* Market status */}
               <div style={{display:'flex',alignItems:'center',gap:6}}>
