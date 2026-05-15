@@ -2442,6 +2442,160 @@ def api_indian_strategy_rank():
     })
 
 
+def _eval_condition_leaf(leaf: dict, row: dict) -> bool:
+    op = str(leaf.get("op") or "gte").lower()
+    left_key = str(leaf.get("left") or "")
+    if not left_key:
+        return False
+    left = _num(row.get(left_key))
+    if "right_key" in leaf:
+        right = _num(row.get(str(leaf.get("right_key") or "")))
+    else:
+        right = _num(leaf.get("right"))
+    if op in ("gt", ">"):
+        return left > right
+    if op in ("gte", ">="):
+        return left >= right
+    if op in ("lt", "<"):
+        return left < right
+    if op in ("lte", "<="):
+        return left <= right
+    if op in ("eq", "=="):
+        return abs(left - right) < 1e-9
+    if op in ("neq", "!="):
+        return abs(left - right) >= 1e-9
+    if op == "between":
+        lo = _num(leaf.get("lo"))
+        hi = _num(leaf.get("hi"))
+        return lo <= left <= hi
+    return False
+
+
+def _eval_condition_graph(node: dict, row: dict) -> bool:
+    if not isinstance(node, dict):
+        return False
+    ntype = str(node.get("type") or "group").lower()
+    if ntype == "leaf":
+        return _eval_condition_leaf(node, row)
+    join = str(node.get("join") or "and").lower()
+    children = node.get("children") or []
+    if not isinstance(children, list) or not children:
+        return False
+    vals = [_eval_condition_graph(c, row) for c in children]
+    return any(vals) if join == "or" else all(vals)
+
+
+@app.route("/api/indian/condition_graph/evaluate", methods=["POST"])
+@_require_auth
+def api_indian_condition_graph_evaluate():
+    body = request.get_json(force=True, silent=True) or {}
+    graph = body.get("graph")
+    sample = body.get("sample") or {}
+    if not isinstance(graph, dict):
+        return jsonify({"error": "graph_must_be_object"}), 400
+    if not isinstance(sample, dict):
+        return jsonify({"error": "sample_must_be_object"}), 400
+    ok = _eval_condition_graph(graph, sample)
+    return jsonify({"ok": True, "result": bool(ok)})
+
+
+@app.route("/api/indian/scanner_replay")
+@_require_auth
+def api_indian_scanner_replay():
+    u = _current_user()
+    symbol = (request.args.get("symbol") or "RELIANCE").upper().strip()
+    days = max(1, min(30, _int(request.args.get("days"), 5)))
+    min_conf = max(1, min(100, _int(request.args.get("min_confidence"), 65)))
+    if not _SYMBOL_RE.match(symbol):
+        return jsonify({"error": "bad_symbol"}), 400
+    broker, err = _get_zerodha_broker(u["id"])
+    if err:
+        return jsonify({"error": err}), 400
+    token = _zerodha_symbol_token(broker, symbol)
+    if not token:
+        return jsonify({"error": "instrument_not_found"}), 404
+    ist = pytz.timezone("Asia/Kolkata")
+    to_dt = datetime.now(ist)
+    from_dt = to_dt - timedelta(days=days)
+    try:
+        raw = broker.get_candles(token, "5minute",
+                                 from_dt.strftime("%Y-%m-%d %H:%M:%S"),
+                                 to_dt.strftime("%Y-%m-%d %H:%M:%S"))
+    except Exception as e:
+        return jsonify({"error": str(e)[:200]}), 500
+    bars = _normalise_zerodha_candles(raw)
+    timeline = []
+    for i in range(35, len(bars)):
+        win = bars[max(0, i - 80):i + 1]
+        score, reasons = _score_backtest_bars(win)
+        if score <= 0:
+            continue
+        status = "candidate" if (score >= min_conf and _volume_surge(win)) else "watch"
+        timeline.append({
+            "time": win[-1]["t"],
+            "price": round(_num(win[-1]["c"]), 2),
+            "score": int(score),
+            "status": status,
+            "reasons": reasons,
+        })
+    return jsonify({
+        "symbol": symbol,
+        "days": days,
+        "candles": len(bars),
+        "events": timeline[-500:],
+    })
+
+
+@app.route("/api/indian/options_payoff", methods=["POST"])
+@_require_auth
+def api_indian_options_payoff():
+    body = request.get_json(force=True, silent=True) or {}
+    spot = max(1.0, _num(body.get("spot"), 100))
+    expiry = max(1.0, _num(body.get("expiry"), spot))
+    width = max(1.0, _num(body.get("width"), spot * 0.25))
+    legs = body.get("legs") or []
+    if not isinstance(legs, list) or not legs:
+        return jsonify({"error": "legs_required"}), 400
+
+    def leg_pnl(leg, px):
+        side = str(leg.get("side") or "buy").lower()
+        kind = str(leg.get("kind") or "call").lower()
+        strike = _num(leg.get("strike"), spot)
+        premium = max(0.0, _num(leg.get("premium"), 0))
+        qty = max(1, _int(leg.get("qty"), 1))
+        intrinsic = max(0.0, px - strike) if kind == "call" else max(0.0, strike - px)
+        unit = intrinsic - premium
+        if side == "sell":
+            unit = -unit
+        return unit * qty
+
+    points = []
+    lo = max(1.0, expiry - width)
+    hi = expiry + width
+    steps = 40
+    for i in range(steps + 1):
+        px = lo + (hi - lo) * i / steps
+        pnl = sum(leg_pnl(l, px) for l in legs)
+        points.append({"price": round(px, 2), "pnl": round(pnl, 2)})
+    be = []
+    for i in range(1, len(points)):
+        a, b = points[i - 1], points[i]
+        if a["pnl"] == 0:
+            be.append(a["price"])
+        elif a["pnl"] * b["pnl"] < 0:
+            be.append(round((a["price"] + b["price"]) / 2, 2))
+    max_profit = max(p["pnl"] for p in points)
+    max_loss = min(p["pnl"] for p in points)
+    return jsonify({
+        "spot": spot,
+        "expiry_ref": expiry,
+        "points": points,
+        "breakevens": be[:4],
+        "max_profit": round(max_profit, 2),
+        "max_loss": round(max_loss, 2),
+    })
+
+
 @app.route("/api/indian/alerts")
 @_require_auth
 def api_indian_alerts():

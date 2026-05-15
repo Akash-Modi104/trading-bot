@@ -2091,6 +2091,215 @@
       );
     };
 
+    const ConditionGraphLab = () => {
+      const [join, setJoin] = useState('and');
+      const [rows, setRows] = useState([
+        { left:'score', op:'gte', right:'65' },
+        { left:'price', op:'gt', right:'100' },
+      ]);
+      const [sample, setSample] = useState({score: 70, price: 150, rel_volume: 1.6});
+      const [result, setResult] = useState(null);
+      const [err, setErr] = useState('');
+
+      const run = async () => {
+        setErr('');
+        setResult(null);
+        const graph = {
+          type:'group',
+          join,
+          children: rows.map(r => ({
+            type:'leaf',
+            left: r.left,
+            op: r.op,
+            right: Number(r.right),
+          })),
+        };
+        try {
+          const r = await fetch('/api/indian/condition_graph/evaluate', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({graph, sample}),
+          });
+          const d = await r.json();
+          if (!r.ok) throw new Error(d.error || 'Evaluate failed');
+          setResult(!!d.result);
+        } catch(e) {
+          setErr(e.message || 'Evaluate failed');
+        }
+      };
+
+      const setRow = (i, key, val) => setRows(prev => prev.map((r, idx) => idx===i ? {...r, [key]: val} : r));
+      const addRow = () => setRows(prev => [...prev, {left:'score', op:'gte', right:'60'}]);
+      const delRow = (i) => setRows(prev => prev.filter((_, idx) => idx !== i));
+
+      return (
+        <div className="card">
+          <div className="card-hdr" style={{justifyContent:'space-between'}}>
+            <span className="card-title">Condition Graph Lab</span>
+            <button className="btn primary btn-sm" onClick={run}>Evaluate</button>
+          </div>
+          <div style={{padding:16,display:'grid',gap:10}}>
+            <div style={{display:'flex',gap:8,alignItems:'center'}}>
+              <span className="eyebrow">Join</span>
+              <select value={join} onChange={e => setJoin(e.target.value)} style={{maxWidth:120}}>
+                <option value="and">AND</option>
+                <option value="or">OR</option>
+              </select>
+              <button className="btn ghost btn-sm" onClick={addRow}>Add Rule</button>
+            </div>
+            {rows.map((r, i) => (
+              <div key={i} style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr auto',gap:8}}>
+                <input value={r.left} onChange={e => setRow(i,'left',e.target.value)} placeholder="field e.g. score" />
+                <select value={r.op} onChange={e => setRow(i,'op',e.target.value)}>
+                  <option value="gte">{'>='}</option>
+                  <option value="gt">{'>'}</option>
+                  <option value="lte">{'<='}</option>
+                  <option value="lt">{'<'}</option>
+                  <option value="eq">{'=='}</option>
+                </select>
+                <input value={r.right} onChange={e => setRow(i,'right',e.target.value)} placeholder="value" />
+                <button className="btn danger btn-sm" onClick={() => delRow(i)}>Del</button>
+              </div>
+            ))}
+            <div style={{display:'grid',gridTemplateColumns:'repeat(3,minmax(0,1fr))',gap:8}}>
+              <label style={{display:'grid',gap:4}}><span className="eyebrow">Sample Score</span><input type="number" value={sample.score} onChange={e=>setSample(s=>({...s,score:Number(e.target.value)}))} /></label>
+              <label style={{display:'grid',gap:4}}><span className="eyebrow">Sample Price</span><input type="number" value={sample.price} onChange={e=>setSample(s=>({...s,price:Number(e.target.value)}))} /></label>
+              <label style={{display:'grid',gap:4}}><span className="eyebrow">Rel Vol</span><input type="number" step="0.1" value={sample.rel_volume} onChange={e=>setSample(s=>({...s,rel_volume:Number(e.target.value)}))} /></label>
+            </div>
+            {err && <div style={{fontSize:12,color:'var(--down)'}}>{err}</div>}
+            {result != null && <div style={{fontSize:12,color:result?'var(--up)':'var(--warn)'}}>Result: {result ? 'PASS' : 'NO PASS'}</div>}
+          </div>
+        </div>
+      );
+    };
+
+    const ScannerReplayLab = () => {
+      const [symbol, setSymbol] = useState('RELIANCE');
+      const [days, setDays] = useState(5);
+      const [score, setScore] = useState(65);
+      const [data, setData] = useState(null);
+      const [busy, setBusy] = useState(false);
+      const [err, setErr] = useState('');
+      const run = async () => {
+        setBusy(true); setErr('');
+        try {
+          const qs = new URLSearchParams({symbol, days:String(days), min_confidence:String(score)});
+          const r = await fetch(`/api/indian/scanner_replay?${qs}`);
+          const d = await r.json();
+          if (!r.ok) throw new Error(d.error || 'Replay failed');
+          setData(d);
+        } catch(e) { setErr(e.message || 'Replay failed'); }
+        finally { setBusy(false); }
+      };
+      const events = data?.events || [];
+      const candidates = events.filter(e => e.status === 'candidate');
+      return (
+        <div className="card">
+          <div className="card-hdr" style={{justifyContent:'space-between'}}>
+            <span className="card-title">Scanner Replay</span>
+            <button className="btn primary btn-sm" disabled={busy} onClick={run}>{busy ? 'Running…' : 'Replay'}</button>
+          </div>
+          <div style={{padding:16,display:'grid',gap:10}}>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 110px 110px',gap:8}}>
+              <input value={symbol} onChange={e=>setSymbol(e.target.value.toUpperCase())} />
+              <input type="number" min="1" max="30" value={days} onChange={e=>setDays(Number(e.target.value))} />
+              <input type="number" min="1" max="100" value={score} onChange={e=>setScore(Number(e.target.value))} />
+            </div>
+            {err && <div style={{fontSize:12,color:'var(--down)'}}>{err}</div>}
+            {data && (
+              <div style={{fontSize:12,color:'var(--ink-3)'}}>
+                {data.candles} candles · {events.length} scored windows · {candidates.length} candidate events
+              </div>
+            )}
+            {events.length > 0 && (
+              <div style={{overflowX:'auto',maxHeight:200}}>
+                <table>
+                  <thead><tr><th>Time</th><th>Status</th><th>Score</th><th>Price</th></tr></thead>
+                  <tbody>
+                    {events.slice(-40).reverse().map((e, i) => (
+                      <tr key={i}>
+                        <td className="mono" style={{fontSize:11}}>{String(e.time).slice(11,16)}</td>
+                        <td style={{color:e.status==='candidate'?'var(--up)':'var(--ink-3)'}}>{e.status}</td>
+                        <td className="mono">{e.score}</td>
+                        <td className="mono">{inr(e.price)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    };
+
+    const OptionsPayoffLab = () => {
+      const [spot, setSpot] = useState(25000);
+      const [expiry, setExpiry] = useState(25000);
+      const [legs, setLegs] = useState([
+        {side:'buy', kind:'call', strike:25000, premium:180, qty:1},
+        {side:'sell', kind:'call', strike:25500, premium:80, qty:1},
+      ]);
+      const [data, setData] = useState(null);
+      const [busy, setBusy] = useState(false);
+      const [err, setErr] = useState('');
+
+      const setLeg = (i, key, val) => setLegs(prev => prev.map((l, idx) => idx===i ? {...l, [key]: val} : l));
+      const addLeg = () => setLegs(prev => [...prev, {side:'buy', kind:'put', strike:24500, premium:120, qty:1}]);
+      const delLeg = (i) => setLegs(prev => prev.filter((_, idx) => idx!==i));
+
+      const run = async () => {
+        setBusy(true); setErr('');
+        try {
+          const r = await fetch('/api/indian/options_payoff', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({spot:Number(spot), expiry:Number(expiry), legs:legs.map(l => ({
+              ...l, strike:Number(l.strike), premium:Number(l.premium), qty:Number(l.qty),
+            }))}),
+          });
+          const d = await r.json();
+          if (!r.ok) throw new Error(d.error || 'Payoff failed');
+          setData(d);
+        } catch(e) { setErr(e.message || 'Payoff failed'); }
+        finally { setBusy(false); }
+      };
+
+      return (
+        <div className="card">
+          <div className="card-hdr" style={{justifyContent:'space-between'}}>
+            <span className="card-title">Options Payoff Lab</span>
+            <button className="btn primary btn-sm" disabled={busy} onClick={run}>{busy?'Calc…':'Calculate'}</button>
+          </div>
+          <div style={{padding:16,display:'grid',gap:10}}>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr auto',gap:8}}>
+              <input type="number" value={spot} onChange={e=>setSpot(e.target.value)} />
+              <input type="number" value={expiry} onChange={e=>setExpiry(e.target.value)} />
+              <button className="btn ghost btn-sm" onClick={addLeg}>Add Leg</button>
+            </div>
+            {legs.map((l, i) => (
+              <div key={i} style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr 1fr auto',gap:6}}>
+                <select value={l.side} onChange={e=>setLeg(i,'side',e.target.value)}><option value="buy">BUY</option><option value="sell">SELL</option></select>
+                <select value={l.kind} onChange={e=>setLeg(i,'kind',e.target.value)}><option value="call">CALL</option><option value="put">PUT</option></select>
+                <input type="number" value={l.strike} onChange={e=>setLeg(i,'strike',e.target.value)} />
+                <input type="number" value={l.premium} onChange={e=>setLeg(i,'premium',e.target.value)} />
+                <input type="number" min="1" value={l.qty} onChange={e=>setLeg(i,'qty',e.target.value)} />
+                <button className="btn danger btn-sm" onClick={() => delLeg(i)}>Del</button>
+              </div>
+            ))}
+            {err && <div style={{fontSize:12,color:'var(--down)'}}>{err}</div>}
+            {data && (
+              <div style={{display:'grid',gridTemplateColumns:'repeat(3,minmax(0,1fr))',gap:8}}>
+                <div style={{background:'var(--bg-2)',border:'1px solid var(--line-soft)',borderRadius:8,padding:'9px 10px'}}><div className="eyebrow">Max Profit</div><div className="mono" style={{fontWeight:800,color:'var(--up)'}}>{inr(data.max_profit)}</div></div>
+                <div style={{background:'var(--bg-2)',border:'1px solid var(--line-soft)',borderRadius:8,padding:'9px 10px'}}><div className="eyebrow">Max Loss</div><div className="mono" style={{fontWeight:800,color:'var(--down)'}}>{inr(data.max_loss)}</div></div>
+                <div style={{background:'var(--bg-2)',border:'1px solid var(--line-soft)',borderRadius:8,padding:'9px 10px'}}><div className="eyebrow">Break-evens</div><div className="mono" style={{fontWeight:800}}>{(data.breakevens||[]).join(', ') || '—'}</div></div>
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    };
+
     /* ── Activity log ────────────────────────────────────────── */
     const Log = ({ rows = [] }) => {
       const tagClass = (m) => {
@@ -2741,6 +2950,9 @@
               <IndianVirtualCard />
               <NoCodeStrategyBuilder broker={broker === 'indian' ? 'zerodha' : broker} />
               <IndianBacktestLab />
+              <ConditionGraphLab />
+              <ScannerReplayLab />
+              <OptionsPayoffLab />
               <StrategyRankCard broker={broker === 'indian' ? 'zerodha' : broker} />
             </div>
           </div>
