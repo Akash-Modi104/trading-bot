@@ -863,6 +863,32 @@
       }} />
     );
 
+    const WhatsNewCard = () => {
+      const items = [
+        "Top bar open/closed now follows broker market hours (India/US).",
+        "Left navigation is pinned with stable content layout.",
+        "Indian bot uses dynamic budget sizing for strong signals.",
+        "Indian entry strictness is configurable from Strategy UI.",
+        "Adaptive good-harsh score + volume filtering is active.",
+      ];
+      return (
+        <div className="card fadein" style={{marginBottom:16}}>
+          <div className="card-hdr" style={{justifyContent:'space-between'}}>
+            <span className="card-title">What&apos;s New</span>
+            <span className="pill accent" style={{fontSize:10}}>Last update: May 15, 2026</span>
+          </div>
+          <div style={{padding:'12px 16px 14px',display:'grid',gap:8}}>
+            {items.map((t, i) => (
+              <div key={i} style={{display:'flex',alignItems:'flex-start',gap:8,color:'var(--ink-2)',fontSize:13,lineHeight:1.45}}>
+                <span style={{color:'var(--accent)',fontWeight:700,marginTop:1}}>•</span>
+                <span>{t}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    };
+
     /* ── Badge ───────────────────────────────────────────────── */
     const Badge = ({ children, color = 'var(--ink-3)', bg }) => (
       <span className="badge" style={{
@@ -6458,6 +6484,7 @@
 
             {/* OVERVIEW */}
             {tab === 'all' && <AllAccountsTab />}
+            {tab === 'overview' && <WhatsNewCard />}
             {tab === 'overview' && broker !== 'alpaca' && (
               <ErrorBoundary key={`overview-${broker}`}><BrokerAggregateOverview broker={broker} aggData={aggData} health={health} /></ErrorBoundary>
             )}
