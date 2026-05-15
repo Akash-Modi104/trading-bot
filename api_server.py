@@ -383,6 +383,44 @@ def api_me():
         "zerodha":   auth.get_zerodha_status(u["id"]),
     })
 
+@app.route("/api/deploy_info")
+@_require_auth
+def api_deploy_info():
+    """Return metadata written by deploy.sh so the UI can show the live build."""
+    path = os.path.join(BASE_DIR, ".deploy_info.json")
+    hist_path = os.path.join(BASE_DIR, ".deploy_history.json")
+    data = read_json(path, {})
+    history = read_json(hist_path, [])
+    if not isinstance(history, list):
+        history = []
+    if not data:
+        try:
+            sha = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=BASE_DIR, text=True
+            ).strip()
+            data = {
+                "deployed_at": None,
+                "sha": sha,
+                "short_sha": sha[:7],
+                "branch": subprocess.check_output(
+                    ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=BASE_DIR, text=True
+                ).strip(),
+                "subject": subprocess.check_output(
+                    ["git", "log", "-1", "--pretty=%s"], cwd=BASE_DIR, text=True
+                ).strip(),
+                "author": subprocess.check_output(
+                    ["git", "log", "-1", "--pretty=%an"], cwd=BASE_DIR, text=True
+                ).strip(),
+                "changed_files": [],
+                "changed_count": 0,
+            }
+        except Exception:
+            data = {"error": "deploy_info_unavailable"}
+    data["history"] = history[:10]
+    resp = jsonify(data)
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    return resp
+
 @app.route("/api/profile", methods=["POST"])
 @_require_auth
 def api_profile_update():

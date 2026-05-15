@@ -36,6 +36,66 @@ else
   git diff --name-only "$OLD_SHA" "$NEW_SHA" | sed 's/^/    /'
 fi
 
+echo ""
+echo "▶ Writing deployment metadata"
+DEPLOY_OLD_SHA="$OLD_SHA" DEPLOY_NEW_SHA="$NEW_SHA" /opt/trading-bot/venv/bin/python - <<'PY'
+import json
+import os
+import subprocess
+from datetime import datetime, timezone
+
+old_sha = os.environ.get("DEPLOY_OLD_SHA", "")
+new_sha = os.environ.get("DEPLOY_NEW_SHA", "")
+
+def git(*args):
+    return subprocess.check_output(["git", *args], text=True).strip()
+
+changed = []
+if old_sha and new_sha and old_sha != new_sha:
+    changed = subprocess.check_output(
+        ["git", "diff", "--name-only", old_sha, new_sha],
+        text=True,
+    ).splitlines()
+
+data = {
+    "deployed_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    "old_sha": old_sha,
+    "sha": new_sha,
+    "short_sha": git("rev-parse", "--short", "HEAD"),
+    "branch": git("rev-parse", "--abbrev-ref", "HEAD"),
+    "subject": git("log", "-1", "--pretty=%s"),
+    "author": git("log", "-1", "--pretty=%an"),
+    "changed_files": changed[:25],
+    "changed_count": len(changed),
+}
+
+with open(".deploy_info.json", "w") as f:
+    json.dump(data, f, indent=2)
+
+hist_path = ".deploy_history.json"
+try:
+    with open(hist_path) as f:
+        history = json.load(f)
+        if not isinstance(history, list):
+            history = []
+except Exception:
+    history = []
+
+history.insert(0, data)
+deduped = []
+seen = set()
+for item in history:
+    key = (item.get("sha"), item.get("deployed_at"))
+    if key in seen:
+        continue
+    seen.add(key)
+    deduped.append(item)
+
+with open(hist_path, "w") as f:
+    json.dump(deduped[:50], f, indent=2)
+PY
+echo "  wrote .deploy_info.json and .deploy_history.json"
+
 # 2. Install new pip dependencies (if requirements.txt changed)
 echo ""
 echo "▶ pip install -r requirements.txt"

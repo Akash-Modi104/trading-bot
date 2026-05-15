@@ -37,3 +37,5 @@ indian_positions_state.json
 indian_trade_log.json
 negative_news_in.json
 manual_news_kill.json
+.deploy_info.json
+.deploy_history.json

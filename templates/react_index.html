@@ -974,26 +974,63 @@
     );
 
     const WhatsNewCard = () => {
-      const items = [
-        "Top bar open/closed now follows broker market hours (India/US).",
-        "Left navigation is pinned with stable content layout.",
-        "Indian bot uses dynamic budget sizing for strong signals.",
-        "Indian entry strictness is configurable from Strategy UI.",
-        "Adaptive good-harsh score + volume filtering is active.",
+      const [deploy, setDeploy] = useState(null);
+      useEffect(() => {
+        fetch('/api/deploy_info')
+          .then(r => r.ok ? r.json() : Promise.reject())
+          .then(setDeploy)
+          .catch(() => setDeploy({error:'unavailable'}));
+      }, []);
+      const fallback = [
+        "Deployment metadata is not available yet.",
+        "Deploy once with ./deploy.sh to start automatic version history.",
       ];
+      const files = Array.isArray(deploy?.changed_files) ? deploy.changed_files : [];
+      const history = Array.isArray(deploy?.history) ? deploy.history : [];
+      const items = files.length
+        ? files.slice(0, 5).map(f => `Changed: ${f}`)
+        : fallback;
+      const deployedAt = deploy?.deployed_at
+        ? new Date(deploy.deployed_at).toLocaleString()
+        : null;
       return (
         <div className="card fadein" style={{marginBottom:16}}>
           <div className="card-hdr" style={{justifyContent:'space-between'}}>
             <span className="card-title">What&apos;s New</span>
-            <span className="pill accent" style={{fontSize:10}}>Last update: May 15, 2026</span>
+            <span className="pill accent" style={{fontSize:10}}>
+              {deploy?.short_sha ? `v ${deploy.short_sha}` : 'Version history'}
+            </span>
           </div>
-          <div style={{padding:'12px 16px 14px',display:'grid',gap:8}}>
+          <div style={{padding:'12px 16px 14px',display:'grid',gap:10}}>
+            <div style={{display:'grid',gap:3}}>
+              <div style={{fontWeight:800,color:'var(--ink)',fontSize:14}}>
+                {deploy?.subject || 'Waiting for first recorded deployment'}
+              </div>
+              <div style={{fontSize:12,color:'var(--ink-3)'}}>
+                {deployedAt ? `Deployed ${deployedAt}` : 'No deployment timestamp recorded'}
+                {deploy?.author ? ` · ${deploy.author}` : ''}
+                {deploy?.changed_count ? ` · ${deploy.changed_count} file${deploy.changed_count===1?'':'s'}` : ''}
+              </div>
+            </div>
             {items.map((t, i) => (
               <div key={i} style={{display:'flex',alignItems:'flex-start',gap:8,color:'var(--ink-2)',fontSize:13,lineHeight:1.45}}>
                 <span style={{color:'var(--accent)',fontWeight:700,marginTop:1}}>•</span>
                 <span>{t}</span>
               </div>
             ))}
+            {history.length > 1 && (
+              <div style={{borderTop:'1px solid var(--line-soft)',paddingTop:10,display:'grid',gap:7}}>
+                <div className="eyebrow">Recent Versions</div>
+                {history.slice(1, 6).map((h, i) => (
+                  <div key={`${h.sha || i}-${h.deployed_at || i}`} style={{display:'grid',gridTemplateColumns:'70px 1fr',gap:8,alignItems:'baseline'}}>
+                    <span className="mono" style={{fontSize:11,color:'var(--accent)',fontWeight:800}}>{h.short_sha || String(h.sha || '').slice(0,7) || '—'}</span>
+                    <span style={{fontSize:12,color:'var(--ink-3)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={h.subject || ''}>
+                      {h.subject || 'Deployment'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       );
