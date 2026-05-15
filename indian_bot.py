@@ -298,6 +298,26 @@ def _max_affordable_qty(price: float, cash_limit: float, margin_limit: float) ->
     return max(0, int((limit - ORDER_BUFFER_INR) // unit))
 
 
+def _cash_cap_for_score(score: int, margin_limit: float) -> float:
+    """
+    Dynamic cash cap:
+    keep base per-trade sizing for average setups, but allow stronger setups
+    to consume a bigger share of TOTAL_BUDGET when margin permits.
+    """
+    base = float(BUDGET_PER_TRADE or 0)
+    total = float(TOTAL_BUDGET or base or 0)
+    if total <= 0:
+        return max(0.0, margin_limit)
+
+    if score >= (MIN_CONFIDENCE + 10):
+        cap = max(base, total * 0.85)
+    elif score >= (MIN_CONFIDENCE + 5):
+        cap = max(base, total * 0.60)
+    else:
+        cap = max(base, total * 0.35)
+    return max(0.0, min(cap, margin_limit))
+
+
 def _entry_block_reason(symbol: str) -> str:
     now_ts = time.time()
     if now_ts < _NO_NEW_BUYS_UNTIL:
@@ -1842,9 +1862,9 @@ def run():
             save_state()
             time.sleep(60)
             continue
-        min_cash_for_scan = min(BUDGET_PER_TRADE, avail_margin)
+        min_cash_for_scan = min(max(BUDGET_PER_TRADE, TOTAL_BUDGET * 0.35), avail_margin)
         log_event(f"[scan] available margin: Rs{avail_margin:,.2f}  "
-                  f"per-trade cap: Rs{BUDGET_PER_TRADE:,.2f}")
+                  f"base per-trade cap: Rs{BUDGET_PER_TRADE:,.2f}  total: Rs{TOTAL_BUDGET:,.2f}")
         if min_cash_for_scan <= ORDER_BUFFER_INR:
             log_event("Insufficient usable margin — skipping new entries")
             save_state()
@@ -1894,7 +1914,8 @@ def run():
 
             price = bars[-1]["c"] if bars else 0
             vol_ok = pe.has_volume_surge(bars)
-            qty_preview = _max_affordable_qty(price, BUDGET_PER_TRADE, avail_margin) if price else 0
+            cash_cap = _cash_cap_for_score(sc, avail_margin) if price else 0
+            qty_preview = _max_affordable_qty(price, cash_cap, avail_margin) if price else 0
             required_margin = _required_margin_estimate(price, qty_preview) if qty_preview > 0 else 0
             stop = round(price * (1 - STOP_PCT / 100), 2) if price else None
             tp = round(price * (1 + TP_PCT / 100), 2) if price else None
@@ -1959,11 +1980,12 @@ def run():
                 row["note"] = "Bad last traded price"
                 continue
 
-            qty = _max_affordable_qty(price, BUDGET_PER_TRADE, remaining_margin)
+            cash_cap = _cash_cap_for_score(sc, remaining_margin)
+            qty = _max_affordable_qty(price, cash_cap, remaining_margin)
             if qty <= 0:
                 row["status"] = "no_cash"
-                row["note"] = f"Price ₹{price:.2f} exceeds per-trade/margin cap"
-                log_event(f"SKIP {sym}: price ₹{price:.2f} exceeds per-trade/margin cap")
+                row["note"] = f"Price ₹{price:.2f} exceeds dynamic budget/margin cap"
+                log_event(f"SKIP {sym}: price ₹{price:.2f} exceeds dynamic budget/margin cap")
                 continue
             required_margin = _required_margin_estimate(price, qty)
             if required_margin > remaining_margin:
