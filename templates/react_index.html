@@ -2774,6 +2774,11 @@
         { key:'consecutive_loss_cooldown_min', label:'Cooldown Min',     desc:'Pause duration in minutes'   },
         { key:'risk_per_trade_pct',  label:'Risk / Trade %',       desc:'ATR-scaled position sizing'   },
         { key:'max_spread_pct',      label:'Max Spread %',         desc:'Reject if bid-ask too wide'   },
+        { key:'ind_volume_surge_strict', label:'IN Volume Strict', desc:'Indian bot strict volume surge (default 1.3x)' },
+        { key:'ind_volume_surge_soft',   label:'IN Volume Soft',   desc:'Indian bot soft volume surge for strong setups (default 1.1x)' },
+        { key:'ind_strong_score_bonus',  label:'IN Strong Score Bonus', desc:'Score above min confidence needed for soft-volume path (default +8)' },
+        { key:'ind_min_conf_relax',      label:'IN Min Conf Relax', desc:'Confidence relaxation in healthy regime (default 3)' },
+        { key:'ind_soft_vix_cap',        label:'IN Soft VIX Cap',   desc:'Relaxed path active only below this India VIX (default 20)' },
       ];
       const txtDefs = [
         { key:'ollama_model', label:'Ollama Model', desc:'e.g. qwen2.5:3b · llama3.2:1b · mistral:7b' },

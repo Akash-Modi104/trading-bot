@@ -48,6 +48,7 @@ POSITIONS_F    = os.path.join(BASE_DIR, "indian_positions_state.json")
 NEG_NEWS_F     = os.path.join(BASE_DIR, "negative_news_in.json")  # written by news_scanner_indian.py
 SCANNER_F      = os.path.join(BASE_DIR, "indian_scanner.json")
 VIRTUAL_F      = os.path.join(BASE_DIR, "indian_virtual_state.json")
+STRAT_F        = os.path.join(BASE_DIR, "strategy_params.json")
 
 # ── Timezone ───────────────────────────────────────────────────
 IST = pytz.timezone("Asia/Kolkata")
@@ -81,6 +82,31 @@ BUY_REJECT_COOLDOWN_SEC = int(os.environ.get("INDIAN_BOT_BUY_REJECT_COOLDOWN_SEC
 
 _NO_NEW_BUYS_UNTIL = 0.0
 _SYMBOL_BUY_BLOCK_UNTIL: dict = {}
+
+
+def _runtime_entry_tuning() -> dict:
+    """
+    Runtime-tunable entry strictness (editable from UI via /api/config).
+    Falls back to conservative defaults when params are missing.
+    """
+    defaults = {
+        "ind_volume_surge_strict": 1.30,   # normal volume confirmation
+        "ind_volume_surge_soft":   1.10,   # softer volume bar for very strong setups
+        "ind_strong_score_bonus":  8.0,    # score above min_conf to allow soft-volume path
+        "ind_min_conf_relax":      3.0,    # relax confidence by this much in healthy regime
+        "ind_soft_vix_cap":       20.0,    # healthy regime VIX cap for relaxed path
+    }
+    try:
+        cfg = safe_io.read_json_file(STRAT_F, {})
+        if not isinstance(cfg, dict):
+            return defaults
+        out = dict(defaults)
+        for k in out.keys():
+            if k in cfg:
+                out[k] = float(cfg.get(k))
+        return out
+    except Exception:
+        return defaults
 
 
 def _load_allocation(broker_name: str) -> dict:
@@ -1871,6 +1897,7 @@ def run():
             time.sleep(60)
             continue
 
+        tuning = _runtime_entry_tuning()
         candidates = []
         scanner_rows = []
         for sym in WATCHLIST:
@@ -1913,15 +1940,17 @@ def run():
                 continue
 
             price = bars[-1]["c"] if bars else 0
-            vol_ok_strict = pe.has_volume_surge(bars)
-            vol_ok_soft = pe.has_volume_surge(bars, threshold=1.1)
+            vol_ok_strict = pe.has_volume_surge(bars, threshold=float(tuning["ind_volume_surge_strict"]))
+            vol_ok_soft = pe.has_volume_surge(bars, threshold=float(tuning["ind_volume_surge_soft"]))
             strong_override = bool(
-                sc >= (MIN_CONFIDENCE + 8) and nifty_up and (_num(vix_val, 99) <= 20.0)
+                sc >= (MIN_CONFIDENCE + float(tuning["ind_strong_score_bonus"]))
+                and nifty_up
+                and (_num(vix_val, 99) <= float(tuning["ind_soft_vix_cap"]))
             )
             vol_ok = bool(vol_ok_strict or (strong_override and vol_ok_soft))
             effective_min_conf = MIN_CONFIDENCE
-            if nifty_up and (_num(vix_val, 99) <= 20.0):
-                effective_min_conf = max(40, MIN_CONFIDENCE - 3)
+            if nifty_up and (_num(vix_val, 99) <= float(tuning["ind_soft_vix_cap"])):
+                effective_min_conf = max(40, int(MIN_CONFIDENCE - float(tuning["ind_min_conf_relax"])))
             cash_cap = _cash_cap_for_score(sc, avail_margin) if price else 0
             qty_preview = _max_affordable_qty(price, cash_cap, avail_margin) if price else 0
             required_margin = _required_margin_estimate(price, qty_preview) if qty_preview > 0 else 0

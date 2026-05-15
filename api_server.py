@@ -3251,6 +3251,12 @@ _STRAT_ALLOWED_KEYS = {
     "rel_vol_min", "max_drawdown_pct", "consecutive_loss_pause",
     "consecutive_loss_cooldown_min", "risk_per_trade_pct",
     "max_spread_pct", "ollama_model",
+    # Indian bot UI-tunable entry strictness
+    "ind_volume_surge_strict",
+    "ind_volume_surge_soft",
+    "ind_strong_score_bonus",
+    "ind_min_conf_relax",
+    "ind_soft_vix_cap",
 }
 
 @app.route("/api/config", methods=["GET"])
