@@ -1616,6 +1616,237 @@
       );
     };
 
+    const StreakStudioCard = ({ broker='zerodha' } = {}) => {
+      const [tab, setTab] = useState('scanner');
+      const [name, setName] = useState('');
+      const [busy, setBusy] = useState('');
+      const [msg, setMsg] = useState('');
+      const [profiles, setProfiles] = useState([]);
+      const [scanner, setScanner] = useState({
+        symbols: 'RELIANCE, TCS, INFY, ONGC',
+        min_confidence: 65,
+        rel_volume_min: 1.3,
+        require_vwap: true,
+        time_window: 'quality',
+      });
+      const [strategy, setStrategy] = useState({
+        mode: 'balanced',
+        stop_pct: 1.5,
+        tp_pct: 3.0,
+        max_positions: 3,
+        budget: 2000,
+      });
+      const [deploy, setDeploy] = useState({
+        auto_trade: true,
+        seed_limit: 3,
+        dry_run: false,
+      });
+      const [alert, setAlert] = useState({
+        browser: true,
+        telegram: true,
+        stale_scan_min: 20,
+      });
+
+      const load = useCallback(() => {
+        fetch(`/api/indian/streak_profiles?type=${tab}`)
+          .then(r => r.ok ? r.json() : r.json().then(e => Promise.reject(e)))
+          .then(d => setProfiles(d.profiles || []))
+          .catch(() => setProfiles([]));
+      }, [tab]);
+
+      useEffect(() => { load(); }, [load]);
+
+      const setField = (setter, key, value) => setter(prev => ({...prev, [key]: value}));
+      const activeConfig = () => ({ scanner, strategy, deployment: deploy, alert }[tab] || scanner);
+
+      const save = async () => {
+        if (!name.trim()) { setMsg('Profile name is required'); return; }
+        setBusy('save');
+        setMsg('');
+        try {
+          const r = await fetch('/api/indian/streak_profiles', {
+            method: 'POST',
+            headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({type: tab, name: name.trim(), config: activeConfig()}),
+          });
+          const d = await r.json();
+          if (!r.ok || !d.ok) throw new Error(d.error || 'Save failed');
+          setMsg('Saved');
+          setName('');
+          load();
+        } catch(e) {
+          setMsg(e.message || 'Save failed');
+        } finally {
+          setBusy('');
+        }
+      };
+
+      const applyProfile = async (p) => {
+        const c = p?.config || {};
+        if (p.type === 'scanner') setScanner(prev => ({...prev, ...c}));
+        if (p.type === 'strategy') setStrategy(prev => ({...prev, ...c}));
+        if (p.type === 'deployment') setDeploy(prev => ({...prev, ...c}));
+        if (p.type === 'alert') setAlert(prev => ({...prev, ...c}));
+        setMsg(`Applied ${p.name}`);
+      };
+
+      const runScanner = async () => {
+        setBusy('run');
+        setMsg('');
+        try {
+          const qs = new URLSearchParams({
+            symbols: scanner.symbols || 'ONGC',
+            days: '20',
+          });
+          const r = await fetch(`/api/indian/strategy_rank?${qs}`);
+          const d = await r.json();
+          if (!r.ok) throw new Error(d.error || 'Run failed');
+          setMsg(`Run complete: ${d.ranking?.[0]?.label || 'n/a'} leads`);
+        } catch(e) {
+          setMsg(e.message || 'Run failed');
+        } finally {
+          setBusy('');
+        }
+      };
+
+      const applyStrategy = async () => {
+        setBusy('apply');
+        setMsg('');
+        try {
+          const r = await fetch(`/api/allocations/${broker}`, {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({
+              trading_mode: strategy.mode,
+              stop_pct: Number(strategy.stop_pct),
+              tp_pct: Number(strategy.tp_pct),
+              max_positions: Number(strategy.max_positions),
+              budget: Number(strategy.budget),
+            }),
+          });
+          const d = await r.json();
+          if (!r.ok || !d.ok) throw new Error(d.error || d.message || 'Apply failed');
+          setMsg('Strategy applied');
+        } catch(e) {
+          setMsg(e.message || 'Apply failed');
+        } finally {
+          setBusy('');
+        }
+      };
+
+      const deployNow = async () => {
+        setBusy('deploy');
+        setMsg('');
+        try {
+          if (!deploy.dry_run) {
+            await fetch('/api/allocations/zerodha/toggle', {method:'POST'});
+          }
+          const r = await fetch('/api/indian/virtual', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({action:'seed_from_scanner', limit:Number(deploy.seed_limit || 3)}),
+          });
+          const d = await r.json();
+          if (!r.ok) throw new Error(d.error || d.message || 'Deploy failed');
+          setMsg(`Deploy done (${deploy.dry_run ? 'dry run' : 'live profile'})`);
+        } catch(e) {
+          setMsg(e.message || 'Deploy failed');
+        } finally {
+          setBusy('');
+        }
+      };
+
+      const removeProfile = async (p) => {
+        setBusy('delete');
+        try {
+          const r = await fetch(`/api/indian/streak_profiles/${p.id}`, {method:'DELETE'});
+          if (!r.ok) throw new Error('Delete failed');
+          load();
+        } catch {}
+        setBusy('');
+      };
+
+      const control = (label, node) => (
+        <label style={{display:'grid',gap:5}}>
+          <span className="eyebrow">{label}</span>
+          {node}
+        </label>
+      );
+
+      return (
+        <div className="card">
+          <div className="card-hdr" style={{justifyContent:'space-between'}}>
+            <span className="card-title">Streak Studio</span>
+            <div style={{display:'flex',gap:6}}>
+              {['scanner','strategy','deployment','alert'].map(t => (
+                <button key={t} className={`btn btn-sm ${tab===t?'primary':'ghost'}`} onClick={() => setTab(t)}>{t}</button>
+              ))}
+            </div>
+          </div>
+          <div style={{padding:16,display:'grid',gap:12}}>
+            {tab === 'scanner' && (
+              <div style={{display:'grid',gridTemplateColumns:'1fr 140px 140px',gap:10}}>
+                {control('Symbols', <input value={scanner.symbols} onChange={e=>setField(setScanner,'symbols',e.target.value.toUpperCase())} />)}
+                {control('Min Score', <input type="number" min="40" max="95" value={scanner.min_confidence} onChange={e=>setField(setScanner,'min_confidence',e.target.value)} />)}
+                {control('Rel Volume', <input type="number" step="0.1" min="1" max="4" value={scanner.rel_volume_min} onChange={e=>setField(setScanner,'rel_volume_min',e.target.value)} />)}
+              </div>
+            )}
+            {tab === 'strategy' && (
+              <div style={{display:'grid',gridTemplateColumns:'repeat(4,minmax(0,1fr))',gap:10}}>
+                {control('Mode', <select value={strategy.mode} onChange={e=>setField(setStrategy,'mode',e.target.value)}><option value="ruthless">Ruthless</option><option value="balanced">Balanced</option><option value="slow_gainer">Slow Gainer</option><option value="custom">Custom</option></select>)}
+                {control('Stop %', <input type="number" step="0.1" value={strategy.stop_pct} onChange={e=>setField(setStrategy,'stop_pct',e.target.value)} />)}
+                {control('Target %', <input type="number" step="0.1" value={strategy.tp_pct} onChange={e=>setField(setStrategy,'tp_pct',e.target.value)} />)}
+                {control('Max Pos', <input type="number" min="1" max="10" value={strategy.max_positions} onChange={e=>setField(setStrategy,'max_positions',e.target.value)} />)}
+              </div>
+            )}
+            {tab === 'deployment' && (
+              <div style={{display:'grid',gridTemplateColumns:'repeat(3,minmax(0,1fr))',gap:10}}>
+                {control('Seed Limit', <input type="number" min="1" max="10" value={deploy.seed_limit} onChange={e=>setField(setDeploy,'seed_limit',e.target.value)} />)}
+                {control('Auto Trade', <select value={deploy.auto_trade ? 'on' : 'off'} onChange={e=>setField(setDeploy,'auto_trade',e.target.value==='on')}><option value="on">ON</option><option value="off">OFF</option></select>)}
+                {control('Dry Run', <select value={deploy.dry_run ? 'yes' : 'no'} onChange={e=>setField(setDeploy,'dry_run',e.target.value==='yes')}><option value="no">No</option><option value="yes">Yes</option></select>)}
+              </div>
+            )}
+            {tab === 'alert' && (
+              <div style={{display:'grid',gridTemplateColumns:'repeat(3,minmax(0,1fr))',gap:10}}>
+                {control('Browser Alerts', <select value={alert.browser ? 'on' : 'off'} onChange={e=>setField(setAlert,'browser',e.target.value==='on')}><option value="on">ON</option><option value="off">OFF</option></select>)}
+                {control('Telegram Alerts', <select value={alert.telegram ? 'on' : 'off'} onChange={e=>setField(setAlert,'telegram',e.target.value==='on')}><option value="on">ON</option><option value="off">OFF</option></select>)}
+                {control('Stale Scan Min', <input type="number" min="5" max="120" value={alert.stale_scan_min} onChange={e=>setField(setAlert,'stale_scan_min',e.target.value)} />)}
+              </div>
+            )}
+
+            <div style={{display:'grid',gridTemplateColumns:'1fr auto auto auto',gap:8}}>
+              <input placeholder={`Save ${tab} template as...`} value={name} onChange={e=>setName(e.target.value)} />
+              <button className="btn ghost" disabled={!!busy} onClick={save}>Save</button>
+              <button className="btn primary" disabled={!!busy} onClick={tab==='scanner' ? runScanner : tab==='strategy' ? applyStrategy : tab==='deployment' ? deployNow : load}>
+                {tab==='scanner'?'Run':tab==='strategy'?'Apply':tab==='deployment'?'Deploy':'Refresh'}
+              </button>
+              <button className="btn ghost" disabled={!!busy} onClick={load}>Reload</button>
+            </div>
+
+            {msg && <div style={{fontSize:12,color:'var(--accent)'}}>{msg}</div>}
+            <div style={{overflowX:'auto'}}>
+              <table>
+                <thead><tr><th>Name</th><th>Updated</th><th>Actions</th></tr></thead>
+                <tbody>
+                  {profiles.slice(0, 15).map((p, i) => (
+                    <tr key={p.id || i}>
+                      <td style={{fontWeight:700}}>{p.name}</td>
+                      <td className="mono" style={{fontSize:11}}>{String(p.updated_at || p.created_at || '').replace('T',' ').slice(0,19)}</td>
+                      <td style={{display:'flex',gap:6}}>
+                        <button className="btn btn-sm ghost" disabled={!!busy} onClick={() => applyProfile(p)}>Use</button>
+                        <button className="btn btn-sm danger" disabled={!!busy} onClick={() => removeProfile(p)}>Delete</button>
+                      </td>
+                    </tr>
+                  ))}
+                  {profiles.length === 0 && <tr><td colSpan="3" style={{color:'var(--ink-3)'}}>No saved templates for this feature yet.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      );
+    };
+
     const NoCodeStrategyBuilder = ({ broker='zerodha' } = {}) => {
       const [form, setForm] = useState({
         budget: 2000, max_positions: 3, stop_pct: 1.5, tp_pct: 3,
@@ -2500,6 +2731,7 @@
 
           <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(min(360px,100%),1fr))',gap:16}}>
             <div style={{display:'grid',gap:16}}>
+              <StreakStudioCard broker={broker === 'indian' ? 'zerodha' : broker} />
               <IndianScannerBoard />
               <IndianAlertsCard />
             </div>

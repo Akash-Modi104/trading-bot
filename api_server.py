@@ -1551,6 +1551,27 @@ INDIAN_BOT_STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
 INDIAN_SCANNER_FILE = os.path.join(BASE_DIR, "indian_scanner.json")
 INDIAN_TRADE_LOG_FILE = os.path.join(BASE_DIR, "indian_trade_log.json")
 INDIAN_VIRTUAL_FILE = os.path.join(BASE_DIR, "indian_virtual_state.json")
+INDIAN_STREAK_PROFILES_FILE = os.path.join(BASE_DIR, "indian_streak_profiles.json")
+
+
+def _default_streak_profiles():
+    return {"profiles": [], "updated_at": datetime.now(pytz.timezone("Asia/Kolkata")).isoformat()}
+
+
+def _load_streak_profiles():
+    data = read_json(INDIAN_STREAK_PROFILES_FILE, None)
+    if not isinstance(data, dict):
+        return _default_streak_profiles()
+    out = _default_streak_profiles()
+    out.update(data)
+    if not isinstance(out.get("profiles"), list):
+        out["profiles"] = []
+    return out
+
+
+def _save_streak_profiles(data: dict):
+    data["updated_at"] = datetime.now(pytz.timezone("Asia/Kolkata")).isoformat()
+    write_json(INDIAN_STREAK_PROFILES_FILE, data)
 
 @app.route("/api/indian/state")
 @_require_auth
@@ -1588,6 +1609,77 @@ def api_indian_state():
         return jsonify(state)
     except Exception as e:
         return jsonify({"error": str(e)[:200]}), 500
+
+
+@app.route("/api/indian/streak_profiles", methods=["GET", "POST"])
+@_require_auth
+def api_indian_streak_profiles():
+    u = _current_user()
+    data = _load_streak_profiles()
+    if request.method == "GET":
+        ptype = (request.args.get("type") or "").strip().lower()
+        rows = data.get("profiles", [])
+        if ptype:
+            rows = [p for p in rows if (p.get("type") or "").lower() == ptype]
+        rows.sort(key=lambda x: str(x.get("updated_at") or x.get("created_at") or ""), reverse=True)
+        return jsonify({"profiles": rows, "updated_at": data.get("updated_at")})
+
+    body = request.get_json(force=True, silent=True) or {}
+    ptype = (body.get("type") or "strategy").strip().lower()
+    if ptype not in ("scanner", "strategy", "deployment", "alert"):
+        return jsonify({"error": "bad_type"}), 400
+    name = (body.get("name") or "").strip()
+    if not name:
+        return jsonify({"error": "name_required"}), 400
+    config = body.get("config")
+    if not isinstance(config, dict):
+        return jsonify({"error": "config_must_be_object"}), 400
+
+    now = datetime.now(pytz.timezone("Asia/Kolkata")).isoformat()
+    pid = str(body.get("id") or "").strip()
+    profiles = data.get("profiles", [])
+    if pid:
+        hit = None
+        for p in profiles:
+            if str(p.get("id")) == pid:
+                hit = p
+                break
+        if hit:
+            hit["type"] = ptype
+            hit["name"] = name[:80]
+            hit["config"] = config
+            hit["updated_at"] = now
+        else:
+            pid = ""
+    if not pid:
+        pid = secrets.token_hex(8)
+        profiles.append({
+            "id": pid,
+            "type": ptype,
+            "name": name[:80],
+            "config": config,
+            "created_by": u.get("id"),
+            "created_at": now,
+            "updated_at": now,
+        })
+    data["profiles"] = profiles[-200:]
+    _save_streak_profiles(data)
+    auth.audit(u["id"], "indian_streak_profile_saved", _client_ip(), {"id": pid, "type": ptype, "name": name[:80]})
+    return jsonify({"ok": True, "id": pid, "updated_at": data.get("updated_at")})
+
+
+@app.route("/api/indian/streak_profiles/<pid>", methods=["DELETE"])
+@_require_auth
+def api_indian_streak_profile_delete(pid: str):
+    u = _current_user()
+    data = _load_streak_profiles()
+    before = len(data.get("profiles", []))
+    data["profiles"] = [p for p in data.get("profiles", []) if str(p.get("id")) != str(pid)]
+    if len(data["profiles"]) == before:
+        return jsonify({"error": "not_found"}), 404
+    _save_streak_profiles(data)
+    auth.audit(u["id"], "indian_streak_profile_deleted", _client_ip(), {"id": pid})
+    return jsonify({"ok": True})
 
 
 def _num(v, default=0.0):
