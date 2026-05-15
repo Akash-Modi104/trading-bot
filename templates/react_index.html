@@ -6227,14 +6227,21 @@
         { id:'profile',   label:'Profile',     icon:'◯' },
       ];
 
-      const isMarketOpen = () => {
+      const isMarketOpen = (activeBroker) => {
         const now = new Date();
+        if (activeBroker === 'zerodha' || activeBroker === 'angelone') {
+          const ist = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+          const h = ist.getHours(), m2 = ist.getMinutes(), day = ist.getDay();
+          if (day === 0 || day === 6) return false;
+          const mins = h * 60 + m2;
+          return mins >= (9 * 60 + 15) && mins < (15 * 60 + 30);
+        }
         const et = new Date(now.toLocaleString('en-US',{timeZone:'America/New_York'}));
         const h = et.getHours(), m2 = et.getMinutes(), day = et.getDay();
         if (day === 0 || day === 6) return false;
         return (h > 9 || (h === 9 && m2 >= 30)) && h < 16;
       };
-      const mktOpen = isMarketOpen();
+      const mktOpen = isMarketOpen(broker);
 
       const visibleBroken = (brokerHealth?.broken || [])
         .filter(b => !healthDismissed[b]);
