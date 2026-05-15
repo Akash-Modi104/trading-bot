@@ -20,6 +20,7 @@
   <!-- Plus Jakarta Sans + JetBrains Mono -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/remixicon@4.3.0/fonts/remixicon.css" rel="stylesheet">
 
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -243,6 +244,13 @@
       flex-shrink: 0;
     }
     .nav-item.active .nav-rail { background: linear-gradient(180deg, var(--brand-2), var(--accent)); }
+    .nav-icon {
+      font-size: 18px;
+      line-height: 1;
+      width: 18px;
+      text-align: center;
+      flex-shrink: 0;
+    }
     .nav-section {
       margin-top: 16px;
       padding: 10px 14px 8px;
@@ -6328,22 +6336,22 @@
 
       /* Sidebar nav mapping */
       const SIDEBAR_TABS = [
-        { id:'overview',  label:'Overview',    icon:'⊞' },
-        { id:'trades',    label:'Trades',      icon:'⬡' },
-        { id:'combined',  label:'Combined',    icon:'⊕' },
-        { id:'history',   label:'History',     icon:'⊘' },
-        { id:'analytics', label:'Analytics',   icon:'⬗' },
-        { id:'reports',   label:'Reports',     icon:'▣' },
+        { id:'overview',  label:'Overview',    icon:'ri-dashboard-3-line' },
+        { id:'trades',    label:'Trades',      icon:'ri-exchange-funds-line' },
+        { id:'combined',  label:'Combined',    icon:'ri-links-line' },
+        { id:'history',   label:'History',     icon:'ri-history-line' },
+        { id:'analytics', label:'Analytics',   icon:'ri-line-chart-line' },
+        { id:'reports',   label:'Reports',     icon:'ri-file-chart-line' },
       ];
       const SIDEBAR_BROKER_TABS = [
-        { id:'alpaca',    label:'Alpaca',      icon:'◆' },
-        { id:'angelone',  label:'Angel One',   icon:'◈' },
-        { id:'zerodha',   label:'Zerodha',     icon:'◉' },
+        { id:'alpaca',    label:'Alpaca',      icon:'ri-building-line' },
+        { id:'angelone',  label:'Angel One',   icon:'ri-bank-line' },
+        { id:'zerodha',   label:'Zerodha',     icon:'ri-pie-chart-2-line' },
       ];
       const SIDEBAR_BOT_TABS = [
-        { id:'strategy',  label:'Strategy',    icon:'⚙' },
-        { id:'system',    label:'System',      icon:'⬟' },
-        { id:'profile',   label:'Profile',     icon:'◯' },
+        { id:'strategy',  label:'Strategy',    icon:'ri-sliders-3-line' },
+        { id:'system',    label:'System',      icon:'ri-settings-3-line' },
+        { id:'profile',   label:'Profile',     icon:'ri-user-3-line' },
       ];
 
       const isMarketOpen = (activeBroker) => {
@@ -6435,7 +6443,7 @@
             {SIDEBAR_TABS.map(t => (
               <button key={t.id} className={`nav-item${tab===t.id?' active':''}`} onClick={() => setTab(t.id)}>
                 <span className="nav-rail" />
-                <span style={{fontSize:15,flexShrink:0}}>{t.icon}</span>
+                <i className={`${t.icon} nav-icon`} aria-hidden="true"></i>
                 <span>{t.label}</span>
               </button>
             ))}
@@ -6444,7 +6452,7 @@
             {SIDEBAR_BROKER_TABS.map(t => (
               <button key={t.id} className={`nav-item${tab===t.id?' active':''}`} onClick={() => setTab(t.id)}>
                 <span className="nav-rail" />
-                <span style={{fontSize:15,flexShrink:0}}>{t.icon}</span>
+                <i className={`${t.icon} nav-icon`} aria-hidden="true"></i>
                 <span>{t.label}</span>
               </button>
             ))}
@@ -6453,7 +6461,7 @@
             {SIDEBAR_BOT_TABS.map(t => (
               <button key={t.id} className={`nav-item${tab===t.id?' active':''}`} onClick={() => setTab(t.id)}>
                 <span className="nav-rail" />
-                <span style={{fontSize:15,flexShrink:0}}>{t.icon}</span>
+                <i className={`${t.icon} nav-icon`} aria-hidden="true"></i>
                 <span>{t.label}</span>
               </button>
             ))}
@@ -6524,9 +6532,9 @@
               )}
               <div className="theme-switch" role="tablist" aria-label="Theme switcher">
                 {[
-                  {id:'dark', icon:'🌙', label:'Dark'},
-                  {id:'light', icon:'☀️', label:'Light'},
-                  {id:'auto', icon:'🖥️', label:'Auto'},
+                  {id:'dark', icon:'ri-moon-clear-line', label:'Dark'},
+                  {id:'light', icon:'ri-sun-line', label:'Light'},
+                  {id:'auto', icon:'ri-computer-line', label:'Auto'},
                 ].map(t => (
                   <button
                     key={t.id}
@@ -6535,7 +6543,7 @@
                     title={`${t.label} theme`}
                     aria-pressed={currentTheme===t.id}
                   >
-                    <span>{t.icon}</span><span className="hide-on-mobile">{t.label}</span>
+                    <i className={t.icon} aria-hidden="true"></i><span className="hide-on-mobile">{t.label}</span>
                   </button>
                 ))}
               </div>
@@ -6555,14 +6563,14 @@
           <nav className="mobile-bar">
             <div className="mobile-bar-inner">
               {[
-                {id:'overview', label:'Overview', icon:'⊞'},
-                {id:'trades',   label:'Trades',   icon:'⬡'},
-                {id:'history',  label:'History',  icon:'⊘'},
-                {id:'reports',  label:'Reports',  icon:'▣'},
-                {id:'profile',  label:'Profile',  icon:'◯'},
+                {id:'overview', label:'Overview', icon:'ri-dashboard-3-line'},
+                {id:'trades',   label:'Trades',   icon:'ri-exchange-funds-line'},
+                {id:'history',  label:'History',  icon:'ri-history-line'},
+                {id:'reports',  label:'Reports',  icon:'ri-file-chart-line'},
+                {id:'profile',  label:'Profile',  icon:'ri-user-3-line'},
               ].map(t => (
                 <button key={t.id} className={`mobile-bar-btn${tab===t.id?' active':''}`} onClick={()=>setTab(t.id)}>
-                  <span className="mb-icon">{t.icon}</span>
+                  <i className={`${t.icon} mb-icon`} aria-hidden="true"></i>
                   {t.label}
                 </button>
               ))}
