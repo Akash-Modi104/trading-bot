@@ -375,23 +375,36 @@
       color: var(--ink-3);
       font-size: 13px;
     }
-    .theme-toggle {
+    .theme-switch {
       display: inline-flex;
       align-items: center;
-      justify-content: center;
-      width: 36px;
-      height: 32px;
+      gap: 4px;
+      padding: 3px;
       background: var(--bg-2);
       border: 1px solid var(--line);
-      border-radius: var(--r);
-      color: var(--ink);
-      cursor: pointer;
-      font-size: 15px;
-      line-height: 1;
-      transition: background .15s, border-color .15s, transform .05s;
+      border-radius: 12px;
     }
-    .theme-toggle:hover { background: var(--bg-3); border-color: var(--accent); }
-    .theme-toggle:active { transform: translateY(1px); }
+    .theme-opt {
+      border: none;
+      background: transparent;
+      color: var(--ink-3);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0;
+      border-radius: 9px;
+      padding: 6px 9px;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      cursor: pointer;
+      transition: background .15s, color .15s;
+    }
+    .theme-opt:hover { color: var(--ink); background: oklch(1 0 0 / 0.04); }
+    .theme-opt.active {
+      background: linear-gradient(180deg, oklch(0.74 0.145 252), oklch(0.66 0.13 252));
+      color: oklch(0.98 0.002 255);
+      box-shadow: 0 8px 18px oklch(0 0 0 / 0.26);
+    }
 
     /* ── Main content ───────────────────────────────────────── */
     .content {
@@ -3116,12 +3129,26 @@
     const SystemTab = ({ health, data }) => {
       const m = data?.metrics || {};
       const [timeline, setTimeline] = useState([]);
+      const [busy, setBusy] = useState('');
       useEffect(() => {
         fetch('/api/audit_full?limit=60')
           .then(r => r.json())
           .then(d => setTimeline(Array.isArray(d) ? d : []))
           .catch(() => setTimeline([]));
       }, []);
+      const runAction = async (action) => {
+        setBusy(action);
+        try {
+          const r = await fetch('/api/action', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({ action }),
+          });
+          await r.json().catch(() => ({}));
+        } finally {
+          setTimeout(() => setBusy(''), 800);
+        }
+      };
       const rows = [
         { label:'Bot Started',    value: m.started  || '—' },
         { label:'Last Scan',      value: m.last_scan || '—' },
@@ -3132,6 +3159,30 @@
       ];
       return (
         <div className="fadein" style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16}}>
+          <div className="card">
+            <div className="card-hdr"><span className="card-title">Control Center</span></div>
+            <div style={{padding:16,display:'grid',gap:10}}>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
+                <button className="btn primary" disabled={!!busy} onClick={() => runAction('indian_restart')}>
+                  {busy==='indian_restart' ? 'Working…' : 'Restart Indian Bot'}
+                </button>
+                <button className="btn ghost" disabled={!!busy} onClick={() => runAction('scan')}>
+                  {busy==='scan' ? 'Working…' : 'Restart Scanner'}
+                </button>
+              </div>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
+                <button className="btn ghost" disabled={!!busy} onClick={() => runAction('restart')}>
+                  {busy==='restart' ? 'Working…' : 'Restart Alpaca Bot'}
+                </button>
+                <button className="btn ghost" disabled={!!busy} onClick={() => window.location.reload()}>
+                  Refresh Dashboard
+                </button>
+              </div>
+              <div style={{fontSize:12,color:'var(--ink-3)'}}>
+                Use these controls for safe operational recovery without opening server console.
+              </div>
+            </div>
+          </div>
           <Health health={health} />
           <div className="card">
             <div className="card-hdr"><span className="card-title">📈 Runtime Info</span></div>
@@ -3424,6 +3475,7 @@
 
       // ── Generic re-validate handler for the per-card buttons ─
       const [revalidating, setRevalidating] = useState({});  // {alpaca:bool, angelone:bool, zerodha:bool}
+      const [validatingAll, setValidatingAll] = useState(false);
       const revalidate = async (broker) => {
         setRevalidating(s => ({...s, [broker]: true}));
         try {
@@ -3445,6 +3497,19 @@
           toast.push('Re-validate request failed', 'error');
         } finally {
           setRevalidating(s => ({...s, [broker]: false}));
+        }
+      };
+      const validateAll = async () => {
+        setValidatingAll(true);
+        try {
+          await Promise.allSettled([
+            revalidate('alpaca'),
+            revalidate('angelone'),
+            revalidate('zerodha'),
+          ]);
+          toast.push('Broker health check complete', 'success');
+        } finally {
+          setValidatingAll(false);
         }
       };
 
@@ -3481,9 +3546,35 @@
       };
 
       const alp = me?.alpaca || {};
+      const ao  = me?.angelone || {};
+      const zrd = me?.zerodha || {};
+      const connectedCount = [alp?.connected, ao?.connected, zrd?.connected].filter(Boolean).length;
 
       return (
         <div className="fadein" style={{display:'grid',gridTemplateColumns:'1fr',gap:16,maxWidth:880,margin:'0 auto'}}>
+
+          <div className="card">
+            <div className="card-hdr"><span className="card-title">Profile Summary</span></div>
+            <div style={{padding:16,display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(170px,1fr))',gap:10}}>
+              <div style={{background:'var(--bg-2)',border:'1px solid var(--line-soft)',borderRadius:8,padding:'10px 12px'}}>
+                <div className="eyebrow">Connected Brokers</div>
+                <div className="mono" style={{fontSize:21,fontWeight:800,marginTop:4}}>{connectedCount} / 3</div>
+              </div>
+              <div style={{background:'var(--bg-2)',border:'1px solid var(--line-soft)',borderRadius:8,padding:'10px 12px'}}>
+                <div className="eyebrow">Telegram Alerts</div>
+                <div style={{fontSize:18,fontWeight:800,marginTop:4,color:tgConfigured?'var(--up)':'var(--warn)'}}>{tgConfigured ? 'Configured' : 'Not set'}</div>
+              </div>
+              <div style={{background:'var(--bg-2)',border:'1px solid var(--line-soft)',borderRadius:8,padding:'10px 12px'}}>
+                <div className="eyebrow">Active Sessions</div>
+                <div className="mono" style={{fontSize:21,fontWeight:800,marginTop:4}}>{sessions?.length || 0}</div>
+              </div>
+            </div>
+            <div style={{padding:'0 16px 16px',display:'flex',justifyContent:'flex-end'}}>
+              <button className="btn primary" disabled={validatingAll} onClick={validateAll}>
+                {validatingAll ? 'Checking all brokers…' : 'Validate All Brokers'}
+              </button>
+            </div>
+          </div>
 
           {/* Account */}
           <div className="card">
@@ -6224,10 +6315,8 @@
       ];
 
 
-      const cycleTheme = () => {
-        const order = ['dark', 'light', 'auto'];
-        const cur = me?.theme || localStorage.getItem('theme') || 'dark';
-        const next = order[(order.indexOf(cur) + 1) % order.length];
+      const currentTheme = me?.theme || localStorage.getItem('theme') || 'dark';
+      const setThemeChoice = (next) => {
         applyThemeAttr(next);
         if (me) {
           fetch('/api/profile', {
@@ -6236,7 +6325,6 @@
           }).then(loadMe);
         }
       };
-      const themeIcon = { dark:'🌙', light:'☀️', auto:'🖥️' }[me?.theme || localStorage.getItem('theme') || 'dark'] || '🌙';
 
       /* Sidebar nav mapping */
       const SIDEBAR_TABS = [
@@ -6434,10 +6522,23 @@
                   {paused ? '▶ Resume' : '⏸ Pause'}
                 </button>
               )}
-              {/* Theme toggle */}
-              <button className="theme-toggle" onClick={cycleTheme} title="Toggle theme">
-                {themeIcon}
-              </button>
+              <div className="theme-switch" role="tablist" aria-label="Theme switcher">
+                {[
+                  {id:'dark', icon:'🌙', label:'Dark'},
+                  {id:'light', icon:'☀️', label:'Light'},
+                  {id:'auto', icon:'🖥️', label:'Auto'},
+                ].map(t => (
+                  <button
+                    key={t.id}
+                    className={`theme-opt ${currentTheme===t.id?'active':''}`}
+                    onClick={() => setThemeChoice(t.id)}
+                    title={`${t.label} theme`}
+                    aria-pressed={currentTheme===t.id}
+                  >
+                    <span>{t.icon}</span><span className="hide-on-mobile">{t.label}</span>
+                  </button>
+                ))}
+              </div>
               {/* Account Switcher */}
               <BrokerSwitcher
                 broker={broker} setBroker={setBroker}
@@ -6484,7 +6585,6 @@
 
             {/* OVERVIEW */}
             {tab === 'all' && <AllAccountsTab />}
-            {tab === 'overview' && <WhatsNewCard />}
             {tab === 'overview' && broker !== 'alpaca' && (
               <ErrorBoundary key={`overview-${broker}`}><BrokerAggregateOverview broker={broker} aggData={aggData} health={health} /></ErrorBoundary>
             )}
@@ -6636,7 +6736,10 @@
 
             {/* SYSTEM */}
             {tab === 'system' && (
-              <div className="fadein"><SystemTab health={health} data={data} /></div>
+              <div className="fadein" style={{display:'grid',gap:12}}>
+                <WhatsNewCard />
+                <SystemTab health={health} data={data} />
+              </div>
             )}
 
             {/* PROFILE */}
