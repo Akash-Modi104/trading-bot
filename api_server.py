@@ -3164,9 +3164,12 @@ def api_trades_combined():
     if broker_filter in ("all", "indian", "angelone", "zerodha"):
         for t in read_json(indian_log_f, []):
             if _in_range(t.get("time", "")):
-                t.setdefault("broker", "indian")
-                t.setdefault("currency", "INR")
-                entries.append(t)
+                row = dict(t)
+                row["broker"] = row.get("broker") or (
+                    broker_filter if broker_filter in ("angelone", "zerodha") else "indian"
+                )
+                row.setdefault("currency", "INR")
+                entries.append(row)
 
     # ── Angel One live trade book ─────────────────────────────────
     if broker_filter in ("all", "angelone"):

@@ -5021,19 +5021,108 @@
     };
 
     /* ── Broker history tab (non-Alpaca) ────────────────────── */
-    const BrokerHistoryTab = ({ broker }) => (
-      <div className="fadein">
-        <div className="card" style={{padding:'14px 18px',marginBottom:16,background:'var(--accent-soft)',border:'1px solid var(--accent)'}}>
-          <div style={{fontSize:13,color:'var(--accent)',fontWeight:600}}>
-            📅 Showing trade history for {BROKER_LABELS[broker]}
+    const BrokerHistoryTab = ({ broker }) => {
+      const [range, setRange] = useState('week');
+      const [data, setData] = useState(null);
+      const [loading, setLoading] = useState(true);
+      const [err, setErr] = useState('');
+      const activeBroker = broker === 'indian' ? 'zerodha' : broker;
+      const label = BROKER_LABELS[activeBroker] || activeBroker;
+      const currency = activeBroker === 'alpaca' ? 'USD' : 'INR';
+      const fmt = v => {
+        if (v == null || v === '') return '—';
+        const n = Number(v);
+        if (!isFinite(n)) return '—';
+        const sym = currency === 'INR' ? '₹' : '$';
+        return (n < 0 ? '-' + sym : sym) + Math.abs(n).toLocaleString('en-IN', {maximumFractionDigits:2});
+      };
+      const load = useCallback(() => {
+        setLoading(true);
+        setErr('');
+        fetch(`/api/trades/combined?range=${range}&broker=${activeBroker}`)
+          .then(r => r.ok ? r.json() : r.json().then(e => Promise.reject(e)))
+          .then(setData)
+          .catch(e => setErr(e?.message || e?.error || 'History unavailable'))
+          .finally(() => setLoading(false));
+      }, [range, activeBroker]);
+      useEffect(() => { load(); }, [load]);
+
+      const trades = data?.trades || [];
+      const sells = trades.filter(t => String(t.action || '').toLowerCase() === 'sell');
+      const pnlRows = trades.filter(t => t.pnl_abs != null || t.pnl != null);
+      const realized = pnlRows.reduce((s, t) => s + Number(t.pnl_abs ?? t.pnl ?? 0), 0);
+      const wins = pnlRows.filter(t => Number(t.pnl_abs ?? t.pnl ?? 0) > 0).length;
+      const losses = pnlRows.filter(t => Number(t.pnl_abs ?? t.pnl ?? 0) < 0).length;
+      const winRate = pnlRows.length ? Math.round(wins / pnlRows.length * 100) : 0;
+      const byDate = {};
+      trades.forEach(t => {
+        const date = String(t.time || t.timestamp || '').slice(0, 10) || 'Unknown';
+        const row = byDate[date] || {date, trades:0, buys:0, sells:0, pnl:0};
+        row.trades += 1;
+        if (String(t.action || '').toLowerCase() === 'buy') row.buys += 1;
+        if (String(t.action || '').toLowerCase() === 'sell') row.sells += 1;
+        row.pnl += Number(t.pnl_abs ?? t.pnl ?? 0);
+        byDate[date] = row;
+      });
+      const daily = Object.values(byDate).sort((a, b) => String(b.date).localeCompare(String(a.date)));
+
+      return (
+        <div className="fadein">
+          <div style={{display:'flex',gap:8,marginBottom:16,flexWrap:'wrap',alignItems:'center'}}>
+            {[
+              ['day', 'Today'],
+              ['week', '7 Days'],
+              ['month', '30 Days'],
+              ['all', 'All Time'],
+            ].map(([id, text]) => (
+              <button key={id} className={`btn ${range===id?'primary':'ghost'}`} onClick={() => setRange(id)}>{text}</button>
+            ))}
+            <button className="btn ghost" style={{marginLeft:'auto'}} onClick={load}>Refresh</button>
           </div>
-          <div style={{fontSize:12,color:'var(--ink-3)',marginTop:4}}>
-            Deep historical analytics (Sharpe, MDD, equity curve) require Alpaca bot data. Switch to Alpaca to access full analytics.
+          {err && <div style={{padding:14,background:'var(--down-soft)',color:'var(--down)',borderRadius:8,marginBottom:16}}>{err}</div>}
+
+          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(170px,1fr))',gap:12,marginBottom:16}}>
+            <MetCard label={`${label} Trades`} value={trades.length} color="var(--accent)" />
+            <MetCard label="Sell Orders" value={sells.length} color="var(--warn)" />
+            <MetCard label="Realized P&L" value={fmt(realized)} color={realized>=0?'var(--up)':'var(--down)'} />
+            <MetCard label="Win Rate" value={`${winRate}%`} color="var(--accent)">
+              <WinBar wins={wins} losses={losses} />
+            </MetCard>
           </div>
+
+          <div className="card" style={{marginBottom:16}}>
+            <div className="card-hdr">
+              <span className="card-title">{label} Daily Breakdown</span>
+              <Badge color="var(--accent)">{range.toUpperCase()}</Badge>
+            </div>
+            {loading ? (
+              <div className="empty">Loading {label} history…</div>
+            ) : daily.length === 0 ? (
+              <div className="empty">No {label} trades found in this range</div>
+            ) : (
+              <div style={{overflowX:'auto'}}>
+                <table>
+                  <thead><tr><th>Date</th><th>Trades</th><th>Buys</th><th>Sells</th><th>Realized P&L</th></tr></thead>
+                  <tbody>
+                    {daily.map(d => (
+                      <tr key={d.date}>
+                        <td className="mono">{d.date}</td>
+                        <td className="mono">{d.trades}</td>
+                        <td className="mono" style={{color:'var(--up)'}}>{d.buys}</td>
+                        <td className="mono" style={{color:'var(--down)'}}>{d.sells}</td>
+                        <td className="mono" style={{color:d.pnl>=0?'var(--up)':'var(--down)',fontWeight:800}}>{fmt(d.pnl)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          <Trades rows={trades} full showBroker />
         </div>
-        <CombinedTradesTab defaultBroker={broker} lockBroker />
-      </div>
-    );
+      );
+    };
 
     /* ── Broker analytics tab (non-Alpaca) ───────────────────── */
     const BrokerAnalyticsTab = ({ broker }) => {
