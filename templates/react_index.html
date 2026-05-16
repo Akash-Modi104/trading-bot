@@ -307,12 +307,13 @@
       border-bottom: 1px solid var(--line);
       flex-shrink: 0;
     }
-    .topbar-left { display: flex; align-items: center; gap: 12px; min-width: 0; }
-    .topbar-right { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+    .topbar-left { display: flex; align-items: center; gap: 12px; min-width: 0; flex: 1 1 auto; }
+    .topbar-right { display: flex; align-items: center; gap: 10px; flex: 0 1 auto; min-width: 0; justify-content: flex-end; }
     .workspace-title {
       display: flex;
       flex-direction: column;
-      min-width: 240px;
+      min-width: 0;
+      flex: 1 1 220px;
     }
     .workspace-title span {
       font-size: 11px;
@@ -326,7 +327,7 @@
       color: var(--ink);
       line-height: 1.25;
     }
-    .topbar-stat { display: flex; flex-direction: column; }
+    .topbar-stat { display: flex; flex-direction: column; min-width: 62px; }
     .topbar-stat .lbl { font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-3); }
 
     /* ── Account Switcher ─────────────────────────────────── */
@@ -749,6 +750,45 @@
     .fadein { animation: fadein .25s ease; }
 
     /* ── Responsive ─────────────────────────────────────────── */
+    /* Narrow desktop / tablet landscape — keep controls from colliding */
+    @media (max-width: 1440px) {
+      .topbar {
+        gap: 12px;
+        padding: 12px 20px;
+        flex-wrap: wrap;
+      }
+      .topbar-left {
+        flex: 1 1 360px;
+      }
+      .topbar-right {
+        flex: 1 1 520px;
+        flex-wrap: wrap;
+      }
+      .workspace-title {
+        flex-basis: 180px;
+      }
+      .theme-opt .hide-on-mobile {
+        display: none !important;
+      }
+      .acct-btn {
+        min-width: 132px;
+      }
+    }
+
+    @media (max-width: 1180px) {
+      .sidebar { width: 64px; padding: 18px 8px; }
+      .shell-body { margin-left: 64px; }
+      .sidebar .brand-name, .sidebar .brand-sub, .sidebar .nav-item span:not(.nav-rail), .sidebar .nav-section, .sidebar .sidebar-status-row span { display: none !important; }
+      .sidebar .nav-item { justify-content: center; padding: 10px 8px; }
+      .brand { padding: 4px 4px 22px; justify-content: center; }
+      .topbar-left {
+        flex-basis: 300px;
+      }
+      .topbar-right {
+        flex-basis: 420px;
+      }
+    }
+
     /* Tablet — collapse sidebar to icon strip */
     @media (max-width: 1024px) {
       .sidebar { width: 64px; padding: 18px 8px; }
@@ -6713,7 +6753,7 @@
                 <strong>DCA TradeOS Pro</strong>
               </div>
               {/* Market status */}
-              <div style={{display:'flex',alignItems:'center',gap:6}}>
+              <div className="topbar-market" style={{display:'flex',alignItems:'center',gap:6,flexShrink:0}}>
                 <span className={`dot ${mktOpen ? 'up' : 'down'} pulse`} />
                 <span style={{fontSize:12,fontWeight:600,color:mktOpen?'var(--up)':'var(--ink-3)'}}>{mktOpen ? 'OPEN' : 'CLOSED'}</span>
               </div>
