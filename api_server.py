@@ -3137,7 +3137,11 @@ def api_trades_combined():
     rng = request.args.get("range", "day")
     broker_filter = request.args.get("broker", "all").lower()
 
-    today  = datetime.now(ET).date()
+    if broker_filter in ("indian", "angelone", "zerodha"):
+        hist_tz = pytz.timezone("Asia/Kolkata")
+    else:
+        hist_tz = ET
+    today  = datetime.now(hist_tz).date()
     spans  = {"day": 0, "week": 6, "month": 29, "all": 9999}
     d_from = today - timedelta(days=spans.get(rng, 0))
     d_to   = today
@@ -3165,9 +3169,10 @@ def api_trades_combined():
         for t in read_json(indian_log_f, []):
             if _in_range(t.get("time", "")):
                 row = dict(t)
-                row["broker"] = row.get("broker") or (
-                    broker_filter if broker_filter in ("angelone", "zerodha") else "indian"
-                )
+                if broker_filter in ("angelone", "zerodha"):
+                    row["broker"] = broker_filter
+                else:
+                    row["broker"] = row.get("broker") or "indian"
                 row.setdefault("currency", "INR")
                 entries.append(row)
 
